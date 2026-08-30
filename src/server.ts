@@ -10,15 +10,24 @@ import type { CatalogItem } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { loadPolicies } from "./negotiation/policies.js";
-import { gatewayFromEnv, publishableKeyId } from "./payments/gateway.js";
+import { gatewayFromEnv, publishableKeyId, type PaymentGateway } from "./payments/gateway.js";
 import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
 import { loadServingCatalog } from "./structuring/run.js";
 
-export async function createApp() {
+export interface AppOptions {
+  /**
+   * Override the gateway. The milestone scripts pass a simulated one so their
+   * proofs hold regardless of which keys happen to be sitting in .env — a test
+   * whose result depends on the developer's local config proves nothing.
+   */
+  gateway?: PaymentGateway;
+}
+
+export async function createApp(options: AppOptions = {}) {
   const keyring = await loadOrCreateKeyring();
   const store = new Store();
-  const gateway = gatewayFromEnv();
+  const gateway = options.gateway ?? gatewayFromEnv();
   const policies = await loadPolicies();
   const structuring = await loadServingCatalog();
   const catalog: CatalogItem[] = structuring.items;

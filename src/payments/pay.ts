@@ -6,7 +6,10 @@ import type { OrderResult, PaymentGateway } from "./gateway.js";
 
 export class PaymentRefused extends Error {
   constructor(readonly reasons: string[]) {
-    super(`Payment refused before any gateway call: ${reasons.join("; ")}`);
+    // Not "before any gateway call" — that is true of authorizeCart, but by the
+    // time settlePayment refuses, an order already exists. An error message that
+    // overstates its own guarantee is the wrong thing to have in this file.
+    super(`Payment refused: ${reasons.join("; ")}`);
     this.name = "PaymentRefused";
   }
 }

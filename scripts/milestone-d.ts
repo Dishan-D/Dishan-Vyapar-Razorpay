@@ -14,7 +14,7 @@ import { negotiate } from "../src/negotiation/engine.js";
 import { templateLine } from "../src/negotiation/phrasing.js";
 import { loadPolicies } from "../src/negotiation/policies.js";
 import { runStructuring } from "../src/structuring/run.js";
-import { gatewayFromEnv, type OrderRequest, type OrderResult, type PaymentGateway, type PaymentResult } from "../src/payments/gateway.js";
+import { SimulatedGateway, type OrderRequest, type OrderResult, type PaymentGateway, type PaymentResult } from "../src/payments/gateway.js";
 import { authorizeCart, payForCart, settlePayment, PaymentRefused } from "../src/payments/pay.js";
 import { createHmac } from "node:crypto";
 
@@ -99,14 +99,13 @@ async function main(): Promise<void> {
   const keyring = await Keyring.generate();
   const structuring = await runStructuring(false);
   const policies = await loadPolicies();
-  const gateway = gatewayFromEnv();
+  // The end-to-end leg runs simulated so it does not depend on .env; the real
+  // Checkout boundary is covered separately by CheckoutGateway below.
+  const gateway = new SimulatedGateway();
 
   heading("Gateway");
-  console.log(
-    gateway.kind === "razorpay"
-      ? `  ${g("Razorpay test mode")} ${dim("— real orders created against the API")}`
-      : `  ${y("simulated")} ${dim("— set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET for real test-mode orders")}`,
-  );
+  console.log(`  ${y("simulated")} ${dim("— deliberately, so this proof does not depend on local .env")}`);
+  console.log(`  ${dim("the real Checkout boundary is exercised further down")}`);
 
   // ── Stages 2–3 ────────────────────────────────────────────────────────────
   heading("Discovery and negotiation");

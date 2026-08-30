@@ -8,6 +8,7 @@
  */
 import type { Server } from "node:http";
 import { createApp } from "../src/server.js";
+import { SimulatedGateway } from "../src/payments/gateway.js";
 import type { AuditBundle } from "../src/audit/bundle.js";
 
 const g = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -23,7 +24,10 @@ function heading(text: string): void {
 async function main(): Promise<void> {
   console.log(bold("\nVyapar-to-Agent · Milestone E — fulfillment and audit"));
 
-  const { app, store, gateway } = await createApp();
+  // Simulated on purpose: this milestone proves the fulfillment and audit
+  // stages, and a real gateway would stop the flow at Checkout for reasons
+  // that have nothing to do with what is being tested here.
+  const { app, store, gateway } = await createApp({ gateway: new SimulatedGateway() });
   const server: Server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
