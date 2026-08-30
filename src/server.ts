@@ -13,19 +13,22 @@ import { loadPolicies } from "./negotiation/policies.js";
 import { gatewayFromEnv, publishableKeyId } from "./payments/gateway.js";
 import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
-import { runStructuring } from "./structuring/run.js";
+import { loadServingCatalog } from "./structuring/run.js";
 
 export async function createApp() {
   const keyring = await loadOrCreateKeyring();
   const store = new Store();
   const gateway = gatewayFromEnv();
   const policies = await loadPolicies();
-  const structuring = await runStructuring(false);
+  const structuring = await loadServingCatalog();
   const catalog: CatalogItem[] = structuring.items;
 
   const app = express();
   app.use(express.json());
   app.use(express.static(path.resolve("frontend")));
+  // The merchant's own photos, served as-is. They are the input to Stage 1, so
+  // showing them next to what was extracted is the point, not decoration.
+  app.use("/media", express.static(path.resolve("data", "sample_products")));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, gateway: gateway.kind, catalog_size: catalog.length });
@@ -46,11 +49,17 @@ export async function createApp() {
   /** The agent-readable catalog. Held items are listed but marked, never hidden. */
   app.get("/catalog", (_req, res) => {
     res.json({
-      items: catalog.map((item) => ({
-        ...item,
-        transactable: !item.needs_merchant_confirmation,
-        held_because: gateReasons(item),
-      })),
+      provider: structuring.provider,
+      items: catalog.map((item) => {
+        const photo = structuring.photos[item.item_id];
+        return {
+          ...item,
+          transactable: !item.needs_merchant_confirmation,
+          held_because: gateReasons(item),
+          photo_url: photo?.present && photo.filename ? `/media/${photo.filename}` : null,
+          photo_filename: photo?.filename ?? null,
+        };
+      }),
     });
   });
 

@@ -51,11 +51,20 @@ async function loadFixtures(): Promise<Record<string, Extraction>> {
   return parsed.extractions;
 }
 
+export interface PhotoRef {
+  /** The filename the merchant's phone gave it — a loose hint, and a real one. */
+  filename?: string;
+  /** Whether that file is actually on disk. Without it, Stage 1 runs text-only. */
+  present: boolean;
+}
+
 export interface StructuringResult {
   items: CatalogItem[];
   records: ExtractionRecord[];
   provider: "claude" | "fixture";
   photosUsed: number;
+  /** item_id → the photo it came from, for display. */
+  photos: Record<string, PhotoRef>;
 }
 
 /**
@@ -83,11 +92,21 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
   }
 
   const items = raws.map((raw, i) => toCatalogItem(raw, records[i]!, i));
+
+  const photos: Record<string, PhotoRef> = {};
+  for (const [i, raw] of raws.entries()) {
+    photos[items[i]!.item_id] = {
+      ...(raw.photo_filename ? { filename: raw.photo_filename } : {}),
+      present: Boolean(raw.photo_path),
+    };
+  }
+
   return {
     items,
     records,
     provider: useLive ? "claude" : "fixture",
     photosUsed: raws.filter((r) => r.photo_path).length,
+    photos,
   };
 }
 
@@ -98,13 +117,45 @@ export async function writeCatalog(result: StructuringResult): Promise<string> {
     ...(result.provider === "fixture"
       ? { warning: "Confidence values come from hand-authored fixtures, not a live model call." }
       : {}),
+    photos: result.photos,
     items: result.items,
   };
   await writeFile(CATALOG_FILE, JSON.stringify(doc, null, 2) + "\n");
   return CATALOG_FILE;
 }
 
+interface CatalogDoc {
+  provider: "claude" | "fixture";
+  photos?: Record<string, PhotoRef>;
+  items: CatalogItem[];
+}
+
 export async function readCatalog(): Promise<CatalogItem[]> {
-  const doc = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as { items: CatalogItem[] };
+  const doc = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as CatalogDoc;
   return doc.items;
+}
+
+/**
+ * What the server serves.
+ *
+ * Extraction is a paid model call over five photos; doing it on every boot would
+ * be slow and would spend money to produce the same catalog each time. So a
+ * catalog written by `milestone-b --live` is reused if present, and fixtures
+ * stand in otherwise. That also makes the live path a deliberate act with a
+ * durable result, rather than something that silently happens at startup.
+ */
+export async function loadServingCatalog(): Promise<StructuringResult> {
+  if (await exists(CATALOG_FILE)) {
+    const doc = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as CatalogDoc;
+    if (doc.items?.length) {
+      return {
+        items: doc.items,
+        records: [],
+        provider: doc.provider ?? "fixture",
+        photosUsed: Object.values(doc.photos ?? {}).filter((p) => p.present).length,
+        photos: doc.photos ?? {},
+      };
+    }
+  }
+  return runStructuring(false);
 }

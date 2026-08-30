@@ -7,135 +7,263 @@
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e8eaf0;
-    --muted: #8b93a7; --ok: #3ddc84; --bad: #ff6b6b; --warn: #ffc857;
-    --buyer: #6ea8fe; --merchant: #ffc857; --accent: #3ddc84;
+    --bg:#0e1014; --card:#171a21; --card2:#1d212a; --line:#282e3a; --line2:#333a48;
+    --ink:#eceef4; --mid:#a2abbd; --dim:#6f7889;
+    --ok:#41d67f; --bad:#ff6b6b; --warn:#f6c453;
+    --buyer:#7aa7ff; --merchant:#f6c453;
     --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --r:12px;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing:border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing:antialiased;
   }
+  button { font:inherit; cursor:pointer; }
+  button:disabled { cursor:not-allowed; }
+
+  /* ── header ── */
   header {
-    padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:16px 28px; border-bottom:1px solid var(--line);
+    position:sticky; top:0; background:rgba(14,16,20,.92);
+    backdrop-filter:blur(8px); z-index:20;
   }
-  h1 { font-size: 17px; margin: 0; letter-spacing: -0.2px; }
-  .sub { color: var(--muted); font-size: 13px; }
-  .grid {
-    display: grid; gap: 16px; padding: 16px 24px 40px;
-    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
-    align-items: start; max-width: 1500px;
+  .brand { font-size:16px; font-weight:650; letter-spacing:-.2px; }
+  .tag { color:var(--dim); font-size:13.5px; }
+  .spacer { flex:1; }
+  .pill {
+    font-size:12px; padding:4px 11px; border-radius:999px;
+    border:1px solid var(--line2); color:var(--mid); white-space:nowrap;
   }
-  section {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px; min-width: 0;
+  .pill.live { color:var(--ok); border-color:#255c3c; background:#10251a; }
+
+  /* ── layout ── */
+  .wrap {
+    display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);
+    gap:24px; padding:24px 28px 64px; max-width:1420px; margin:0 auto;
+    align-items:start;
   }
-  h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
-    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  @media (max-width:1000px){ .wrap { grid-template-columns:1fr; } }
+
+  .col { min-width:0; }
+  .colhead { display:flex; align-items:baseline; gap:10px; margin:0 0 4px; }
+  .colhead h2 { font-size:15px; margin:0; font-weight:640; letter-spacing:-.1px; }
+  .colhead .step {
+    font-size:11px; font-weight:700; letter-spacing:.5px; color:var(--dim);
+    border:1px solid var(--line2); border-radius:6px; padding:1px 6px;
   }
-  .item {
-    display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
-    padding: 9px 0; border-bottom: 1px solid var(--line);
+  .colsub { color:var(--dim); font-size:13px; margin:0 0 14px; }
+
+  /* ── product cards ── */
+  .products { display:grid; gap:12px; }
+  .product {
+    display:grid; grid-template-columns:96px 1fr auto; gap:14px; align-items:center;
+    width:100%; text-align:left; padding:12px; border-radius:var(--r);
+    background:var(--card); border:1px solid var(--line); color:inherit;
+    transition:border-color .12s, background .12s, transform .08s;
   }
-  .item:last-child { border-bottom: 0; }
-  .item .name { font-weight: 500; }
-  .item .why { color: var(--bad); font-size: 12px; display: block; font-weight: 400; }
-  .item .attrs { color: var(--muted); font-size: 12px; display: block; }
-  .price { font-family: var(--mono); white-space: nowrap; }
-  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; }
-  .dot.live { background: var(--ok); }
-  .dot.held { background: var(--bad); }
-  .turn { display: flex; gap: 10px; padding: 6px 0; align-items: baseline; }
-  .turn .r { font-family: var(--mono); color: var(--muted); font-size: 11px; min-width: 20px; }
-  .turn .who { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; min-width: 62px; }
-  .turn.buyer .who { color: var(--buyer); }
-  .turn.merchant .who { color: var(--merchant); }
-  .turn .why { color: var(--muted); font-size: 12px; display: block; }
-  .stage { display: flex; gap: 11px; padding: 11px 0; border-bottom: 1px solid var(--line); }
-  .stage:last-child { border-bottom: 0; }
-  .stage .mark { font-size: 15px; line-height: 1.3; }
-  .stage.pending { opacity: 0.45; }
-  .stage .label {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
-    color: var(--muted); margin-bottom: 2px;
+  .product:hover:not(:disabled) { border-color:#3d4a63; background:var(--card2); }
+  .product:active:not(:disabled) { transform:translateY(1px); }
+  .product.sel { border-color:var(--ok); background:#122019; }
+  .product:disabled { opacity:.72; }
+  .thumb {
+    width:96px; height:96px; border-radius:9px; object-fit:cover;
+    background:#0b0d11; border:1px solid var(--line);
   }
-  .stage .hash { font-family: var(--mono); font-size: 11px; color: var(--muted); word-break: break-all; }
-  .stage .det { color: var(--muted); font-size: 12px; }
-  .sig { font-family: var(--mono); font-size: 11px; }
-  .sig .ok { color: var(--ok); } .sig .bad { color: var(--bad); }
-  button {
-    background: var(--accent); color: #05210f; border: 0; border-radius: 7px;
-    padding: 9px 14px; font-weight: 600; font-size: 13px; cursor: pointer;
+  .thumb.ph {
+    display:grid; place-items:center; color:var(--dim); font-size:11px;
+    text-align:center; padding:6px; line-height:1.3;
   }
-  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  .pname { font-weight:600; font-size:15px; margin-bottom:3px; }
+  .pmeta { color:var(--dim); font-size:12.5px; }
+  .pprice { font-family:var(--mono); font-size:15px; text-align:right; white-space:nowrap; }
+  .pprice small { display:block; font-family:inherit; font-size:11px; color:var(--dim); font-weight:500; }
+
+  .conf { display:flex; gap:6px; margin-top:7px; flex-wrap:wrap; }
+  .chip {
+    font-size:11px; padding:2px 8px; border-radius:999px;
+    border:1px solid var(--line2); color:var(--mid); white-space:nowrap;
+  }
+  .chip.good { color:var(--ok); border-color:#255c3c; }
+  .chip.low  { color:var(--bad); border-color:#6b2b2b; }
+  .heldmsg {
+    margin-top:8px; font-size:12.5px; color:#ffa8a8;
+    background:#241315; border:1px solid #5d2626; border-radius:8px; padding:7px 10px;
+  }
+
+  /* ── buyer mandate bar ── */
+  .mandate {
+    margin-top:18px; background:var(--card); border:1px solid var(--line);
+    border-radius:var(--r); padding:14px 16px;
+  }
+  .mandate h3 { font-size:12px; text-transform:uppercase; letter-spacing:.8px;
+    color:var(--dim); margin:0 0 10px; font-weight:650; }
+  .fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label { display:block; font-size:12px; color:var(--dim); margin-bottom:5px; }
   input {
-    width: 100%; background: #0d0f14; border: 1px solid var(--line); color: var(--ink);
-    border-radius: 7px; padding: 8px 10px; font: inherit;
+    width:100%; background:#0b0d11; border:1px solid var(--line2); color:var(--ink);
+    border-radius:8px; padding:9px 11px; font:inherit;
   }
-  .banner {
-    border-radius: 7px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px;
-    border: 1px solid var(--line);
+  input:focus { outline:none; border-color:#4a5a7a; }
+  .hint { color:var(--dim); font-size:12px; margin-top:10px; }
+  .presets { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .preset {
+    background:transparent; color:var(--mid); border:1px solid var(--line2);
+    border-radius:8px; padding:7px 12px; font-size:12.5px;
   }
-  .banner.ok   { border-color: #1e5b39; background: #10251a; color: var(--ok); }
-  .banner.bad  { border-color: #6b2b2b; background: #2a1414; color: var(--bad); }
-  .banner.warn { border-color: #6b5622; background: #241f10; color: var(--warn); }
-  .fingerprint { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 10px; word-break: break-all; }
-  .empty { color: var(--muted); font-size: 13px; }
+  .preset:hover { color:var(--ink); border-color:#4a5a7a; }
+
+  /* ── timeline ── */
+  .flow { display:grid; gap:12px; }
+  .stagecard {
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    padding:14px 16px;
+  }
+  .stagecard.idle { opacity:.5; }
+  .sh { display:flex; align-items:center; gap:10px; }
+  .num {
+    width:22px; height:22px; border-radius:50%; display:grid; place-items:center;
+    font-size:11px; font-weight:700; border:1px solid var(--line2); color:var(--dim);
+    flex:none;
+  }
+  .num.on { background:var(--ok); border-color:var(--ok); color:#062815; }
+  .num.no { background:var(--bad); border-color:var(--bad); color:#2b0b0b; }
+  .st { font-weight:600; font-size:14px; }
+  .sbody { margin-top:11px; }
+  .empty { color:var(--dim); font-size:13.5px; }
+
+  .turn { display:grid; grid-template-columns:26px 66px 1fr; gap:10px; padding:7px 0; align-items:baseline; }
+  .turn + .turn { border-top:1px solid #21262f; }
+  .turn .r { font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .turn .who { font-size:11px; text-transform:uppercase; letter-spacing:.6px; font-weight:650; }
+  .turn.buyer .who { color:var(--buyer); }
+  .turn.merchant .who { color:var(--merchant); }
+  .turn .msg { font-size:14px; }
+  .turn .why { color:var(--dim); font-size:12px; margin-top:2px; }
+
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:13px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; font-family:var(--mono); font-size:12px; word-break:break-all; }
+
+  .note {
+    border-radius:9px; padding:10px 12px; font-size:13.5px; border:1px solid var(--line2);
+    color:var(--mid); margin-bottom:11px;
+  }
+  .note.ok   { border-color:#255c3c; background:#10251a; color:#9fe9be; }
+  .note.bad  { border-color:#6b2b2b; background:#241315; color:#ffa8a8; }
+  .note.warn { border-color:#6b5622; background:#241f10; color:#f0d493; }
+
+  .cta {
+    background:var(--ok); color:#052a15; border:0; border-radius:9px;
+    padding:10px 16px; font-weight:650; font-size:13.5px;
+  }
+  .cta:disabled { background:#2a3340; color:var(--dim); }
+  .cta.wide { width:100%; margin-top:4px; }
+
+  .chain { display:grid; gap:0; }
+  .link { display:grid; grid-template-columns:24px 1fr; gap:11px; padding:11px 0; }
+  .link + .link { border-top:1px solid #21262f; }
+  .link.idle { opacity:.45; }
+  .mk { font-size:15px; line-height:1.25; text-align:center; }
+  .lname { font-size:11px; text-transform:uppercase; letter-spacing:.7px; color:var(--dim); font-weight:650; }
+  .ltxt { font-size:13.5px; margin-top:1px; }
+  .ldet { color:var(--dim); font-size:12px; }
+  .lhash { font-family:var(--mono); font-size:10.5px; color:#5c6473; word-break:break-all; margin-top:3px; }
+  .sigs { font-family:var(--mono); font-size:11px; margin-top:3px; }
+  .sigs .y { color:var(--ok); } .sigs .n { color:var(--bad); }
+  .fp { font-family:var(--mono); font-size:10.5px; color:var(--dim); margin-top:10px; word-break:break-all; }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Vyapar-to-Agent</h1>
-  <span class="sub">a UPI-only merchant, made transactable by an AI buyer-agent</span>
-  <span class="sub" id="gateway"></span>
+  <span class="brand">Vyapar-to-Agent</span>
+  <span class="tag">a UPI-only shop, made transactable by an AI buyer-agent</span>
+  <span class="spacer"></span>
+  <span class="pill" id="src">catalog: —</span>
+  <span class="pill" id="gw">gateway: —</span>
 </header>
 
-<div class="grid">
-  <section>
-    <h2>1 · Catalog from unstructured input</h2>
-    <div id="catalog" class="empty">loading…</div>
-  </section>
+<div class="wrap">
 
-  <section>
-    <h2>2–3 · Buyer-agent: discover and negotiate</h2>
-    <label for="want">What the buyer-agent was asked for</label>
-    <input id="want" value="blue cotton saree" />
-    <label for="max">Authorized ceiling (₹)</label>
-    <input id="max" type="number" value="1500" />
-    <label for="open">Opening offer (₹)</label>
-    <input id="open" type="number" value="800" />
-    <div class="row">
-      <button id="run">Run transaction</button>
-      <button id="sc-nodeal" class="ghost">Scenario: no deal</button>
-      <button id="sc-held" class="ghost">Scenario: held item</button>
+  <!-- ── LEFT: the shop ─────────────────────────────────────────────────── -->
+  <div class="col">
+    <div class="colhead">
+      <span class="step">STAGE 1</span>
+      <h2>The shop</h2>
     </div>
-    <div id="negotiation" style="margin-top:14px" class="empty">no negotiation yet</div>
-  </section>
+    <p class="colsub">
+      Built from photos and Hinglish voice notes. Pick something to buy — greyed items
+      can't be sold yet, and will tell you why.
+    </p>
+    <div class="products" id="products"><p class="empty">loading…</p></div>
 
-  <section>
-    <h2>5–6 · Payment and fulfillment</h2>
-    <div id="payment" class="empty">nothing paid yet</div>
-    <div class="row">
-      <button id="confirm" disabled>Merchant: confirm handover</button>
+    <div class="mandate">
+      <h3>What the buyer-agent may do</h3>
+      <div class="fields">
+        <div>
+          <label for="max">Spending ceiling</label>
+          <input id="max" type="number" value="1500" />
+        </div>
+        <div>
+          <label for="open">Opening offer</label>
+          <input id="open" type="number" value="800" />
+        </div>
+      </div>
+      <div class="presets">
+        <button class="preset" data-max="1500" data-open="800">Fair buyer</button>
+        <button class="preset" data-max="900" data-open="800">Can't afford it</button>
+        <button class="preset" data-max="5000" data-open="1400">Generous buyer</button>
+      </div>
+      <p class="hint">
+        These are the limits signed into the Intent Mandate. The agent cannot exceed
+        the ceiling, and the shop will not go below its own floor.
+      </p>
     </div>
-  </section>
+  </div>
 
-  <section>
-    <h2>7 · Signed audit chain</h2>
-    <div id="audit" class="empty">no transaction yet</div>
-  </section>
+  <!-- ── RIGHT: the transaction ─────────────────────────────────────────── -->
+  <div class="col">
+    <div class="colhead">
+      <span class="step">STAGES 2–7</span>
+      <h2>The transaction</h2>
+    </div>
+    <p class="colsub" id="flowsub">Pick a product on the left to begin.</p>
+
+    <div class="flow">
+      <section class="stagecard idle" id="c-neg">
+        <div class="sh"><span class="num" id="n-neg">1</span><span class="st">Discover &amp; negotiate</span></div>
+        <div class="sbody" id="b-neg"><p class="empty">Nothing yet.</p></div>
+      </section>
+
+      <section class="stagecard idle" id="c-pay">
+        <div class="sh"><span class="num" id="n-pay">2</span><span class="st">Pay</span></div>
+        <div class="sbody" id="b-pay"><p class="empty">Nothing yet.</p></div>
+      </section>
+
+      <section class="stagecard idle" id="c-ful">
+        <div class="sh"><span class="num" id="n-ful">3</span><span class="st">Merchant confirms handover</span></div>
+        <div class="sbody" id="b-ful"><p class="empty">Nothing yet.</p></div>
+      </section>
+
+      <section class="stagecard idle" id="c-aud">
+        <div class="sh"><span class="num" id="n-aud">4</span><span class="st">Signed audit chain</span></div>
+        <div class="sbody" id="b-aud"><p class="empty">Nothing yet.</p></div>
+      </section>
+    </div>
+  </div>
+
 </div>
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
-let config;
 const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+let config = { gateway: "simulated", requires_checkout: false, razorpay_key_id: null };
+let items = [];
 let txnId = null;
 
 async function api(path, options) {
@@ -146,110 +274,145 @@ async function api(path, options) {
   return { status: res.status, body: await res.json() };
 }
 
-function banner(kind, text) {
-  return `<div class="banner ${kind}">${text}</div>`;
+const note = (kind, text) => `<div class="note ${kind}">${text}</div>`;
+
+/** Set a stage card's state: idle | active | done | failed. */
+function setStage(key, state, sub) {
+  const card = $(`c-${key}`);
+  const num = $(`n-${key}`);
+  card.classList.toggle("idle", state === "idle");
+  num.classList.toggle("on", state === "done");
+  num.classList.toggle("no", state === "failed");
+  num.textContent = state === "done" ? "✓" : state === "failed" ? "✕" : num.dataset.n;
+  if (sub !== undefined) $(`b-${key}`).innerHTML = sub;
 }
 
-// ── 1 · catalog ─────────────────────────────────────────────────────────────
+["neg", "pay", "ful", "aud"].forEach((k, i) => { $(`n-${k}`).dataset.n = String(i + 1); });
+
+function resetFlow() {
+  txnId = null;
+  for (const k of ["neg", "pay", "ful", "aud"]) setStage(k, "idle", `<p class="empty">Nothing yet.</p>`);
+}
+
+// ── the shop ────────────────────────────────────────────────────────────────
+function confChip(label, v) {
+  const cls = v < 0.6 ? "low" : v >= 0.85 ? "good" : "";
+  return `<span class="chip ${cls}">${label} ${v.toFixed(2)}</span>`;
+}
+
+function productCard(item) {
+  const held = !item.transactable;
+  const attrs = Object.entries(item.attributes).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const thumb = item.photo_url
+    ? `<img class="thumb" src="${item.photo_url}" alt="${esc(item.name)}"
+            onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'no photo'}))" />`
+    : `<div class="thumb ph">drop<br>${esc(item.photo_filename ?? "a photo")}<br>here</div>`;
+
+  return `<button class="product${held ? "" : ""}" data-id="${item.item_id}" ${held ? "disabled" : ""}>
+    ${thumb}
+    <div>
+      <div class="pname">${esc(item.name)}</div>
+      <div class="pmeta">${esc(attrs)}</div>
+      <div class="conf">
+        ${confChip("price", item.price.confidence)}
+        ${confChip("stock", item.stock.confidence)}
+      </div>
+      ${held ? `<div class="heldmsg">Can't be sold yet — ${esc(item.held_because.join("; "))}</div>` : ""}
+    </div>
+    <div class="pprice">
+      ${item.price.confidence === 0 ? "—" : rupee(item.price.value)}
+      <small>${item.price.confidence === 0 ? "no price given" : item.stock.confidence === 0 ? "stock unknown" : `${item.stock.quantity} in stock`}</small>
+    </div>
+  </button>`;
+}
+
 async function loadCatalog() {
   const { body } = await api("/catalog");
-  $("catalog").innerHTML = body.items
-    .map((i) => {
-      const held = !i.transactable;
-      const attrs = Object.entries(i.attributes).map(([k, v]) => `${k}: ${v}`).join(" · ");
-      const price = i.price.confidence === 0 ? "—" : rupee(i.price.value);
-      return `<div class="item">
-        <div>
-          <span class="name"><span class="dot ${held ? "held" : "live"}"></span>${i.name}</span>
-          <span class="attrs">${attrs} · confidence ${i.price.confidence.toFixed(2)} price / ${i.stock.confidence.toFixed(2)} stock</span>
-          ${held ? `<span class="why">held — ${i.held_because.join("; ")}</span>` : ""}
-        </div>
-        <span class="price">${price}</span>
-      </div>`;
-    })
-    .join("");
+  items = body.items;
+  $("src").textContent = `catalog: ${body.provider === "claude" ? "extracted live" : "fixtures"}`;
+  $("products").innerHTML = items.map(productCard).join("");
+  for (const el of document.querySelectorAll(".product[data-id]")) {
+    el.onclick = () => start(el.dataset.id);
+  }
 }
 
-// ── 2–3 · negotiation ───────────────────────────────────────────────────────
+// ── the transaction ─────────────────────────────────────────────────────────
 function renderTurns(log) {
-  return log
-    .map(
-      (t) => `<div class="turn ${t.actor}">
-        <span class="r">r${t.round}</span>
-        <span class="who">${t.actor}</span>
-        <span>${t.message}<span class="why">${t.rationale}</span></span>
-      </div>`,
-    )
-    .join("");
+  return log.map((t) => `<div class="turn ${t.actor}">
+    <span class="r">r${t.round}</span>
+    <span class="who">${t.actor}</span>
+    <span><span class="msg">${esc(t.message)}</span><div class="why">${esc(t.rationale)}</div></span>
+  </div>`).join("");
 }
 
-async function runTransaction({ want, max_price, opening_offer }) {
-  txnId = null;
-  $("confirm").disabled = true;
-  $("negotiation").innerHTML = `<span class="empty">negotiating…</span>`;
-  $("payment").innerHTML = `<span class="empty">waiting on the negotiation</span>`;
-  $("audit").innerHTML = `<span class="empty">waiting on the negotiation</span>`;
+async function start(itemId) {
+  const item = items.find((i) => i.item_id === itemId);
+  if (!item) return;
+
+  resetFlow();
+  for (const el of document.querySelectorAll(".product")) el.classList.remove("sel");
+  document.querySelector(`.product[data-id="${itemId}"]`)?.classList.add("sel");
+
+  $("flowsub").textContent = `Buying: ${item.name}`;
+  setStage("neg", "active", `<p class="empty">Negotiating…</p>`);
 
   const { status, body } = await api("/transactions", {
     method: "POST",
-    body: JSON.stringify({ want, max_price, opening_offer }),
+    body: JSON.stringify({
+      want: item.name,
+      max_price: Number($("max").value),
+      opening_offer: Number($("open").value),
+    }),
   });
 
   if (status === 404) {
-    $("negotiation").innerHTML =
-      banner("warn", "Nothing offerable matched.") +
-      (body.withheld ?? [])
-        .map((w) => `<div class="turn"><span>${w.item.name}<span class="why">withheld — ${w.reason}</span></span></div>`)
-        .join("");
+    setStage("neg", "failed", note("warn", "Nothing offerable matched that.") +
+      (body.withheld ?? []).map((w) => `<div class="ldet">${esc(w.item.name)} — ${esc(w.reason)}</div>`).join(""));
     return;
   }
 
   if (body.status === "no_deal") {
-    $("negotiation").innerHTML = renderTurns(body.log) + banner("bad", "No deal — " + body.reason);
-    $("payment").innerHTML = banner("warn", "No payment attempted. The merchant's floor held.");
+    setStage("neg", "failed", renderTurns(body.log) + note("bad", esc(body.reason)));
+    setStage("pay", "idle", note("warn", "No payment attempted. The shop's floor held."));
     return;
   }
 
   if (status !== 201) {
-    $("negotiation").innerHTML = banner("bad", body.error ?? "unexpected error");
+    setStage("neg", "failed", note("bad", esc(body.error ?? "unexpected error")));
     return;
   }
 
   txnId = body.transaction_id;
-  $("negotiation").innerHTML =
-    renderTurns(body.log) + banner("ok", `Agreed at ${rupee(body.final_price)} — within the merchant's floor and the buyer's ceiling.`);
+  setStage("neg", "done",
+    renderTurns(body.log) +
+    note("ok", `Agreed at <strong>${rupee(body.final_price)}</strong> — above the shop's floor, within the agent's ceiling.`));
 
-  const orderRow = `<div class="stage"><div><div class="label">order</div><div class="hash">${body.order_id}</div></div></div>`;
+  const orderRow = `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>`;
 
   if (body.status === "awaiting_payment") {
-    // Real gateway: an order exists, but nobody has paid yet. A payment_id only
-    // comes from a Checkout session, so the transaction waits here.
-    $("payment").innerHTML =
-      banner("warn", `Order opened for ${rupee(body.final_price)} — awaiting payment through Razorpay Checkout.`) +
-      orderRow;
+    setStage("pay", "active",
+      note("warn", `Order opened for ${rupee(body.final_price)}. Complete it in Razorpay Checkout.`) +
+      orderRow +
+      `<button class="cta wide" id="reopen">Open Razorpay Checkout</button>`);
+    $("reopen").onclick = () => openCheckout(body);
     await loadAudit();
     openCheckout(body);
     return;
   }
 
-  $("payment").innerHTML =
-    banner("ok", `Paid ${rupee(body.final_price)}`) +
-    orderRow +
-    `<div class="stage"><div><div class="label">payment</div><div class="hash">${body.payment_id}</div></div></div>` +
-    (body.gateway === "simulated"
-      ? banner("warn", "Simulated gateway — set Razorpay test keys for real order IDs.")
-      : "");
-  $("confirm").disabled = false;
+  setStage("pay", "done",
+    note("ok", `Paid ${rupee(body.final_price)}`) +
+    `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>` +
+    (body.gateway === "simulated" ? note("warn", "Simulated gateway — add Razorpay test keys for real IDs.") : ""));
+  awaitFulfillment();
   await loadAudit();
 }
 
-// ── 5 · Razorpay Checkout, only when a real gateway is configured ────────────
 function openCheckout(deal) {
   if (!config.razorpay_key_id || typeof window.Razorpay !== "function") {
-    $("payment").innerHTML += banner("bad", "Razorpay Checkout could not load.");
+    $("b-pay").innerHTML += note("bad", "Razorpay Checkout could not load.");
     return;
   }
-
   new window.Razorpay({
     key: config.razorpay_key_id,
     order_id: deal.order_id,
@@ -258,101 +421,88 @@ function openCheckout(deal) {
     name: "Vyapar-to-Agent",
     description: `${deal.item_id} · agreed ${rupee(deal.final_price)}`,
     handler: async (response) => {
-      // The callback is not trusted here — the server verifies its signature
-      // against the order it authorized before issuing a Payment Mandate.
+      // Not trusted here — the server verifies the signature against the order
+      // it authorized before it will sign a Payment Mandate.
       const { status, body } = await api(`/transactions/${deal.transaction_id}/settle-payment`, {
         method: "POST",
         body: JSON.stringify(response),
       });
       if (status !== 201) {
-        $("payment").innerHTML += banner("bad", (body.reasons ?? [body.error]).join("; "));
+        $("b-pay").innerHTML += note("bad", esc((body.reasons ?? [body.error]).join("; ")));
         return;
       }
-      $("payment").innerHTML =
-        banner("ok", `Paid ${rupee(deal.final_price)}`) +
-        `<div class="stage"><div><div class="label">order</div><div class="hash">${body.order_id}</div></div></div>
-         <div class="stage"><div><div class="label">payment</div><div class="hash">${body.payment_id}</div></div></div>`;
-      $("confirm").disabled = false;
+      setStage("pay", "done",
+        note("ok", `Paid ${rupee(deal.final_price)}`) +
+        `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>`);
+      awaitFulfillment();
       await loadAudit();
     },
     modal: {
       ondismiss: () => {
-        $("payment").innerHTML += banner(
-          "warn",
-          "Checkout dismissed. The order stands unpaid — no payment mandate was issued.",
-        );
+        $("b-pay").innerHTML += note("warn", "Checkout dismissed — the order stands unpaid, and no payment mandate was issued.");
       },
     },
   }).open();
 }
 
-// ── 7 · audit ───────────────────────────────────────────────────────────────
+function awaitFulfillment() {
+  setStage("ful", "active",
+    note("warn", "Paid, but not delivered. Nothing here infers a handover — only the shopkeeper's signature can.") +
+    `<button class="cta wide" id="confirm">Shopkeeper: I handed it over</button>`);
+  $("confirm").onclick = async () => {
+    $("confirm").disabled = true;
+    const { status, body } = await api(`/transactions/${txnId}/confirm-fulfillment`, {
+      method: "POST",
+      body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
+    });
+    setStage("ful", status === 201 ? "done" : "failed",
+      status === 201
+        ? note("ok", "Handover signed by the shopkeeper.")
+        : note("bad", esc((body.reasons ?? [body.error]).join("; "))));
+    await loadAudit();
+  };
+}
+
 async function loadAudit() {
   if (!txnId) return;
   const { body } = await api(`/transactions/${txnId}/audit`);
-  const stages = body.timeline
-    .map((s) => {
-      if (!s.present) {
-        return `<div class="stage pending"><span class="mark">○</span>
-          <div><div class="label">${s.stage}</div><div class="det">${s.headline}</div></div></div>`;
-      }
-      const sigs = s.signatures
-        .map((x) => `<span class="${x.verified ? "ok" : "bad"}">${x.verified ? "✔" : "✘"} ${x.role}</span>`)
-        .join("  ");
-      return `<div class="stage"><span class="mark">${s.verified ? "✅" : "❌"}</span>
-        <div>
-          <div class="label">${s.stage}</div>
-          <div>${s.headline}</div>
-          ${s.detail.map((d) => `<div class="det">${d}</div>`).join("")}
-          <div class="hash">${s.hash}</div>
-          <div class="sig">${sigs}</div>
-        </div></div>`;
-    })
-    .join("");
 
-  $("audit").innerHTML =
+  const chain = body.timeline.map((s) => {
+    if (!s.present) {
+      return `<div class="link idle"><span class="mk">○</span>
+        <div><div class="lname">${s.stage}</div><div class="ldet">${esc(s.headline)}</div></div></div>`;
+    }
+    const sigs = s.signatures.map((x) => `<span class="${x.verified ? "y" : "n"}">${x.verified ? "✔" : "✘"} ${x.role}</span>`).join("  ");
+    return `<div class="link"><span class="mk">${s.verified ? "✅" : "❌"}</span>
+      <div>
+        <div class="lname">${s.stage}</div>
+        <div class="ltxt">${esc(s.headline)}</div>
+        ${s.detail.map((d) => `<div class="ldet">${esc(d)}</div>`).join("")}
+        <div class="lhash">${esc(s.hash)}</div>
+        <div class="sigs">${sigs}</div>
+      </div></div>`;
+  }).join("");
+
+  setStage("aud", body.verified ? "done" : "failed",
     (body.verified
-      ? banner("ok", "CHAIN VERIFIED — every signature and hash link re-checked just now")
-      : banner("bad", "CHAIN REJECTED — " + body.failures.join("; "))) +
-    stages +
-    `<div class="fingerprint">status: ${body.status}<br>fingerprint: ${body.fingerprint}</div>`;
+      ? note("ok", "CHAIN VERIFIED — every signature and hash link re-checked just now, not read from a stored flag.")
+      : note("bad", esc(body.failures.join("; ")))) +
+    `<div class="chain">${chain}</div>` +
+    `<div class="fp">status: ${body.status}<br>fingerprint: ${esc(body.fingerprint)}</div>`);
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-$("run").onclick = () =>
-  runTransaction({
-    want: $("want").value,
-    max_price: Number($("max").value),
-    opening_offer: Number($("open").value),
-  });
+for (const p of document.querySelectorAll(".preset")) {
+  p.onclick = () => { $("max").value = p.dataset.max; $("open").value = p.dataset.open; };
+}
 
-$("sc-nodeal").onclick = () => {
-  $("want").value = "blue cotton saree";
-  $("max").value = 900;
-  $("open").value = 800;
-  return runTransaction({ want: "blue cotton saree", max_price: 900, opening_offer: 800 });
-};
-
-$("sc-held").onclick = () => {
-  $("want").value = "printed bedsheet";
-  return runTransaction({ want: "printed bedsheet", max_price: 1500, opening_offer: 400 });
-};
-
-$("confirm").onclick = async () => {
-  $("confirm").disabled = true;
-  await api(`/transactions/${txnId}/confirm-fulfillment`, {
-    method: "POST",
-    body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
-  });
-  await loadAudit();
-};
-
-config = { gateway: "simulated", requires_checkout: false, razorpay_key_id: null };
 api("/config").then(({ body }) => {
   config = body;
-  $("gateway").textContent =
-    `· gateway: ${body.gateway}` + (body.requires_checkout ? " (Checkout)" : "");
+  const gw = $("gw");
+  gw.textContent = `gateway: ${body.gateway}${body.requires_checkout ? " · Checkout" : ""}`;
+  gw.classList.toggle("live", body.gateway === "razorpay");
 });
+resetFlow();
 loadCatalog();
 </script>
 </body>
