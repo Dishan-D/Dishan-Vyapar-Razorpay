@@ -1,0 +1,22 @@
+{
+  "name": "vyapar-to-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Makes UPI-only Indian merchants transactable by AI buyer-agents: auto-catalog, bounded negotiation, and a signed 4-mandate audit chain.",
+  "scripts": {
+    "milestone-a": "tsx scripts/milestone-a.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jose": "^6.2.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}
