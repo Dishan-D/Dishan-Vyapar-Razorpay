@@ -21,7 +21,7 @@ See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the full spec: pipeline, schema
 | **C** | Discovery + bounded negotiation | ✅ done |
 | **D** | Mandates → gated Razorpay test-mode payment | ✅ done |
 | **E** | Fulfillment loop + audit view, over HTTP, persisted in SQLite | ✅ done |
-| F | Demo frontend + pre-seeded scenarios | not started |
+| **F** | Demo frontend + CLI walkthrough + pre-seeded scenarios | ✅ done |
 
 Each milestone is a runnable proof, not a claim:
 
@@ -32,7 +32,9 @@ npm run milestone-b   # structuring agent + confidence gate
 npm run milestone-c   # discovery + 4 negotiation cases
 npm run milestone-d   # mandates → payment, with the gate tested
 npm run milestone-e   # fulfillment + audit, end to end over HTTP
-npm run serve         # the API on :3000
+
+npm run serve         # API + demo UI on http://localhost:3000
+npm run demo          # the same walkthrough in the terminal, for recording
 ```
 
 None of them need an API key or Razorpay credentials to run. With

@@ -11,7 +11,8 @@
     "milestone-c": "tsx scripts/milestone-c.ts",
     "milestone-d": "tsx scripts/milestone-d.ts",
     "milestone-e": "tsx scripts/milestone-e.ts",
-    "serve": "tsx src/server.ts"
+    "serve": "tsx src/server.ts",
+    "demo": "tsx scripts/demo.ts"
   },
   "engines": {
     "node": ">=20"
