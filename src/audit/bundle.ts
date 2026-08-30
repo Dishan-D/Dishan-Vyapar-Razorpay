@@ -44,7 +44,7 @@ function describe(mandate: Mandate): { headline: string; detail: string[] } {
         headline: `Buyer-agent ${mandate.buyer_agent_id} was authorized to spend up to ₹${mandate.constraints.max_price}`,
         detail: [
           `asked for: "${mandate.prompt_playback}"`,
-          `limited to category ${mandate.constraints.category}, valid ${mandate.constraints.ttl_seconds}s`,
+          `limited to ${mandate.constraints.category ? `category ${mandate.constraints.category}` : "any category"}, valid ${mandate.constraints.ttl_seconds}s`,
         ],
       };
     case "cart":

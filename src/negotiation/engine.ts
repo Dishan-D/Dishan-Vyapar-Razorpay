@@ -116,14 +116,23 @@ export function negotiate(
     });
 
     if (offer >= policy.floor_price) {
+      // Never charge above the merchant's own list price. A buyer-agent that
+      // opens high — because its ceiling is generous, or it misjudged the market
+      // — should not be billed more than the shop was asking; taking the surplus
+      // would be the opposite of the "favour the buyer" rule this branch exists
+      // to implement.
+      const settled = Math.min(offer, policy.list_price);
       log.push({
         round,
         actor: "merchant",
         action: "accept",
-        amount: offer,
-        rationale: `offer is at or above the ₹${policy.floor_price} floor — accepted as offered, not haggled up`,
+        amount: settled,
+        rationale:
+          settled < offer
+            ? `offer of ₹${offer} is above the ₹${policy.list_price} list price — settled at list, not at the offer`
+            : `offer is at or above the ₹${policy.floor_price} floor — accepted as offered, not haggled up`,
       });
-      return finish({ status: "agreed", final_price: offer, rounds: round, log });
+      return finish({ status: "agreed", final_price: settled, rounds: round, log });
     }
 
     const counter = nextCounter(ask, policy.floor_price);

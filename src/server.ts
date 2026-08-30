@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import path from "node:path";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
@@ -24,6 +25,7 @@ export async function createApp() {
 
   const app = express();
   app.use(express.json());
+  app.use(express.static(path.resolve("frontend")));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, gateway: gateway.kind, catalog_size: catalog.length });
@@ -63,11 +65,14 @@ export async function createApp() {
         max_price = 1500,
         opening_offer = 800,
         buyer_agent_id = "agent_xyz",
-        category = "apparel",
+        // "" means the buyer-agent was not constrained to a category. Defaulting
+        // to a guess like "apparel" silently narrows a mandate the buyer never gave.
+        category = "",
         phrase = false,
       } = req.body ?? {};
 
-      const found = discover(catalog, { want, max_price });
+      // The intent's category constraint is applied at discovery, not just at payment.
+      const found = discover(catalog, { want, max_price, category });
       const item = found.matches[0]?.item;
       if (!item) {
         res.status(404).json({ error: "no offerable match", withheld: found.withheld });
