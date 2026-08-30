@@ -43,8 +43,11 @@ Credentials, when you have them, go in `.env` (copy `.env.example`). Every scrip
 loads it via `--env-file-if-exists`, so there is nothing to export and nothing
 breaks when the file is absent:
 
-- `ANTHROPIC_API_KEY` — `milestone-b -- --live` runs the real extraction,
-  `milestone-c -- --live` lets Claude phrase the haggle.
+- `GROQ_API_KEY` **or** `ANTHROPIC_API_KEY` — `milestone-b -- --live` runs the
+  real extraction and writes `data/catalog.json`, which the server then serves;
+  `milestone-c -- --live` lets the model phrase the haggle. Groq wins if both
+  are set; `LLM_PROVIDER=claude` forces the other. Defaults are
+  `qwen/qwen3.8-27b` on Groq (vision + strict JSON) and `claude-opus-5`.
 - `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — orders are created against the real
   test-mode API and the UI settles them through Razorpay Checkout. Confirm it
   took: `curl localhost:3000/config` should say `"gateway":"razorpay"`.
@@ -100,7 +103,7 @@ data/            sample products, merchant policies, offline fixtures
 
 | Stage | Uses a model? | Why |
 |---|---|---|
-| 1 Structuring | **yes** — vision + text | reading a photo and a Hinglish voice note is exactly what a model is for |
+| 1 Structuring | **yes** — vision + text | reading a photo and a Hinglish voice note is exactly what a model is for. Groq or Claude, same prompt and schema either way |
 | 2 Discovery | no | a buyer-agent deserves an answer it can check; a filter is auditable, an embedding match isn't |
 | 3 Negotiation | **only for phrasing** | the merchant set a floor — no model gets to talk the system below it. Every number is deterministic; phrasing that loses or changes a rupee figure is discarded |
 | 4–7 Mandates, payment, fulfillment, audit | no | cryptography and money |

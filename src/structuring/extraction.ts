@@ -30,6 +30,29 @@ export const ExtractionSchema = z.object({
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
 
+/**
+ * The shape the model is actually asked for.
+ *
+ * Identical to Extraction except that `attributes` is a list of key/value pairs
+ * rather than a map. Strict structured-output modes require every object to
+ * declare `additionalProperties: false`, which an open-ended map cannot — so the
+ * map is carried as pairs on the wire and rebuilt on arrival. Both providers use
+ * this same schema, so neither gets a different question.
+ */
+export const ExtractionWireSchema = ExtractionSchema.omit({ attributes: true }).extend({
+  attributes: z
+    .array(z.object({ key: z.string(), value: z.string() }))
+    .describe("Material, colour, size etc. Only attributes actually stated or clearly visible."),
+});
+
+export type ExtractionWire = z.infer<typeof ExtractionWireSchema>;
+
+export function fromWire(wire: ExtractionWire): Extraction {
+  const attributes: Record<string, string> = {};
+  for (const { key, value } of wire.attributes) attributes[key] = value;
+  return { ...wire, attributes };
+}
+
 /** A merchant's raw, unstructured input for one product. */
 export interface RawProduct {
   sample_id: string;
@@ -42,10 +65,13 @@ export interface RawProduct {
   payment_page_description?: string;
 }
 
+/** Who produced an extraction. Recorded so a catalog can never misreport itself. */
+export type ExtractionSource = "claude" | "groq" | "fixture";
+
 export interface ExtractionRecord {
   sample_id: string;
   extraction: Extraction;
-  provider: "claude" | "fixture";
+  provider: ExtractionSource;
   model?: string;
   extracted_at: string;
 }

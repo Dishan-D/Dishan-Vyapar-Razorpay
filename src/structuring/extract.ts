@@ -1,17 +1,27 @@
-import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import OpenAI from "openai";
+import { z } from "zod";
+import {
+  activeProvider,
+  CLAUDE_MODEL,
+  GROQ_BASE_URL,
+  GROQ_MODEL,
+  strictJsonSchema,
+  type LlmProvider,
+} from "../llm/provider.js";
 import {
   ExtractionSchema,
+  ExtractionWireSchema,
+  fromWire,
   type Extraction,
   type ExtractionRecord,
   type RawProduct,
 } from "./extraction.js";
 
-export const MODEL = "claude-opus-5";
+export const MODEL = CLAUDE_MODEL;
 
 const SYSTEM_PROMPT = `You are reading a small Indian merchant's own description of something they sell — a phone photo, a filename, and a voice note transcribed as-is. The voice note is usually Hindi/Hinglish; the shopkeeper is talking to a customer, not filling in a form.
 
@@ -35,6 +45,19 @@ const MEDIA_TYPES: Record<string, "image/png" | "image/jpeg" | "image/webp" | "i
   ".gif": "image/gif",
 };
 
+/** The merchant's input as text. Shared, so both providers get the same wording. */
+function describeInput(raw: RawProduct): string {
+  return [
+    raw.photo_filename ? `Photo filename: ${raw.photo_filename}` : null,
+    `Voice note (transcribed): "${raw.voice_note}"`,
+    raw.payment_page_description
+      ? `Razorpay Payment Page description: "${raw.payment_page_description}"`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function buildContent(raw: RawProduct): Promise<Anthropic.ContentBlockParam[]> {
   const blocks: Anthropic.ContentBlockParam[] = [];
 
@@ -46,15 +69,7 @@ async function buildContent(raw: RawProduct): Promise<Anthropic.ContentBlockPara
     blocks.push({ type: "image", source: { type: "base64", media_type: mediaType, data } });
   }
 
-  const lines = [
-    raw.photo_filename ? `Photo filename: ${raw.photo_filename}` : null,
-    `Voice note (transcribed): "${raw.voice_note}"`,
-    raw.payment_page_description
-      ? `Razorpay Payment Page description: "${raw.payment_page_description}"`
-      : null,
-  ].filter(Boolean);
-
-  blocks.push({ type: "text", text: lines.join("\n") });
+  blocks.push({ type: "text", text: describeInput(raw) });
   return blocks;
 }
 
@@ -69,7 +84,7 @@ export async function extractWithClaude(
     thinking: { type: "adaptive" },
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: await buildContent(raw) }],
-    output_config: { format: zodOutputFormat(ExtractionSchema) },
+    output_config: { format: zodOutputFormat(ExtractionWireSchema) },
   });
 
   if (response.stop_reason === "refusal") {
@@ -85,11 +100,81 @@ export async function extractWithClaude(
 
   return {
     sample_id: raw.sample_id,
-    extraction: parsed,
+    extraction: fromWire(parsed),
     provider: "claude",
     model: response.model,
     extracted_at: new Date().toISOString(),
   };
+}
+
+/**
+ * Stage 1 against Groq. Same prompt, same schema, same gate — only the model
+ * behind it differs, which is the point: nothing downstream of Stage 1 knows or
+ * cares who read the photo.
+ *
+ * Groq speaks the OpenAI wire format, so the official OpenAI SDK is the client;
+ * only the base URL changes.
+ */
+export async function extractWithGroq(
+  raw: RawProduct,
+  client?: OpenAI,
+): Promise<ExtractionRecord> {
+  const groq =
+    client ?? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
+
+  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
+
+  if (raw.photo_path) {
+    const ext = path.extname(raw.photo_path).toLowerCase();
+    const mediaType = MEDIA_TYPES[ext];
+    if (!mediaType) throw new Error(`Unsupported image type for ${raw.photo_path}`);
+    const data = (await readFile(raw.photo_path)).toString("base64");
+    content.push({ type: "image_url", image_url: { url: `data:${mediaType};base64,${data}` } });
+  }
+
+  content.push({ type: "text", text: describeInput(raw) });
+
+  const response = await groq.chat.completions.create({
+    model: GROQ_MODEL,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "catalog_extraction",
+        strict: true,
+        schema: strictJsonSchema(z.toJSONSchema(ExtractionWireSchema) as Record<string, unknown>),
+      },
+    },
+  });
+
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error(`Groq returned no content for ${raw.sample_id}`);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Groq returned unparseable JSON for ${raw.sample_id}: ${text.slice(0, 200)}`);
+  }
+
+  return {
+    sample_id: raw.sample_id,
+    extraction: fromWire(ExtractionWireSchema.parse(parsed)),
+    provider: "groq",
+    model: response.model,
+    extracted_at: new Date().toISOString(),
+  };
+}
+
+/** Dispatch to whichever provider this run is configured for. */
+export async function extractLive(raw: RawProduct): Promise<ExtractionRecord> {
+  const provider = activeProvider();
+  if (provider === "groq") return extractWithGroq(raw);
+  if (provider === "claude") return extractWithClaude(raw);
+  throw new Error("No model provider configured — set GROQ_API_KEY or ANTHROPIC_API_KEY");
 }
 
 /**
@@ -115,19 +200,11 @@ export async function extractFromFixture(
   };
 }
 
-/**
- * True when a live call is possible.
- *
- * The SDK resolves credentials in its own order — `ANTHROPIC_API_KEY`, then
- * `ANTHROPIC_AUTH_TOKEN`, then a profile written by `ant auth login`. Checking
- * only the env vars would send anyone who authenticated with the CLI down the
- * fixture path while telling them no credentials exist, so the profile store is
- * checked too.
- */
+/** True when some provider can actually be called. */
 export function hasCredentials(): boolean {
-  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return true;
+  return activeProvider() !== "none";
+}
 
-  const configHome =
-    process.env.XDG_CONFIG_HOME ?? (homedir() ? path.join(homedir(), ".config") : undefined);
-  return configHome ? existsSync(path.join(configHome, "anthropic")) : false;
+export function currentProvider(): LlmProvider {
+  return activeProvider();
 }

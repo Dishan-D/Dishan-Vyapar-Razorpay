@@ -13,7 +13,8 @@ import {
   NotTransactableError,
   CONFIDENCE_FLOOR,
 } from "../src/structuring/extraction.js";
-import { hasCredentials, MODEL } from "../src/structuring/extract.js";
+import { hasCredentials } from "../src/structuring/extract.js";
+import { activeProvider, providerLabel } from "../src/llm/provider.js";
 import { runStructuring, writeCatalog } from "../src/structuring/run.js";
 
 const g = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -38,16 +39,16 @@ async function main(): Promise<void> {
 
   if (live && !hasCredentials()) {
     console.log(
-      `\n  ${y("--live requested but no credentials found")} ` +
-        `${dim("(set ANTHROPIC_API_KEY, or run `ant auth login`)")}\n  falling back to fixtures.`,
+      `\n  ${y("--live requested but no model credentials found")} ` +
+        `${dim("(set GROQ_API_KEY or ANTHROPIC_API_KEY in .env)")}\n  falling back to fixtures.`,
     );
   }
 
   const result = await runStructuring(live);
 
   heading("Source");
-  if (result.provider === "claude") {
-    console.log(`  ${g("live model")} ${dim(MODEL)}`);
+  if (result.provider !== "fixture") {
+    console.log(`  ${g("live model")} ${dim(providerLabel(result.provider === "groq" ? "groq" : "claude"))}`);
   } else {
     console.log(`  ${y("fixtures")} ${dim("— hand-authored stand-ins, not recorded model output")}`);
   }

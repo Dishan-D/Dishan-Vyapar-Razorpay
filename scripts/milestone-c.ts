@@ -12,6 +12,7 @@ import { negotiate, type BuyerMandate, type NegotiationOutcome } from "../src/ne
 import { phraseTurns, templateLine } from "../src/negotiation/phrasing.js";
 import { loadPolicies } from "../src/negotiation/policies.js";
 import { hasCredentials } from "../src/structuring/extract.js";
+import { activeProvider, providerLabel } from "../src/llm/provider.js";
 import { runStructuring, writeCatalog } from "../src/structuring/run.js";
 import type { CatalogItem, NegotiationPolicy } from "../src/mandates/schema.js";
 
@@ -70,13 +71,16 @@ async function main(): Promise<void> {
   const live = process.argv.includes("--live");
   console.log(bold("\nVyapar-to-Agent · Milestone C — discovery and negotiation"));
 
+  if (live && hasCredentials()) {
+    console.log(`  ${dim("phrasing via")} ${providerLabel(activeProvider())}`);
+  }
   const structuring = await runStructuring(live);
   await writeCatalog(structuring);
   const catalog = structuring.items;
   const policies = await loadPolicies();
 
   if (live && !hasCredentials()) {
-    console.log(`\n  ${y("--live requested but no credentials found")} ${dim("— using deterministic phrasing")}`);
+    console.log(`\n  ${y("--live requested but no model credentials found")} ${dim("— using deterministic phrasing")}`);
   }
 
   // ── Stage 2 ───────────────────────────────────────────────────────────────

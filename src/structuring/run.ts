@@ -1,16 +1,12 @@
 import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
 import type { CatalogItem } from "../mandates/schema.js";
-import {
-  extractFromFixture,
-  extractWithClaude,
-  hasCredentials,
-} from "./extract.js";
+import { extractFromFixture, extractLive, hasCredentials } from "./extract.js";
 import {
   toCatalogItem,
   type Extraction,
   type ExtractionRecord,
+  type ExtractionSource,
   type RawProduct,
 } from "./extraction.js";
 
@@ -61,7 +57,7 @@ export interface PhotoRef {
 export interface StructuringResult {
   items: CatalogItem[];
   records: ExtractionRecord[];
-  provider: "claude" | "fixture";
+  provider: ExtractionSource;
   photosUsed: number;
   /** item_id → the photo it came from, for display. */
   photos: Record<string, PhotoRef>;
@@ -81,10 +77,11 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
 
   let records: ExtractionRecord[];
   if (useLive) {
-    const client = new Anthropic();
+    // Sequential on purpose: image requests are the expensive part and both
+    // providers rate-limit them, so a burst of five buys nothing but 429s.
     records = [];
     for (const raw of raws) {
-      records.push(await extractWithClaude(raw, client));
+      records.push(await extractLive(raw));
     }
   } else {
     const fixtures = await loadFixtures();
@@ -104,7 +101,7 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
   return {
     items,
     records,
-    provider: useLive ? "claude" : "fixture",
+    provider: records[0]?.provider ?? "fixture",
     photosUsed: raws.filter((r) => r.photo_path).length,
     photos,
   };
@@ -125,7 +122,7 @@ export async function writeCatalog(result: StructuringResult): Promise<string> {
 }
 
 interface CatalogDoc {
-  provider: "claude" | "fixture";
+  provider: ExtractionSource;
   photos?: Record<string, PhotoRef>;
   items: CatalogItem[];
 }
