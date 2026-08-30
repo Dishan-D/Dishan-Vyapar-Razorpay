@@ -158,6 +158,14 @@ export class Store {
     return row ? (JSON.parse(row.json) as Clarification) : undefined;
   }
 
+  /** Which transaction an order belongs to — the only handle a webhook gives us. */
+  findTransactionByOrder(orderId: string): string | undefined {
+    const row = this.db
+      .prepare(`SELECT transaction_id FROM orders WHERE order_id = ?`)
+      .get(orderId) as { transaction_id: string } | undefined;
+    return row?.transaction_id;
+  }
+
   loadChain(transactionId: string): MandateChain | undefined {
     const txn = this.db
       .prepare(`SELECT transaction_id FROM transactions WHERE transaction_id = ?`)

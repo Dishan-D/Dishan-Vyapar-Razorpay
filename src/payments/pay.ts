@@ -148,7 +148,7 @@ export async function settlePayment(
   gateway: PaymentGateway,
   order: OrderResult,
   callback: CheckoutCallback | undefined,
-  opts: { now?: Date } = {},
+  opts: { now?: Date; verifiedByGateway?: boolean } = {},
 ): Promise<PayResult> {
   const report = await verifyChain(chain, keyring);
   const reasons = preflight(chain, item, report, opts.now ?? new Date());
@@ -163,7 +163,11 @@ export async function settlePayment(
     ]);
   }
 
-  if (gateway.requiresCheckout) {
+  // A verified webhook is the gateway telling us directly that it captured the
+  // payment — a stronger statement than a browser callback relaying the claim,
+  // and it is verified before this is ever set. Requiring the checkout signature
+  // on top would mean refusing Razorpay's own word about its own transaction.
+  if (gateway.requiresCheckout && !opts.verifiedByGateway) {
     if (!callback?.razorpay_payment_id || !callback.razorpay_signature) {
       throw new PaymentRefused([
         "this gateway settles only through Razorpay Checkout — a payment id and its signature are required",

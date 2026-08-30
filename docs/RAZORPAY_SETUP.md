@@ -121,3 +121,31 @@ Test mode is not a weaker version of the claim — it is the correct mode for a
 demo, and saying so plainly is better than letting a judge wonder. "Razorpay test
 mode, real API, real order ID" is a complete sentence. What you should not do is
 show a `sim_` ID while narrating that a payment happened.
+
+---
+
+## 6 · Webhook (Milestone L)
+
+Razorpay telling us it captured a payment is better than us asking. Register the
+endpoint in **Dashboard → Settings → Webhooks**:
+
+- **URL** — `https://<your-host>/webhooks/razorpay`. For local work, tunnel it
+  (`ngrok http 3000`, or any equivalent) and register the tunnel URL.
+- **Active events** — `payment.captured` is the only one handled; anything else
+  is acknowledged and ignored.
+- **Secret** — set one, and put the same value in `.env` as
+  `RAZORPAY_WEBHOOK_SECRET`.
+
+The endpoint is mounted *before* `express.json()` so the HMAC is checked against
+the exact bytes Razorpay signed — parsing first and re-serialising would change
+whitespace and key order, and no signature would ever match. Nothing runs on an
+unsigned body: `npm run milestone-l` submits four bad webhooks (no signature, a
+forged one, a valid signature for a different body, and a body altered after
+signing) and asserts all four are refused and none of them wrote a mandate.
+
+Retries are idempotent — Razorpay redelivers, and a second `payment.captured`
+for a settled transaction returns `already_settled` rather than minting a second
+Payment Mandate.
+
+Test it without a real payment from **Dashboard → Settings → Webhooks → Test**,
+or just complete a test-mode Checkout and watch the real event arrive.

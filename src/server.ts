@@ -64,6 +64,95 @@ export async function createApp(options: AppOptions = {}) {
   await openClarifications();
 
   const app = express();
+
+  /**
+   * Milestone L — Razorpay's webhook.
+   *
+   * Registered before express.json() so the HMAC can be checked against the
+   * exact bytes Razorpay signed. Parsing first and re-serialising would change
+   * whitespace and key order, and the signature would never match.
+   */
+  app.post(
+    "/webhooks/razorpay",
+    express.raw({ type: "application/json" }),
+    async (req: Request, res: Response) => {
+      const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
+      const signature = String(req.header("x-razorpay-signature") ?? "");
+
+      if (!gateway.verifyWebhookSignature) {
+        res.status(503).json({ error: "no webhook verification available on this gateway" });
+        return;
+      }
+      if (!signature || !gateway.verifyWebhookSignature(raw, signature)) {
+        // Anyone can POST here. Nothing below this line runs on an unsigned body.
+        res.status(401).json({ error: "webhook signature did not verify" });
+        return;
+      }
+
+      let event: any;
+      try {
+        event = JSON.parse(raw);
+      } catch {
+        res.status(400).json({ error: "unparseable webhook body" });
+        return;
+      }
+
+      if (event?.event !== "payment.captured") {
+        res.json({ ignored: event?.event ?? "unknown" });
+        return;
+      }
+
+      const entity = event.payload?.payment?.entity ?? {};
+      const orderId = String(entity.order_id ?? "");
+      const paymentId = String(entity.id ?? "");
+      const transactionId = orderId ? store.findTransactionByOrder(orderId) : undefined;
+
+      if (!transactionId) {
+        res.status(404).json({ error: `no transaction for order ${orderId}` });
+        return;
+      }
+
+      const chain = store.loadChain(transactionId);
+      const order = store.loadOrder(transactionId);
+      if (!chain || !order) {
+        res.status(409).json({ error: "transaction is missing its chain or order" });
+        return;
+      }
+      if (chain.payment) {
+        // Razorpay retries webhooks. Settling twice would mean two payment
+        // mandates for one payment, which the append-only store refuses anyway.
+        res.json({ status: "already_settled", transaction_id: transactionId });
+        return;
+      }
+
+      const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
+      if (!item) {
+        res.status(409).json({ error: `catalog no longer has ${chain.cart?.item_id}` });
+        return;
+      }
+
+      try {
+        const paid = await settlePayment(
+          chain,
+          item,
+          keyring,
+          gateway,
+          order,
+          { razorpay_payment_id: paymentId },
+          { verifiedByGateway: true },
+        );
+        store.appendMandate(transactionId, paid.payment);
+        res.json({ status: "settled", transaction_id: transactionId, payment_id: paid.payment_id });
+      } catch (err) {
+        if (err instanceof PaymentRefused) {
+          res.status(402).json({ error: "payment refused", reasons: err.reasons });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
   app.use(express.json());
   app.use(express.static(path.resolve("frontend")));
   // The merchant's own photos, served as-is. They are the input to Stage 1, so

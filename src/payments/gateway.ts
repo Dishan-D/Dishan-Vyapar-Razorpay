@@ -1,5 +1,5 @@
 import Razorpay from "razorpay";
-import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
+import { validatePaymentVerification, validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils.js";
 
 export interface OrderRequest {
   /** Razorpay works in currency subunits: ₹1100 is 110000 paise. */
@@ -25,6 +25,8 @@ export interface PaymentResult {
 
 export interface PaymentGateway {
   readonly kind: "razorpay" | "simulated";
+  /** Present only on gateways that sign their webhooks. */
+  verifyWebhookSignature?(rawBody: string, signature: string): boolean;
   /**
    * True when a payment can only come from a real Checkout session in a browser.
    * Server-side code cannot conjure a payment_id, because there is nothing to
@@ -75,6 +77,23 @@ export class RazorpayGateway implements PaymentGateway {
       signature,
       this.keySecret,
     );
+  }
+
+  /**
+   * A webhook is signed with its own secret over the raw request body — not the
+   * key secret, and not over a reconstructed object. It must be checked against
+   * the exact bytes received, because re-serialising the JSON first would let a
+   * payload that differs only in whitespace or key order verify against a
+   * signature computed for something else.
+   */
+  verifyWebhookSignature(rawBody: string, signature: string): boolean {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) return false;
+    try {
+      return validateWebhookSignature(rawBody, signature, secret);
+    } catch {
+      return false;
+    }
   }
 
   async createOrder(req: OrderRequest): Promise<OrderResult> {
