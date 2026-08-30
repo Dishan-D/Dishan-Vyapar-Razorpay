@@ -20,6 +20,12 @@ import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js"
 import { gateReasons } from "./structuring/extraction.js";
 import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
 import { clarificationMessage, DashboardNotifier, type Notifier } from "./structuring/notify.js";
+import {
+  parseInbound,
+  saleConfirmationMessage,
+  twilioConfigFromEnv,
+  WhatsAppNotifier,
+} from "./structuring/whatsapp.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus } from "./events/bus.js";
 import { loadServingCatalog } from "./structuring/run.js";
@@ -46,7 +52,13 @@ export async function createApp(options: AppOptions = {}) {
   const policies = indexPolicies(structuring.policies);
   const catalogItems = structuring.items;
   const merchants = new Map(structuring.merchants.map((m) => [m.merchant_id, m]));
-  const notifier: Notifier = options.notifier ?? new DashboardNotifier();
+  // WhatsApp when Twilio is configured, the dashboard queue otherwise. The
+  // fallback is not a degraded mode: the question is the same question, and the
+  // loop closes either way. What must never happen is the pipeline blocking
+  // because a notification channel is unconfigured.
+  const twilioConfig = twilioConfigFromEnv();
+  const notifier: Notifier =
+    options.notifier ?? (twilioConfig ? new WhatsAppNotifier(twilioConfig) : new DashboardNotifier());
   const bus = options.bus ?? new EventBus();
 
   /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
@@ -85,6 +97,17 @@ export async function createApp(options: AppOptions = {}) {
       });
     }
   }
+  /**
+   * Milestone K, message type 2 — outbound only, no reply expected.
+   * Fire-and-forget: a merchant not hearing about a sale is a bad afternoon,
+   * but a notification failing must never unwind a captured payment.
+   */
+  async function confirmSale(merchantId: string, itemName: string, price: number): Promise<void> {
+    const merchant = merchants.get(merchantId);
+    if (!merchant) return;
+    await notifier.send(merchant.whatsapp, saleConfirmationMessage(itemName, price)).catch(() => undefined);
+  }
+
   await openClarifications();
 
   for (const item of catalogItems) {
@@ -184,6 +207,7 @@ export async function createApp(options: AppOptions = {}) {
           message: `Razorpay confirmed capture of ${paid.payment_id}`,
           data: { payment_id: paid.payment_id, order_id: paid.order_id, via: "webhook" },
         });
+        void confirmSale(item.merchant_id, item.name, chain.cart?.final_price.value ?? 0);
         res.json({ status: "settled", transaction_id: transactionId, payment_id: paid.payment_id });
       } catch (err) {
         if (err instanceof PaymentRefused) {
@@ -412,6 +436,7 @@ export async function createApp(options: AppOptions = {}) {
         message: `Payment captured — ₹${outcome.final_price} for ${item.name}`,
         data: { payment_id: paid.payment_id, order_id: paid.order_id, amount: outcome.final_price },
       });
+      void confirmSale(item.merchant_id, item.name, outcome.final_price);
       res.status(201).json({ ...common, status: "paid", payment_id: paid.payment_id });
     } catch (err) {
       if (err instanceof PaymentRefused) {
@@ -464,6 +489,7 @@ export async function createApp(options: AppOptions = {}) {
         message: `Payment captured — ${paid.payment_id}`,
         data: { payment_id: paid.payment_id, order_id: paid.order_id },
       });
+      void confirmSale(item.merchant_id, item.name, chain.cart?.final_price.value ?? 0);
       res.status(201).json({
         status: "paid",
         transaction_id: id,
@@ -620,30 +646,15 @@ export async function createApp(options: AppOptions = {}) {
    * The merchant's answer (Addendum G.1.5). Accepts what someone would actually
    * type — "110", "₹110", "Rs 110" — rather than demanding a clean number.
    */
-  app.post("/clarifications/:id/reply", (req: Request, res: Response) => {
-    const id = String(req.params.id);
-    const clarification = store.getClarification(id);
-    if (!clarification) {
-      res.status(404).json({ error: `no such clarification: ${id}` });
-      return;
-    }
-    if (clarification.status === "resolved") {
-      res.status(409).json({ error: "already resolved" });
-      return;
-    }
+  interface ResolveOutcome { cleared: boolean; remaining: string[]; followUp: string | null; value: number }
 
-    const raw = req.body?.reply ?? req.body?.value;
-    const value = typeof raw === "number" ? raw : parseReply(String(raw ?? ""));
-    if (value === null) {
-      res.status(400).json({ error: `could not read a number from "${raw}"` });
-      return;
-    }
+  /** One resolution path, whether the answer arrived over HTTP or WhatsApp. */
+  function resolveClarification(id: string, value: number): ResolveOutcome | null {
+    const clarification = store.getClarification(id);
+    if (!clarification || clarification.status === "resolved") return null;
 
     const index = catalogItems.findIndex((i) => i.item_id === clarification.item_id);
-    if (index < 0) {
-      res.status(409).json({ error: `catalog no longer has ${clarification.item_id}` });
-      return;
-    }
+    if (index < 0) return null;
 
     const outcome = applyResolution(catalogItems[index]!, clarification, value, (updated) =>
       priceSanity(updated, catalogItems.map((i) => (i.item_id === updated.item_id ? updated : i))),
@@ -674,10 +685,8 @@ export async function createApp(options: AppOptions = {}) {
       const next = draftClarification(outcome.item, sanityFor(outcome.item), notifier.channel);
       if (next && next.trigger !== clarification.trigger) {
         const merchant = merchants.get(outcome.item.merchant_id);
-        void notifier
-          .send(merchant?.whatsapp ?? outcome.item.merchant_id, clarificationMessage(next))
-          .then((delivery) => store.saveClarification({ ...next, channel: delivery.channel }));
         store.saveClarification(next);
+        void notifier.send(merchant?.whatsapp ?? outcome.item.merchant_id, clarificationMessage(next));
         followUp = next.question;
       }
     }
@@ -692,15 +701,91 @@ export async function createApp(options: AppOptions = {}) {
       data: { value, cleared: outcome.cleared, follow_up: followUp },
     });
 
+    return { cleared: outcome.cleared, remaining: outcome.remaining, followUp, value };
+  }
+
+  app.post("/clarifications/:id/reply", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const clarification = store.getClarification(id);
+    if (!clarification) {
+      res.status(404).json({ error: `no such clarification: ${id}` });
+      return;
+    }
+    if (clarification.status === "resolved") {
+      res.status(409).json({ error: "already resolved" });
+      return;
+    }
+
+    const raw = req.body?.reply ?? req.body?.value;
+    const value = typeof raw === "number" ? raw : parseReply(String(raw ?? ""));
+    if (value === null) {
+      res.status(400).json({ error: `could not read a number from "${raw}"` });
+      return;
+    }
+
+    const outcome = resolveClarification(id, value);
+    if (!outcome) {
+      res.status(409).json({ error: "could not resolve" });
+      return;
+    }
+
     res.json({
       clarification_id: id,
       item_id: clarification.item_id,
-      resolved_value: value,
+      resolved_value: outcome.value,
       transactable: outcome.cleared,
       still_held_because: outcome.remaining,
-      follow_up: followUp,
+      follow_up: outcome.followUp,
     });
   });
+
+  /**
+   * Milestone K — the merchant's WhatsApp reply comes back here.
+   *
+   * Twilio posts form-encoded. The reply is matched to the oldest open question
+   * for whoever sent it: a merchant answering "110" is answering the thing they
+   * were last asked, and asking them to quote a clarification id would defeat
+   * the point of using WhatsApp at all.
+   */
+  app.post(
+    "/webhooks/whatsapp",
+    express.urlencoded({ extended: false }),
+    (req: Request, res: Response) => {
+      const inbound = parseInbound(req.body ?? {});
+      if (!inbound) {
+        res.status(400).type("text/xml").send("<Response/>");
+        return;
+      }
+
+      const merchant = structuring.merchants.find(
+        (m) => m.whatsapp.replace(/\s/g, "") === inbound.from.replace(/\s/g, ""),
+      );
+      if (!merchant) {
+        res.type("text/xml").send("<Response><Message>Sorry, I don't recognise this number.</Message></Response>");
+        return;
+      }
+
+      const open = store.listClarifications(merchant.merchant_id).find((c) => c.status === "open");
+      if (!open) {
+        res.type("text/xml").send("<Response><Message>Nothing is waiting on you right now — thanks!</Message></Response>");
+        return;
+      }
+
+      const value = parseReply(inbound.text);
+      if (value === null) {
+        res
+          .type("text/xml")
+          .send(`<Response><Message>Sorry, I couldn't read a number in that. ${open.question}</Message></Response>`);
+        return;
+      }
+
+      const outcome = resolveClarification(open.clarification_id, value);
+      const reply = outcome?.cleared
+        ? `Thanks! ${open.item_name} is live at ${open.field === "price" ? "₹" : ""}${value}.`
+        : outcome?.followUp ?? `Noted — ${open.item_name} is still on hold.`;
+      res.type("text/xml").send(`<Response><Message>${reply}</Message></Response>`);
+    },
+  );
 
   /** Stage 6 — the merchant says the goods changed hands. */
   app.post("/transactions/:id/confirm-fulfillment", async (req: Request, res: Response) => {

@@ -16,7 +16,8 @@
     "milestone-g": "tsx --env-file-if-exists=.env scripts/milestone-g.ts",
     "milestone-l": "tsx --env-file-if-exists=.env scripts/milestone-l.ts",
     "milestone-h": "tsx --env-file-if-exists=.env scripts/milestone-h.ts",
-    "milestone-j": "tsx --env-file-if-exists=.env scripts/milestone-j.ts"
+    "milestone-j": "tsx --env-file-if-exists=.env scripts/milestone-j.ts",
+    "milestone-k": "tsx --env-file-if-exists=.env scripts/milestone-k.ts"
   },
   "engines": {
     "node": ">=20"
@@ -29,6 +30,7 @@
     "openai": "^6.49.0",
     "razorpay": "^2.9.8",
     "socket.io": "^4.8.3",
+    "twilio": "^6.1.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {
