@@ -1,0 +1,70 @@
+{
+  "_note": "HAND-AUTHORED STAND-INS, NOT RECORDED MODEL OUTPUT. Written to make Stage 1's gate runnable and demonstrable without an API key. Confidence values are what a careful reader would assign to these voice notes, chosen so the gate is exercised in both directions. Re-record with `npm run milestone-b -- --live` once a key is set, and replace this file with the real output before claiming these numbers came from the model.",
+  "extractions": {
+    "saree_blue": {
+      "name": "Blue Cotton Saree",
+      "name_confidence": 0.93,
+      "category": "apparel.saree",
+      "category_confidence": 0.96,
+      "attributes": { "material": "cotton", "color": "blue" },
+      "attributes_confidence": 0.9,
+      "price_value": 1200,
+      "price_confidence": 0.94,
+      "stock_quantity": 1,
+      "stock_confidence": 0.9,
+      "notes": "Price and stock both stated plainly — '1200 ka hai' and 'ek hi piece bacha hai'. Material and colour stated."
+    },
+    "kurta_white": {
+      "name": "White Cotton Kurta",
+      "name_confidence": 0.95,
+      "category": "apparel.kurta",
+      "category_confidence": 0.96,
+      "attributes": { "material": "cotton", "color": "white", "size": "L" },
+      "attributes_confidence": 0.94,
+      "price_value": 650,
+      "price_confidence": 0.97,
+      "stock_quantity": 4,
+      "stock_confidence": 0.92,
+      "notes": "Price stated twice and agrees with the Payment Page description. Size and count both stated."
+    },
+    "bedsheet_double": {
+      "name": "Printed Double Bedsheet",
+      "name_confidence": 0.88,
+      "category": "home.bedsheet",
+      "category_confidence": 0.91,
+      "attributes": { "size": "double", "pattern": "printed" },
+      "attributes_confidence": 0.85,
+      "price_value": null,
+      "price_confidence": 0.05,
+      "stock_quantity": 2,
+      "stock_confidence": 0.25,
+      "notes": "Merchant explicitly has not set a price — 'rate abhi fix nahi kiya hai'. Stock is a guess he hedged twice ('do teen', 'shayad'), so the count is not usable."
+    },
+    "dupatta_silk": {
+      "name": "Maroon Silk Dupatta",
+      "name_confidence": 0.94,
+      "category": "apparel.dupatta",
+      "category_confidence": 0.95,
+      "attributes": { "material": "silk", "color": "maroon" },
+      "attributes_confidence": 0.92,
+      "price_value": 800,
+      "price_confidence": 0.93,
+      "stock_quantity": null,
+      "stock_confidence": 0.05,
+      "notes": "Price stated plainly. Stock is explicitly unknown — merchant has to check the godown — so no count was invented."
+    },
+    "towel_set": {
+      "name": "Cotton Towel Set (3 pieces)",
+      "name_confidence": 0.92,
+      "category": "home.towel",
+      "category_confidence": 0.93,
+      "attributes": { "material": "cotton", "pieces": "3" },
+      "attributes_confidence": 0.9,
+      "price_value": 450,
+      "price_confidence": 0.93,
+      "stock_quantity": 10,
+      "stock_confidence": 0.91,
+      "notes": "Price is per set and stated as such. Ten sets stated. Piece count is part of the product, not the stock count — kept as an attribute."
+    }
+  }
+}

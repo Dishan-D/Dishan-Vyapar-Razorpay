@@ -6,13 +6,16 @@
   "description": "Makes UPI-only Indian merchants transactable by AI buyer-agents: auto-catalog, bounded negotiation, and a signed 4-mandate audit chain.",
   "scripts": {
     "milestone-a": "tsx scripts/milestone-a.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "milestone-b": "tsx scripts/milestone-b.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "jose": "^6.2.10"
+    "@anthropic-ai/sdk": "^0.122.0",
+    "jose": "^6.2.10",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
