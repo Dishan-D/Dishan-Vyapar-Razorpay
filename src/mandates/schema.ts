@@ -133,7 +133,14 @@ export const CHAIN_ORDER: readonly MandateType[] = ["intent", "cart", "payment",
  *    Mandate is "signed by the buyer-agent's key" but §4.3 shows the pre-signing
  *    payload, so the field had to be named somewhere.
  *
- * 2. PaymentMandate gains `platform_signature` rather than reusing
+ * 2. SCOPE DECISION — the cart is single-item, per §9's recommendation. A cart
+ *    mandate binds exactly one `item_id` at one `final_price`. Multi-item would
+ *    mean a line-items array, a subtotal the negotiation stage has to allocate
+ *    across items, and re-cutting §4.4 — so it is locked closed now rather than
+ *    left ambiguous, because changing it after Milestone D means re-signing
+ *    every mandate shape downstream of it.
+ *
+ * 3. PaymentMandate gains `platform_signature` rather than reusing
  *    `merchant_signature`. §3 Stage 5 says "sign a Payment Mandate" without
  *    naming a signer. The merchant is not the party that observed the Razorpay
  *    capture — this service is — so attributing that assertion to the merchant's
