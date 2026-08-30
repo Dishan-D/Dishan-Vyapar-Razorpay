@@ -88,6 +88,15 @@ data/            sample products, merchant policies, offline fixtures
 | 3 Negotiation | **only for phrasing** | the merchant set a floor — no model gets to talk the system below it. Every number is deterministic; phrasing that loses or changes a rupee figure is discarded |
 | 4–7 Mandates, payment, fulfillment, audit | no | cryptography and money |
 
+## Razorpay
+
+The pipeline runs on a simulated gateway until you add test-mode keys; order and
+payment IDs are prefixed `sim_` so a simulated payment can never be mistaken for
+a real one. Adding `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env` switches
+to real test-mode orders with no code change — see
+[docs/RAZORPAY_SETUP.md](docs/RAZORPAY_SETUP.md), which also covers what a real
+`payment_id` additionally requires.
+
 ## What's real vs. simulated
 
 **Real:** all signing and verification, canonicalization, hash-linking, chain validation. This is the credibility core — there is no mocked `"signature": true` anywhere.
