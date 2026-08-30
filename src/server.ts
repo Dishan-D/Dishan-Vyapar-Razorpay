@@ -10,8 +10,8 @@ import type { CatalogItem } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { loadPolicies } from "./negotiation/policies.js";
-import { gatewayFromEnv } from "./payments/gateway.js";
-import { payForCart, PaymentRefused } from "./payments/pay.js";
+import { gatewayFromEnv, publishableKeyId } from "./payments/gateway.js";
+import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
 import { runStructuring } from "./structuring/run.js";
 
@@ -29,6 +29,18 @@ export async function createApp() {
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, gateway: gateway.kind, catalog_size: catalog.length });
+  });
+
+  /**
+   * What the browser needs to know to run Checkout. The Key ID is publishable by
+   * design — Razorpay expects it in the page. The secret stays here.
+   */
+  app.get("/config", (_req, res) => {
+    res.json({
+      gateway: gateway.kind,
+      requires_checkout: gateway.requiresCheckout,
+      razorpay_key_id: publishableKeyId(gateway),
+    });
   });
 
   /** The agent-readable catalog. Held items are listed but marked, never hidden. */
@@ -127,20 +139,79 @@ export async function createApp() {
       store.appendMandate(transaction_id, cart);
 
       const chain: MandateChain = { transaction_id, intent, cart };
-      const paid = await payForCart(chain, item, keyring, gateway, {
-        paymentId: req.body?.razorpay_payment_id,
-      });
-      store.appendMandate(transaction_id, paid.payment);
 
-      res.status(201).json({
-        status: "paid",
+      // Authorize only. The order is a request to be paid, not a payment.
+      const order = await authorizeCart(chain, item, keyring, gateway);
+      store.saveOrder(transaction_id, order);
+
+      const common = {
         transaction_id,
         item_id: item.item_id,
         final_price: outcome.final_price,
+        order_id: order.order_id,
+        amount_paise: order.amount_paise,
+        gateway: gateway.kind,
+        log,
+      };
+
+      if (gateway.requiresCheckout) {
+        // A real payment_id can only come from a browser Checkout session, so
+        // the transaction stops here and waits rather than inventing one.
+        res.status(201).json({ ...common, status: "awaiting_payment" });
+        return;
+      }
+
+      const paid = await settlePayment(chain, item, keyring, gateway, order, undefined);
+      store.appendMandate(transaction_id, paid.payment);
+      res.status(201).json({ ...common, status: "paid", payment_id: paid.payment_id });
+    } catch (err) {
+      if (err instanceof PaymentRefused) {
+        res.status(402).json({ error: "payment refused", reasons: err.reasons });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * Stage 5b — settle a Razorpay Checkout callback and issue the Payment Mandate.
+   *
+   * Everything in the body arrived from a browser, so none of it is believed
+   * until the signature checks out against the order this server authorized.
+   */
+  app.post("/transactions/:id/settle-payment", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const chain = store.loadChain(id);
+    if (!chain) {
+      res.status(404).json({ error: `no such transaction: ${id}` });
+      return;
+    }
+    if (chain.payment) {
+      res.status(409).json({ error: "this transaction is already paid" });
+      return;
+    }
+    const order = store.loadOrder(id);
+    if (!order) {
+      res.status(409).json({ error: "no authorized order for this transaction" });
+      return;
+    }
+    const item = catalog.find((i) => i.item_id === chain.cart?.item_id);
+    if (!item) {
+      res.status(409).json({ error: `catalog no longer has ${chain.cart?.item_id}` });
+      return;
+    }
+
+    try {
+      const paid = await settlePayment(chain, item, keyring, gateway, order, {
+        razorpay_payment_id: String(req.body?.razorpay_payment_id ?? ""),
+        razorpay_signature: req.body?.razorpay_signature,
+      });
+      store.appendMandate(id, paid.payment);
+      res.status(201).json({
+        status: "paid",
+        transaction_id: id,
         order_id: paid.order_id,
         payment_id: paid.payment_id,
-        gateway: paid.gateway,
-        log,
       });
     } catch (err) {
       if (err instanceof PaymentRefused) {

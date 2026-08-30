@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Vyapar-to-Agent</title>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e8eaf0;
@@ -133,6 +134,7 @@
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
+let config;
 const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
 let txnId = null;
 
@@ -216,15 +218,72 @@ async function runTransaction({ want, max_price, opening_offer }) {
   txnId = body.transaction_id;
   $("negotiation").innerHTML =
     renderTurns(body.log) + banner("ok", `Agreed at ${rupee(body.final_price)} — within the merchant's floor and the buyer's ceiling.`);
+
+  const orderRow = `<div class="stage"><div><div class="label">order</div><div class="hash">${body.order_id}</div></div></div>`;
+
+  if (body.status === "awaiting_payment") {
+    // Real gateway: an order exists, but nobody has paid yet. A payment_id only
+    // comes from a Checkout session, so the transaction waits here.
+    $("payment").innerHTML =
+      banner("warn", `Order opened for ${rupee(body.final_price)} — awaiting payment through Razorpay Checkout.`) +
+      orderRow;
+    await loadAudit();
+    openCheckout(body);
+    return;
+  }
+
   $("payment").innerHTML =
     banner("ok", `Paid ${rupee(body.final_price)}`) +
-    `<div class="stage"><div><div class="label">order</div><div class="hash">${body.order_id}</div></div></div>
-     <div class="stage"><div><div class="label">payment</div><div class="hash">${body.payment_id}</div></div></div>` +
+    orderRow +
+    `<div class="stage"><div><div class="label">payment</div><div class="hash">${body.payment_id}</div></div></div>` +
     (body.gateway === "simulated"
       ? banner("warn", "Simulated gateway — set Razorpay test keys for real order IDs.")
       : "");
   $("confirm").disabled = false;
   await loadAudit();
+}
+
+// ── 5 · Razorpay Checkout, only when a real gateway is configured ────────────
+function openCheckout(deal) {
+  if (!config.razorpay_key_id || typeof window.Razorpay !== "function") {
+    $("payment").innerHTML += banner("bad", "Razorpay Checkout could not load.");
+    return;
+  }
+
+  new window.Razorpay({
+    key: config.razorpay_key_id,
+    order_id: deal.order_id,
+    amount: deal.amount_paise,
+    currency: "INR",
+    name: "Vyapar-to-Agent",
+    description: `${deal.item_id} · agreed ${rupee(deal.final_price)}`,
+    handler: async (response) => {
+      // The callback is not trusted here — the server verifies its signature
+      // against the order it authorized before issuing a Payment Mandate.
+      const { status, body } = await api(`/transactions/${deal.transaction_id}/settle-payment`, {
+        method: "POST",
+        body: JSON.stringify(response),
+      });
+      if (status !== 201) {
+        $("payment").innerHTML += banner("bad", (body.reasons ?? [body.error]).join("; "));
+        return;
+      }
+      $("payment").innerHTML =
+        banner("ok", `Paid ${rupee(deal.final_price)}`) +
+        `<div class="stage"><div><div class="label">order</div><div class="hash">${body.order_id}</div></div></div>
+         <div class="stage"><div><div class="label">payment</div><div class="hash">${body.payment_id}</div></div></div>`;
+      $("confirm").disabled = false;
+      await loadAudit();
+    },
+    modal: {
+      ondismiss: () => {
+        $("payment").innerHTML += banner(
+          "warn",
+          "Checkout dismissed. The order stands unpaid — no payment mandate was issued.",
+        );
+      },
+    },
+  }).open();
 }
 
 // ── 7 · audit ───────────────────────────────────────────────────────────────
@@ -288,8 +347,11 @@ $("confirm").onclick = async () => {
   await loadAudit();
 };
 
-api("/health").then(({ body }) => {
-  $("gateway").textContent = `· gateway: ${body.gateway}`;
+config = { gateway: "simulated", requires_checkout: false, razorpay_key_id: null };
+api("/config").then(({ body }) => {
+  config = body;
+  $("gateway").textContent =
+    `· gateway: ${body.gateway}` + (body.requires_checkout ? " (Checkout)" : "");
 });
 loadCatalog();
 </script>

@@ -56,58 +56,45 @@ conjure: no card was entered and no UPI collect request was approved. So with
 keys set but no Checkout step, you get a real order and then the capture call has
 nothing to capture.
 
-## 4 · If you want a real payment ID in the video
+## 4 · Getting a real payment ID in the video
 
-This needs a Checkout step in the frontend, which is **not built yet** — the
-current UI creates the order and the mandate in one call. The change is:
+This is **built** — it just needs your keys to come alive. With
+`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` set, the flow becomes two phases:
 
-1. **Split the transaction endpoint.** `POST /transactions` stops at the order:
-   verify the cart mandate, create the Razorpay order, return `order_id` with
-   status `awaiting_payment`. No payment mandate yet — nothing has been paid.
+1. `POST /transactions` verifies the cart mandate, creates the order, and stops
+   at `status: "awaiting_payment"`. No Payment Mandate yet — nothing has been
+   paid, and signing one here would assert a capture that never happened.
+2. The UI opens **Razorpay Checkout** with that order.
+3. Checkout's callback goes to `POST /transactions/:id/settle-payment`, which
+   verifies `razorpay_signature` — HMAC-SHA256 of `<order_id>|<payment_id>` under
+   your key secret — against the order *this server* authorized, before believing
+   any of it. Only then is the Payment Mandate signed.
 
-2. **Open Checkout in the browser** with the returned `order_id`:
+That last check matters more here than in an ordinary integration: the Payment
+Mandate is evidence. Signing one from an unverified browser callback would put
+the platform's signature on a claim it never confirmed. `npm run milestone-d`
+exercises the boundary against a stand-in gateway with the same signature
+scheme — a missing signature, a forged one, and a valid signature reused for a
+different payment id are all refused; only the genuine callback settles.
 
-   ```html
-   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-   ```
-   ```js
-   new window.Razorpay({
-     key: RAZORPAY_KEY_ID,        // publishable; serve it from an endpoint
-     order_id: orderId,
-     amount: amountPaise,
-     currency: "INR",
-     name: "Vyapar-to-Agent",
-     handler: (res) => settle(res),  // res has razorpay_payment_id,
-                                     // razorpay_order_id, razorpay_signature
-   }).open();
-   ```
+**Pay with a test instrument** in the Checkout window:
 
-3. **Settle server-side.** A new `POST /transactions/:id/settle-payment` takes
-   those three fields, verifies the signature *before* trusting any of it, and
-   only then builds the Payment Mandate:
+- Card `4111 1111 1111 1111`, any future expiry, any CVV, any name.
+- Or UPI, using the test VPA `success@razorpay` (and `failure@razorpay` to
+  demo the failure path).
 
-   ```ts
-   import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
+Razorpay publishes the current list under Docs → Payments → Test Card Details;
+check there if one of the above is rejected.
 
-   const genuine = validatePaymentVerification(
-     { order_id, payment_id },
-     razorpay_signature,
-     process.env.RAZORPAY_KEY_SECRET!,
-   );
-   if (!genuine) throw new PaymentRefused(["Razorpay signature did not verify"]);
-   ```
+**One caveat, stated plainly:** the Razorpay half of this has never run against
+the live test-mode API, because this machine has no keys. The order-creation and
+signature-verification code is written against the SDK's own
+`validatePaymentVerification`, and the verification logic is covered by the
+milestone-d tests above — but the first end-to-end run with real keys is yours.
+Budget ten minutes for it before you record, not two.
 
-   That check matters more here than in an ordinary integration: the Payment
-   Mandate is evidence. Signing one from an unverified browser callback would put
-   the platform's signature on a claim it never confirmed.
-
-4. **Pay with a test instrument** in the Checkout window:
-   - Card `4111 1111 1111 1111`, any future expiry, any CVV, any name.
-   - Or UPI, using the test VPA `success@razorpay` (and `failure@razorpay` to
-     demo the failure path).
-
-   Razorpay publishes the current list under Docs → Payments → Test Card Details;
-   check it if one of the above is rejected.
+The CLI walkthrough (`npm run demo`) stops at `awaiting_payment` when real keys
+are set, and says so, rather than pretending to produce a payment id it cannot.
 
 ## 5 · What to say in the video
 

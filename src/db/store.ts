@@ -29,6 +29,14 @@ export class Store {
         buyer_agent_id TEXT NOT NULL,
         created_at     TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS orders (
+        transaction_id TEXT PRIMARY KEY,
+        order_id       TEXT NOT NULL,
+        amount_paise   INTEGER NOT NULL,
+        status         TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
+      );
       CREATE TABLE IF NOT EXISTS mandates (
         transaction_id TEXT NOT NULL,
         mandate_type   TEXT NOT NULL,
@@ -82,6 +90,28 @@ export class Store {
         JSON.stringify(mandate),
         new Date().toISOString(),
       );
+  }
+
+  /**
+   * An authorized order, held between the authorize and settle phases.
+   *
+   * One order per transaction, written once. Re-authorizing would leave two
+   * open orders for one cart, and a later settle could not say which of them the
+   * buyer actually paid.
+   */
+  saveOrder(transactionId: string, order: { order_id: string; amount_paise: number; status: string }): void {
+    this.db
+      .prepare(
+        `INSERT INTO orders (transaction_id, order_id, amount_paise, status, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(transactionId, order.order_id, order.amount_paise, order.status, new Date().toISOString());
+  }
+
+  loadOrder(transactionId: string): { order_id: string; amount_paise: number; status: string } | undefined {
+    return this.db
+      .prepare(`SELECT order_id, amount_paise, status FROM orders WHERE transaction_id = ?`)
+      .get(transactionId) as { order_id: string; amount_paise: number; status: string } | undefined;
   }
 
   loadChain(transactionId: string): MandateChain | undefined {

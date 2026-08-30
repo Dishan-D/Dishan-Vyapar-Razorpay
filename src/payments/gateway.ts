@@ -1,4 +1,5 @@
 import Razorpay from "razorpay";
+import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
 
 export interface OrderRequest {
   /** Razorpay works in currency subunits: ₹1100 is 110000 paise. */
@@ -24,7 +25,18 @@ export interface PaymentResult {
 
 export interface PaymentGateway {
   readonly kind: "razorpay" | "simulated";
+  /**
+   * True when a payment can only come from a real Checkout session in a browser.
+   * Server-side code cannot conjure a payment_id, because there is nothing to
+   * conjure: no card was entered and no UPI collect was approved.
+   */
+  readonly requiresCheckout: boolean;
   createOrder(req: OrderRequest): Promise<OrderResult>;
+  /**
+   * Confirm a Checkout callback really came from the gateway. Present only on
+   * gateways that have a signature to check.
+   */
+  verifyCheckoutSignature?(orderId: string, paymentId: string, signature: string): boolean;
   /**
    * Settle a payment against an order.
    *
@@ -38,14 +50,31 @@ export interface PaymentGateway {
 /** Real Razorpay, test mode. Orders are genuinely created against the API. */
 export class RazorpayGateway implements PaymentGateway {
   readonly kind = "razorpay" as const;
+  readonly requiresCheckout = true;
   private readonly client: Razorpay;
+  private readonly keySecret: string;
 
-  constructor(keyId: string, keySecret: string) {
+  constructor(readonly keyId: string, keySecret: string) {
     if (!keyId.startsWith("rzp_test_")) {
       // A live key here would move real money on a hackathon demo path.
       throw new Error(`Refusing to run with a non-test Razorpay key ("${keyId.slice(0, 12)}…")`);
     }
     this.client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    this.keySecret = keySecret;
+  }
+
+  /**
+   * HMAC-SHA256 of `order_id|payment_id` under the key secret, as Razorpay
+   * Checkout returns it. Checked before the callback is believed at all: the
+   * Payment Mandate is evidence, and signing one from an unverified browser
+   * callback would put the platform's signature on a claim it never confirmed.
+   */
+  verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
+    return validatePaymentVerification(
+      { order_id: orderId, payment_id: paymentId },
+      signature,
+      this.keySecret,
+    );
   }
 
   async createOrder(req: OrderRequest): Promise<OrderResult> {
@@ -94,6 +123,7 @@ export class RazorpayGateway implements PaymentGateway {
  */
 export class SimulatedGateway implements PaymentGateway {
   readonly kind = "simulated" as const;
+  readonly requiresCheckout = false;
   private seq = 0;
 
   async createOrder(req: OrderRequest): Promise<OrderResult> {
@@ -119,4 +149,9 @@ export function gatewayFromEnv(): PaymentGateway {
   const id = process.env.RAZORPAY_KEY_ID;
   const secret = process.env.RAZORPAY_KEY_SECRET;
   return id && secret ? new RazorpayGateway(id, secret) : new SimulatedGateway();
+}
+
+/** The Key ID is publishable — Checkout needs it in the browser. The secret never is. */
+export function publishableKeyId(gateway: PaymentGateway): string | null {
+  return gateway instanceof RazorpayGateway ? gateway.keyId : null;
 }

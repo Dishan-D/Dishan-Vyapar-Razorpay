@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -113,7 +115,19 @@ export async function extractFromFixture(
   };
 }
 
-/** True when a live call is possible: an API key, an auth token, or a CLI profile. */
+/**
+ * True when a live call is possible.
+ *
+ * The SDK resolves credentials in its own order — `ANTHROPIC_API_KEY`, then
+ * `ANTHROPIC_AUTH_TOKEN`, then a profile written by `ant auth login`. Checking
+ * only the env vars would send anyone who authenticated with the CLI down the
+ * fixture path while telling them no credentials exist, so the profile store is
+ * checked too.
+ */
 export function hasCredentials(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return true;
+
+  const configHome =
+    process.env.XDG_CONFIG_HOME ?? (homedir() ? path.join(homedir(), ".config") : undefined);
+  return configHome ? existsSync(path.join(configHome, "anthropic")) : false;
 }

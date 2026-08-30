@@ -15,7 +15,8 @@ import { templateLine } from "../src/negotiation/phrasing.js";
 import { loadPolicies } from "../src/negotiation/policies.js";
 import { runStructuring } from "../src/structuring/run.js";
 import { gatewayFromEnv, type OrderRequest, type OrderResult, type PaymentGateway, type PaymentResult } from "../src/payments/gateway.js";
-import { payForCart, PaymentRefused } from "../src/payments/pay.js";
+import { authorizeCart, payForCart, settlePayment, PaymentRefused } from "../src/payments/pay.js";
+import { createHmac } from "node:crypto";
 
 const g = (s: string) => `\x1b[32m${s}\x1b[0m`;
 const r = (s: string) => `\x1b[31m${s}\x1b[0m`;
@@ -34,8 +35,13 @@ function heading(text: string): void {
 class SpyGateway implements PaymentGateway {
   calls = 0;
   readonly kind: PaymentGateway["kind"];
+  readonly requiresCheckout: boolean;
   constructor(private readonly inner: PaymentGateway) {
     this.kind = inner.kind;
+    this.requiresCheckout = inner.requiresCheckout;
+  }
+  verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
+    return this.inner.verifyCheckoutSignature?.(orderId, paymentId, signature) ?? true;
   }
   async createOrder(req: OrderRequest): Promise<OrderResult> {
     this.calls++;
@@ -44,6 +50,46 @@ class SpyGateway implements PaymentGateway {
   async capturePayment(order: OrderResult, paymentId?: string): Promise<PaymentResult> {
     this.calls++;
     return this.inner.capturePayment(order, paymentId);
+  }
+}
+
+/**
+ * A gateway that behaves like Razorpay does at the Checkout boundary: it will
+ * not settle without a payment id and a signature that verifies as
+ * HMAC-SHA256("<order_id>|<payment_id>") under the key secret.
+ *
+ * This exists because the real Razorpay path cannot be exercised without live
+ * test keys, and the callback-verification code is the most security-sensitive
+ * thing added for it. Untested verification code is worse than none — it looks
+ * like a check.
+ */
+class CheckoutGateway implements PaymentGateway {
+  readonly kind = "razorpay" as const;
+  readonly requiresCheckout = true;
+  private seq = 0;
+  constructor(private readonly secret: string) {}
+
+  async createOrder(req: OrderRequest): Promise<OrderResult> {
+    this.seq++;
+    return {
+      order_id: `order_TEST${String(this.seq).padStart(4, "0")}`,
+      amount_paise: req.amount_paise,
+      status: "created",
+    };
+  }
+
+  verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
+    const expected = createHmac("sha256", this.secret).update(`${orderId}|${paymentId}`).digest("hex");
+    return expected === signature;
+  }
+
+  async capturePayment(order: OrderResult, paymentId?: string): Promise<PaymentResult> {
+    return {
+      payment_id: paymentId ?? "pay_TESTmissing",
+      order_id: order.order_id,
+      amount_paise: order.amount_paise,
+      status: "captured",
+    };
   }
 }
 
@@ -178,15 +224,62 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── The Checkout callback boundary ────────────────────────────────────────
+  heading("Gate: a Checkout callback is not believed until it verifies");
+  const secret = "test_secret_not_a_real_key";
+  const checkout = new CheckoutGateway(secret);
+  const coChain = structuredClone(chain);
+  delete coChain.payment;
+  const order = await authorizeCart(coChain, item, keyring, checkout);
+  console.log(`  ${dim("authorized order")} ${order.order_id} ${dim("— no payment mandate issued yet")}`);
+
+  const goodSig = createHmac("sha256", secret).update(`${order.order_id}|pay_TEST0001`).digest("hex");
+  const callbacks: Array<[string, { razorpay_payment_id: string; razorpay_signature?: string }, boolean]> = [
+    ["no signature at all", { razorpay_payment_id: "pay_TEST0001" }, false],
+    ["a forged signature", { razorpay_payment_id: "pay_TEST0001", razorpay_signature: "0".repeat(64) }, false],
+    [
+      "a signature for a different payment",
+      {
+        razorpay_payment_id: "pay_TEST9999",
+        razorpay_signature: goodSig,
+      },
+      false,
+    ],
+    ["the genuine callback", { razorpay_payment_id: "pay_TEST0001", razorpay_signature: goodSig }, true],
+  ];
+
+  let checkoutOk = 0;
+  for (const [name, callback, shouldPass] of callbacks) {
+    try {
+      const settled = await settlePayment(coChain, item, keyring, checkout, order, callback);
+      if (shouldPass) {
+        checkoutOk++;
+        console.log(`  ${g("✅ settled ")}  ${name} ${dim(`→ ${settled.payment_id}`)}`);
+      } else {
+        console.log(`  ${r("❌ SETTLED")}  ${name} ${r("— an unverified callback was believed")}`);
+      }
+    } catch (err) {
+      if (!(err instanceof PaymentRefused)) throw err;
+      if (shouldPass) {
+        console.log(`  ${r("❌ refused")}  ${name} ${r(err.reasons[0] ?? "")}`);
+      } else {
+        checkoutOk++;
+        console.log(`  ${g("✅ refused")}  ${name}`);
+        console.log(`     ${dim(err.reasons[0] ?? "")}`);
+      }
+    }
+  }
+
   heading("Milestone D — definition of done");
   console.log(`  ${chainOk ? g("✅") : r("❌")} 3-mandate chain verifies under Milestone A's logic`);
   console.log(`  ${caught === checks.length ? g("✅") : r("❌")} tampered carts refused before any API call: ${caught}/${checks.length}`);
+  console.log(`  ${checkoutOk === callbacks.length ? g("✅") : r("❌")} checkout callbacks: ${checkoutOk}/${callbacks.length} handled correctly`);
   if (gateway.kind === "simulated") {
     console.log(`  ${y("⚠")}  order and payment ids are simulated — set Razorpay test keys for real ones`);
   }
   console.log();
 
-  if (!chainOk || caught !== checks.length) process.exitCode = 1;
+  if (!chainOk || caught !== checks.length || checkoutOk !== callbacks.length) process.exitCode = 1;
 }
 
 main().catch((err) => {

@@ -49,9 +49,16 @@ test-mode API.
 |---|---|---|
 | `GET /catalog` | 1 | the agent-readable catalog, held items marked with why |
 | `POST /discover` | 2 | deterministic filtered search |
-| `POST /transactions` | 2–5 | find → haggle → sign → pay, returns the negotiation log |
+| `POST /transactions` | 2–5a | find → haggle → sign → authorize an order, returns the negotiation log |
+| `POST /transactions/:id/settle-payment` | 5b | verifies a Razorpay Checkout callback, then issues the Payment Mandate |
 | `POST /transactions/:id/confirm-fulfillment` | 6 | merchant signs that the goods changed hands |
 | `GET /transactions/:id/audit` | 7 | the full chain, re-verified at read time |
+| `GET /config` | — | gateway kind and the publishable Razorpay Key ID, for Checkout |
+
+On the simulated gateway `POST /transactions` settles immediately, since there
+is no browser step to wait for. With real keys it stops at `awaiting_payment`
+and the UI opens Razorpay Checkout; a `payment_id` only exists once someone
+actually pays, so the transaction waits rather than inventing one.
 
 ## How the chain works
 
@@ -105,5 +112,56 @@ to real test-mode orders with no code change — see
 
 ## What broke, and how I got out
 
-<!-- TODO: write this from what actually happens while building B–F. It gets read
-     first, and a clean story reads as fabricated. Keep the awkward middle. -->
+> Draft, from the build log — rewrite it in your own voice before submitting.
+
+I built the pipeline bottom-up and had the negotiation stage passing all four of
+its test cases: instant accept, converge-within-max-rounds, buyer walks away, and
+rounds-exhausted no-deal. Green across the board. Then I wired up the demo UI and
+clicked the "no deal" button, and instead of a no-deal I got a `402 payment
+refused` — a *payment* error on a path that was never supposed to reach payment.
+
+The refusal reason said the item's category was `home.towel`, outside the intent's
+`apparel`. The buyer-agent had asked for a blue cotton saree and been offered a
+**towel set**. Discovery matched anything sharing one query term, and "cotton" was
+enough. So the real chain of events was: bad match → a full three-round
+negotiation over the wrong product → refused at the payment gate on a category
+check. The gate did its job. But finding out at the till that you have been
+haggling over towels is not a system working correctly, it's a system being saved
+by its last line of defence.
+
+Two fixes were obvious — require a match to cover at least half the query, and
+apply the Intent Mandate's category constraint at discovery instead of only at
+payment. The third took longer to see. I had also written discovery to exclude
+anything priced above the buyer's ceiling, which is exactly right for a catalog
+with fixed prices and exactly wrong for this project: here the list price is an
+opening ask, and an item above the ceiling is *precisely* the case negotiation
+exists to resolve. I had imported an assumption from the world this project is
+arguing against.
+
+What actually convinced me was noticing the filter made a genuine `no_deal`
+unreachable. If discovery only ever returns items whose list price is under the
+buyer's ceiling, and the merchant's floor is by definition at or below the list
+price, then the ceiling always sits above the floor and a deal is always
+findable. My no-deal test case had been passing only because it called the
+negotiation engine directly, bypassing discovery. The test was green and the
+system was wrong.
+
+The lesson I took: the tests I had written all exercised one stage at a time, and
+every one of these bugs lived in the seam between two stages. The UI was the first
+thing that made the pipeline run end to end, and it found three bugs in the first
+click.
+
+### Two smaller ones, for the record
+
+**The audit trail disagreed with itself.** The negotiation's no-deal reason
+quoted the buyer's best offer as ₹888 — a number appearing nowhere in the log the
+reason was attached to. The loop advanced the offer after its final round and
+exited without logging it. Harmless-looking, and completely corrosive to a
+project whose whole claim is that the log is evidence.
+
+**A gate I tested without testing.** My tamper test for "cart exceeds the buyer's
+authorization" mutated a signed cart, so it was refused for a bad signature and
+the authorization check never actually ran. It passed for the wrong reason. The
+fix was to build a *validly signed* cart that simply asks for too much — which is
+the real threat model anyway, since a merchant and a buyer-agent can both sign
+something the buyer was never authorized to agree to.

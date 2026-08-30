@@ -97,6 +97,13 @@ async function main(): Promise<void> {
     console.log(`     ${g("✅")} intent mandate   ${dim("what the buyer-agent was authorized to do")}`);
     console.log(`     ${g("✅")} cart mandate     ${dim("merchant signs, buyer-agent countersigns")}`);
     console.log(`     ${g("✅")} order  ${bold(deal.order_id)}`);
+    if (deal.status === "awaiting_payment") {
+      // Real Razorpay: a payment_id only exists once someone pays in a browser.
+      console.log(`     ${y("⏸")}  awaiting payment through Razorpay Checkout`);
+      console.log(`     ${dim("Run the browser demo (npm run serve) to complete this one — the CLI")}`);
+      console.log(`     ${dim("cannot produce a payment_id, and will not pretend to.")}\n`);
+      return;
+    }
     console.log(`     ${g("✅")} payment ${bold(deal.payment_id)}${deal.gateway === "simulated" ? dim("  (simulated gateway)") : ""}`);
     console.log(`     ${dim("Signatures are verified before the payment API is called, not after.")}`);
     await beat();

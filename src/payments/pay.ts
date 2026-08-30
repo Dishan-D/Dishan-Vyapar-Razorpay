@@ -2,7 +2,7 @@ import type { Keyring } from "../mandates/keys.js";
 import { buildPaymentMandate, verifyChain, type MandateChain } from "../mandates/chain.js";
 import { mandateHash } from "../mandates/sign.js";
 import type { CartMandate, CatalogItem, IntentMandate, PaymentMandate } from "../mandates/schema.js";
-import type { PaymentGateway } from "./gateway.js";
+import type { OrderResult, PaymentGateway } from "./gateway.js";
 
 export class PaymentRefused extends Error {
   constructor(readonly reasons: string[]) {
@@ -83,33 +83,33 @@ function preflight(
 }
 
 /**
- * Stage 5 — pay for a signed cart.
+ * Stage 5a — authorize a signed cart and open an order.
  *
  * The ordering here is the whole point, and it is deliberately not a matter of
  * remembering to check first: verification happens, and only its result decides
  * whether `gateway` is ever called. Nothing above the throw touches the network.
+ *
+ * No Payment Mandate is issued here. An order is a request to be paid, not a
+ * payment — signing a mandate at this point would assert a capture that has not
+ * happened.
  */
-export async function payForCart(
+export async function authorizeCart(
   chain: MandateChain,
   item: CatalogItem,
   keyring: Keyring,
   gateway: PaymentGateway,
-  opts: { paymentId?: string; now?: Date } = {},
-): Promise<PayResult> {
-  const now = opts.now ?? new Date();
-
-  // Gate — verify signatures and hash links across everything issued so far.
+  opts: { now?: Date } = {},
+): Promise<OrderResult> {
   const report = await verifyChain(chain, keyring);
-  const reasons = preflight(chain, item, report, now);
+  const reasons = preflight(chain, item, report, opts.now ?? new Date());
   if (reasons.length > 0) throw new PaymentRefused(reasons);
 
   const cart = chain.cart as CartMandate;
   const intent = chain.intent as IntentMandate;
 
   // Past this line the mandate is trusted, and only now does the gateway appear.
-  const amountPaise = toPaise(cart.final_price.value);
-  const order = await gateway.createOrder({
-    amount_paise: amountPaise,
+  return gateway.createOrder({
+    amount_paise: toPaise(cart.final_price.value),
     currency: "INR",
     receipt: chain.transaction_id,
     notes: {
@@ -119,12 +119,73 @@ export async function payForCart(
       cart_mandate_hash: mandateHash(cart),
     },
   });
+}
 
-  const settled = await gateway.capturePayment(order, opts.paymentId);
+export interface CheckoutCallback {
+  razorpay_payment_id: string;
+  razorpay_signature?: string;
+}
+
+/**
+ * Stage 5b — settle a payment against an authorized order and issue the mandate.
+ *
+ * The whole gate runs again rather than trusting that authorizeCart already
+ * passed. In a two-phase flow the chain can be swapped between the calls, and
+ * "we checked a moment ago" is not a property of the object in front of us.
+ *
+ * On a gateway that requires Checkout, the browser's callback is verified before
+ * any of it is believed. An unsigned or badly signed callback is refused rather
+ * than trusted, because everything downstream of here gets the platform's
+ * signature on it.
+ */
+export async function settlePayment(
+  chain: MandateChain,
+  item: CatalogItem,
+  keyring: Keyring,
+  gateway: PaymentGateway,
+  order: OrderResult,
+  callback: CheckoutCallback | undefined,
+  opts: { now?: Date } = {},
+): Promise<PayResult> {
+  const report = await verifyChain(chain, keyring);
+  const reasons = preflight(chain, item, report, opts.now ?? new Date());
+  if (reasons.length > 0) throw new PaymentRefused(reasons);
+
+  const cart = chain.cart as CartMandate;
+  const amountPaise = toPaise(cart.final_price.value);
+
+  if (order.amount_paise !== amountPaise) {
+    throw new PaymentRefused([
+      `order ${order.order_id} is for ${order.amount_paise} paise but the cart says ${amountPaise}`,
+    ]);
+  }
+
+  if (gateway.requiresCheckout) {
+    if (!callback?.razorpay_payment_id || !callback.razorpay_signature) {
+      throw new PaymentRefused([
+        "this gateway settles only through Razorpay Checkout — a payment id and its signature are required",
+      ]);
+    }
+    const genuine = gateway.verifyCheckoutSignature?.(
+      order.order_id,
+      callback.razorpay_payment_id,
+      callback.razorpay_signature,
+    );
+    if (!genuine) {
+      throw new PaymentRefused(["Razorpay checkout signature did not verify"]);
+    }
+  }
+
+  const settled = await gateway.capturePayment(order, callback?.razorpay_payment_id);
 
   if (settled.amount_paise !== amountPaise) {
     throw new PaymentRefused([
       `gateway settled ${settled.amount_paise} paise against a cart for ${amountPaise}`,
+    ]);
+  }
+  if (settled.order_id !== order.order_id) {
+    throw new PaymentRefused([
+      `gateway settled against order ${settled.order_id}, not the authorized ${order.order_id}`,
     ]);
   }
 
@@ -141,4 +202,20 @@ export async function payForCart(
   );
 
   return { payment, order_id: settled.order_id, payment_id: settled.payment_id, gateway: gateway.kind };
+}
+
+/**
+ * Both phases in one call — only usable on a gateway that does not require a
+ * browser Checkout. The CLI walkthrough and the milestone scripts use this.
+ */
+export async function payForCart(
+  chain: MandateChain,
+  item: CatalogItem,
+  keyring: Keyring,
+  gateway: PaymentGateway,
+  opts: { paymentId?: string; now?: Date } = {},
+): Promise<PayResult> {
+  const order = await authorizeCart(chain, item, keyring, gateway, opts);
+  const callback = opts.paymentId ? { razorpay_payment_id: opts.paymentId } : undefined;
+  return settlePayment(chain, item, keyring, gateway, order, callback, opts);
 }
