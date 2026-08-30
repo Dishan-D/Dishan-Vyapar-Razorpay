@@ -222,6 +222,22 @@
       "stock_quantity": null,
       "stock_confidence": 0.2,
       "notes": "No price set — 'rate innum pakka pannala', son will decide. Quantity only 'konjam' (a little), not a count."
+    },
+    "amma_phone_case": {
+      "name": "Black Silicone Phone Case",
+      "name_confidence": 0.92,
+      "category": "mobile.case",
+      "category_confidence": 0.93,
+      "attributes": {
+        "material": "silicone",
+        "color": "black"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 265,
+      "price_confidence": 0.92,
+      "stock_quantity": 12,
+      "stock_confidence": 0.89,
+      "notes": "Price and count stated plainly ('265 rupees', 'panneendu' = twelve)."
     }
   }
 }

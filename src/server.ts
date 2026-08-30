@@ -4,6 +4,8 @@ import { createServer, type Server as HttpServer } from "node:http";
 import { Server as IOServer } from "socket.io";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { buildCommerceHistory } from "./audit/history.js";
+import { readinessScore } from "./marketplace/readiness.js";
+import { compareMerchants } from "./marketplace/compare.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
@@ -488,6 +490,90 @@ export async function createApp(options: AppOptions = {}) {
     });
   });
 
+  /** Fulfillment record straight from the chains — the readiness score's third component. */
+  function fulfillmentRecord(merchantId: string): { confirmed: number; paid: number } {
+    let confirmed = 0;
+    let paid = 0;
+    for (const id of store.listTransactionIdsForMerchant(merchantId)) {
+      const chain = store.loadChain(id);
+      if (!chain?.payment) continue;
+      paid++;
+      if (chain.fulfillment) confirmed++;
+    }
+    return { confirmed, paid };
+  }
+
+  const readinessFor = (merchantId: string) =>
+    readinessScore(merchantId, catalogItems, structuring.policies, fulfillmentRecord(merchantId));
+
+  app.get("/merchants/:id/readiness", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    res.json(readinessFor(id));
+  });
+
+  /**
+   * Milestone J.2 — one intent, every merchant, one justified choice.
+   * The losing offers come back too: a comparison you cannot inspect is
+   * indistinguishable from a preference.
+   */
+  app.post("/marketplace/compare", (req: Request, res: Response) => {
+    const {
+      want,
+      max_price = 1000,
+      opening_offer = Math.round(Number(max_price) * 0.6),
+      buyer_agent_id = "agent_xyz",
+    } = req.body ?? {};
+
+    if (typeof want !== "string" || want.trim() === "") {
+      res.status(400).json({ error: "`want` is required" });
+      return;
+    }
+
+    const views = structuring.merchants.map((m) => ({
+      merchant_id: m.merchant_id,
+      name: m.name,
+      readiness: readinessFor(m.merchant_id),
+    }));
+
+    const result = compareMerchants(
+      want,
+      { buyer_agent_id, max_price: Number(max_price), opening_offer: Number(opening_offer) },
+      views,
+      catalogItems,
+      policies,
+    );
+
+    for (const offer of result.offers) {
+      bus.emit({
+        type: offer.eligible ? "negotiation.agreed" : "negotiation.no_deal",
+        merchant_id: offer.merchant_id,
+        item_id: offer.item_id,
+        message: `${offer.merchant_name}: ${offer.note}`,
+        data: {
+          final_price: offer.final_price,
+          effective_price: offer.effective_price,
+          readiness: offer.readiness.score,
+          comparison: true,
+        },
+      });
+    }
+    if (result.selected) {
+      bus.emit({
+        type: "discovery.queried",
+        merchant_id: result.selected.merchant_id,
+        item_id: result.selected.item_id,
+        message: `Selected ${result.selected.merchant_name} — ${result.reasoning[result.reasoning.length - 1]}`,
+        data: { selected: true },
+      });
+    }
+
+    res.json(result);
+  });
+
   /**
    * Milestone H — the merchant's verifiable trading record, signed.
    * Not a lending product; a repackaging of what the chains already prove.
@@ -519,6 +605,7 @@ export async function createApp(options: AppOptions = {}) {
         ...m,
         items: catalogItems.filter((i) => i.merchant_id === m.merchant_id).length,
         held: catalogItems.filter((i) => i.merchant_id === m.merchant_id && i.needs_merchant_confirmation).length,
+        readiness: readinessFor(m.merchant_id),
       })),
     });
   });
