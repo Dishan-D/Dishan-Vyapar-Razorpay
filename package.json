@@ -14,7 +14,8 @@
     "serve": "tsx --env-file-if-exists=.env src/server.ts",
     "demo": "tsx --env-file-if-exists=.env scripts/demo.ts",
     "milestone-g": "tsx --env-file-if-exists=.env scripts/milestone-g.ts",
-    "milestone-l": "tsx --env-file-if-exists=.env scripts/milestone-l.ts"
+    "milestone-l": "tsx --env-file-if-exists=.env scripts/milestone-l.ts",
+    "milestone-h": "tsx --env-file-if-exists=.env scripts/milestone-h.ts"
   },
   "engines": {
     "node": ">=20"

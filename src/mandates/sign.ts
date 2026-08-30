@@ -135,3 +135,63 @@ export function mandateHash(mandate: Mandate): Sha256Ref {
 export function signatureFieldsFor(type: MandateType): readonly string[] {
   return (SIGNATURE_ORDER[type] as ReadonlyArray<{ field: string }>).map((s) => s.field);
 }
+
+
+// ── Signed documents that are not mandates ───────────────────────────────────
+
+/**
+ * Sign an arbitrary document with one role's key.
+ *
+ * The Verified Commerce History (Addendum H) is not a mandate — it makes no
+ * claim about consent — but it is handed to third parties, so it needs the same
+ * property: checkable by someone who does not trust whoever handed it over.
+ * Same canonical bytes, same ES256, same verification rule that the signature
+ * must cover exactly the document in front of you.
+ */
+export async function signDocument<T extends Record<string, unknown>>(
+  document: T,
+  keyring: Keyring,
+  role: Role,
+  signatureField = "signature",
+): Promise<T & Record<string, string>> {
+  const { privateKey, kid } = keyring.get(role);
+  const jws = await new CompactSign(enc.encode(canonicalize(document)))
+    .setProtectedHeader({ alg: "ES256", kid, typ: "application/report+jws" })
+    .sign(privateKey);
+  return { ...document, [signatureField]: jws } as T & Record<string, string>;
+}
+
+export async function verifyDocument(
+  document: Record<string, unknown>,
+  keyring: Keyring,
+  role: Role,
+  signatureField = "signature",
+): Promise<SignatureCheck> {
+  const jws = document[signatureField] as CompactJws | undefined;
+  if (!jws) return { field: signatureField, role, ok: false, reason: "signature missing" };
+
+  const { publicKey, kid } = keyring.get(role);
+  try {
+    const { payload, protectedHeader } = await compactVerify(jws, publicKey);
+    if (protectedHeader.kid !== kid) {
+      return { field: signatureField, role, ok: false, reason: `signed by kid "${protectedHeader.kid}"` };
+    }
+    const expected = canonicalize(omit(document, [signatureField]));
+    if (dec.decode(payload) !== expected) {
+      return {
+        field: signatureField,
+        role,
+        ok: false,
+        reason: "signature is valid but covers different content — the report was altered after signing",
+      };
+    }
+    return { field: signatureField, role, ok: true };
+  } catch (err) {
+    return {
+      field: signatureField,
+      role,
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

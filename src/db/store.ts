@@ -183,6 +183,15 @@ export class Store {
     return chain;
   }
 
+  /** Every transaction a merchant was party to. */
+  listTransactionIdsForMerchant(merchantId: string): string[] {
+    return (
+      this.db
+        .prepare(`SELECT transaction_id FROM transactions WHERE merchant_id = ? ORDER BY created_at`)
+        .all(merchantId) as Array<{ transaction_id: string }>
+    ).map((r) => r.transaction_id);
+  }
+
   listTransactions(): Array<{ transaction_id: string; item_id: string; created_at: string; stages: number }> {
     return this.db
       .prepare(

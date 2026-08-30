@@ -3,6 +3,7 @@ import path from "node:path";
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server as IOServer } from "socket.io";
 import { buildAuditBundle } from "./audit/bundle.js";
+import { buildCommerceHistory } from "./audit/history.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
@@ -485,6 +486,31 @@ export async function createApp(options: AppOptions = {}) {
         limit: Number(req.query.limit ?? 100),
       }),
     });
+  });
+
+  /**
+   * Milestone H — the merchant's verifiable trading record, signed.
+   * Not a lending product; a repackaging of what the chains already prove.
+   */
+  app.get("/merchants/:id/commerce-history", async (req: Request, res: Response) => {
+    const merchantId = String(req.params.id);
+    const merchant = merchants.get(merchantId);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${merchantId}` });
+      return;
+    }
+
+    const chains = store
+      .listTransactionIdsForMerchant(merchantId)
+      .map((id) => store.loadChain(id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    const from = typeof req.query.from === "string" ? req.query.from : "1970-01-01";
+    const to = typeof req.query.to === "string" ? req.query.to : new Date().toISOString().slice(0, 10);
+
+    res.json(
+      await buildCommerceHistory(merchant, chains, structuring.policies, keyring, { from, to }),
+    );
   });
 
   app.get("/merchants", (_req, res) => {
