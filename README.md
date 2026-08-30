@@ -37,11 +37,21 @@ npm run serve         # API + demo UI on http://localhost:3000
 npm run demo          # the same walkthrough in the terminal, for recording
 ```
 
-None of them need an API key or Razorpay credentials to run. With
-`ANTHROPIC_API_KEY` set, `milestone-b -- --live` runs the real extraction and
-`milestone-c -- --live` lets Claude phrase the haggle. With
-`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` set, orders are created against the real
-test-mode API.
+None of them need an API key or Razorpay credentials to run.
+
+Credentials, when you have them, go in `.env` (copy `.env.example`). Every script
+loads it via `--env-file-if-exists`, so there is nothing to export and nothing
+breaks when the file is absent:
+
+- `ANTHROPIC_API_KEY` — `milestone-b -- --live` runs the real extraction,
+  `milestone-c -- --live` lets Claude phrase the haggle.
+- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` — orders are created against the real
+  test-mode API and the UI settles them through Razorpay Checkout. Confirm it
+  took: `curl localhost:3000/config` should say `"gateway":"razorpay"`.
+
+With real Razorpay keys the CLI walkthrough stops at `awaiting_payment` and says
+so — a `payment_id` only exists once someone pays in a browser, so the full path
+runs in the UI. See [docs/RAZORPAY_SETUP.md](docs/RAZORPAY_SETUP.md).
 
 ## API
 
