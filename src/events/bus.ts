@@ -28,6 +28,9 @@ export interface VyaparEvent {
 
 const BUFFER = 500;
 
+/** Sockets watching the whole market rather than one merchant or transaction. */
+export const ROOM_ALL = "all";
+
 /**
  * A publish layer over state changes that already happen.
  *
@@ -57,10 +60,14 @@ export class EventBus {
     for (const l of this.listeners) l(full);
 
     if (this.io) {
-      // Everyone watching the whole market, plus the two rooms that care.
-      this.io.emit("event", full);
-      if (full.transaction_id) this.io.to(`txn:${full.transaction_id}`).emit("event", full);
-      if (full.merchant_id) this.io.to(`merchant:${full.merchant_id}`).emit("event", full);
+      // One emit across every room that should see it. Socket.io delivers once
+      // per socket even when it is in several of these rooms — emitting to a
+      // broadcast *and* to the rooms separately, as an earlier version did,
+      // delivered every event twice to anyone watching a specific merchant.
+      const rooms = [ROOM_ALL];
+      if (full.transaction_id) rooms.push(`txn:${full.transaction_id}`);
+      if (full.merchant_id) rooms.push(`merchant:${full.merchant_id}`);
+      this.io.to(rooms).emit("event", full);
     }
 
     return full;

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shopper · Vyapar-to-Agent</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .wrap { max-width:820px; margin:0 auto; padding:20px 24px 60px; display:grid; gap:16px; }
+  .ask { display:grid; grid-template-columns:1fr 130px 130px auto; gap:10px; align-items:end; }
+  @media (max-width:760px){ .ask { grid-template-columns:1fr; } }
+  .thread { display:grid; gap:10px; }
+  .msg { max-width:88%; padding:10px 13px; border-radius:13px; font-size:14px; line-height:1.5; }
+  .msg.agent { background:var(--card2); border:1px solid var(--line2); border-bottom-left-radius:4px; }
+  .msg.think { background:transparent; border:1px dashed var(--line2); color:var(--mid); font-size:13px; }
+  .msg.me { background:#16324a; border:1px solid #24507a; margin-left:auto; border-bottom-right-radius:4px; }
+  .msg .why { color:var(--dim); font-size:12px; margin-top:4px; }
+  .offers { display:grid; gap:10px; margin-top:4px; }
+  .offer { border:1px solid var(--line2); border-radius:11px; padding:12px; }
+  .offer.win { border-color:#255c3c; background:#10251a; }
+  .offer h4 { margin:0 0 2px; font-size:14px; }
+  .offer .row { display:flex; justify-content:space-between; gap:10px; font-size:13px; }
+  .offer .rd { color:var(--dim); font-size:12px; }
+  .turns { margin-top:8px; display:grid; gap:3px; }
+  .turns div { font-size:12px; color:var(--mid); font-family:var(--mono); }
+  .verdict { font-size:13px; color:#9fe9be; margin-top:8px; }
+  .typing { color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Vyapar-to-Agent</span>
+  <nav class="tabs">
+    <a href="/">Shop</a>
+    <a href="/merchant.html">Merchant</a>
+    <a href="/shopper.html" class="on">Shopper</a>
+    <a href="/market.html">Market</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="pill" id="conn">connecting…</span>
+</header>
+
+<div class="wrap">
+  <section>
+    <h2>Tell the buyer-agent what you want</h2>
+    <div class="ask">
+      <div><label for="want">What are you after?</label><input id="want" value="silicone phone case" /></div>
+      <div><label for="max">Most you'll pay</label><input id="max" type="number" value="320" /></div>
+      <div><label for="open">Open at</label><input id="open" type="number" value="220" /></div>
+      <button class="cta" id="go">Send it shopping</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>The agent's thinking</h2>
+    <div class="thread" id="thread"><p class="empty">Nothing yet.</p></div>
+  </section>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const api = async (p, o) => {
+  const res = await fetch(p, { ...o, headers: { "content-type": "application/json", ...(o?.headers ?? {}) } });
+  return { status: res.status, body: await res.json() };
+};
+
+const thread = $("thread");
+let first = true;
+function say(kind, html) {
+  if (first) { thread.innerHTML = ""; first = false; }
+  const el = document.createElement("div");
+  el.className = `msg ${kind}`;
+  el.innerHTML = html;
+  thread.appendChild(el);
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return el;
+}
+
+/**
+ * The agent narrates as it goes. Each line is a real step it took — the pauses
+ * exist so a viewer can follow the reasoning, not to fake work that isn't happening.
+ */
+async function shop() {
+  thread.innerHTML = "";
+  first = true;
+  $("go").disabled = true;
+
+  const want = $("want").value;
+  const max_price = Number($("max").value);
+  const opening_offer = Number($("open").value);
+
+  say("me", `${esc(want)} — up to ${rupee(max_price)}.`);
+  await sleep(400);
+
+  const thinking = say("think", "Looking for shops that stock it…");
+  const { body: cmp } = await api("/marketplace/compare", {
+    method: "POST",
+    body: JSON.stringify({ want, max_price, opening_offer }),
+  });
+
+  if (cmp.offers.length === 0) {
+    thinking.remove();
+    say("agent", "Nobody I can reach stocks that right now.");
+    $("go").disabled = false;
+    return;
+  }
+
+  thinking.textContent = `Found ${cmp.offers.length} shop(s). Haggling with each, separately.`;
+  await sleep(600);
+
+  const cards = cmp.offers.map((o) => {
+    const win = cmp.selected?.merchant_id === o.merchant_id;
+    return `<div class="offer${win ? " win" : ""}">
+      <div class="row"><h4>${esc(o.merchant_name)}</h4><span class="rd">readiness ${o.readiness.score}/100</span></div>
+      <div class="rd">${esc(o.item_name)} · list ${rupee(o.list_price)}</div>
+      <div class="turns">${o.outcome.log.map((t) => `<div>r${t.round} ${t.actor === "buyer" ? "me" : "them"} ${t.amount ? rupee(t.amount) : "—"} <span style="opacity:.6">${esc(t.rationale)}</span></div>`).join("")}</div>
+      <div class="row" style="margin-top:8px">
+        <strong>${o.eligible ? rupee(o.final_price) : "no deal"}</strong>
+        <span class="rd">${o.eligible ? `${rupee(o.effective_price)} once I price in their record` : esc(o.note)}</span>
+      </div>
+    </div>`;
+  }).join("");
+
+  say("agent", `<div class="offers">${cards}</div>`);
+  await sleep(500);
+
+  say("agent", cmp.reasoning.map((line) => `<div class="verdict">${esc(line)}</div>`).join(""));
+
+  if (cmp.selected) {
+    await sleep(400);
+    say("think", `Buying from ${esc(cmp.selected.merchant_name)}…`);
+    const { status, body } = await api("/transactions", {
+      method: "POST",
+      body: JSON.stringify({ want: cmp.selected.item_name, max_price, opening_offer }),
+    });
+    if (status === 201) {
+      say("agent",
+        body.status === "awaiting_payment"
+          ? `Order <span class="mono">${esc(body.order_id)}</span> opened for ${rupee(body.final_price)} — waiting on Razorpay Checkout.<div class="why">A payment id only exists once someone actually pays.</div>`
+          : `Paid ${rupee(body.final_price)}. <span class="mono">${esc(body.payment_id)}</span><div class="why">Signed chain: <a href="/transactions/${body.transaction_id}/audit" target="_blank">audit it</a></div>`);
+    } else {
+      say("agent", `Couldn't complete: ${esc(body.error ?? body.reason ?? "unknown")}`);
+    }
+  }
+
+  $("go").disabled = false;
+}
+
+$("go").onclick = shop;
+
+const socket = io();
+socket.on("connect", () => { $("conn").textContent = "live"; $("conn").className = "pill live"; });
+socket.on("disconnect", () => { $("conn").textContent = "offline"; $("conn").className = "pill warn"; });
+</script>
+</body>
+</html>

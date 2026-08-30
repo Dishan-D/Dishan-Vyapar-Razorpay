@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Merchant Dashboard · Vyapar-to-Agent</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .wrap { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:16px;
+          padding:20px 24px 60px; max-width:1500px; margin:0 auto; align-items:start; }
+  @media (max-width:1040px){ .wrap { grid-template-columns:1fr; } }
+  .col { display:grid; gap:16px; min-width:0; }
+  .item { display:grid; grid-template-columns:52px 1fr auto; gap:12px; align-items:center; padding:9px 0; }
+  .item + .item { border-top:1px solid #21262f; }
+  .thumb { width:52px; height:52px; border-radius:8px; object-fit:cover; background:#0b0d11; border:1px solid var(--line); }
+  .thumb.ph { display:grid; place-items:center; color:var(--dim); font-size:9px; text-align:center; }
+  .nm { font-weight:600; font-size:14px; }
+  .sub { color:var(--dim); font-size:12px; }
+  .price { font-family:var(--mono); font-size:13px; text-align:right; white-space:nowrap; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; }
+  .dot.live { background:var(--ok); } .dot.held { background:var(--bad); }
+  .ask { border:1px solid #5d4a26; background:#241f10; border-radius:10px; padding:12px; margin-bottom:10px; }
+  .ask p { margin:0 0 10px; font-size:13.5px; color:#f0d493; }
+  .askrow { display:flex; gap:8px; flex-wrap:wrap; }
+  .askrow input { width:110px; }
+  .hist { display:grid; grid-template-columns:1fr auto; gap:6px 14px; font-size:13px; }
+  .hist dt { color:var(--dim); }
+  .hist dd { margin:0; font-family:var(--mono); text-align:right; }
+  .qr { display:flex; gap:14px; align-items:center; }
+  .qr img { width:104px; height:104px; border-radius:9px; background:#fff; padding:5px; }
+  .ticker { max-height:420px; overflow-y:auto; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Vyapar-to-Agent</span>
+  <nav class="tabs">
+    <a href="/">Shop</a>
+    <a href="/merchant.html" class="on">Merchant</a>
+    <a href="/shopper.html">Shopper</a>
+    <a href="/market.html">Market</a>
+  </nav>
+  <span class="spacer"></span>
+  <select id="pick" style="width:auto"></select>
+  <span class="pill" id="conn">connecting…</span>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <section>
+      <h2>Questions waiting on you</h2>
+      <div id="asks"><p class="empty">Nothing to confirm — everything you sent was clear.</p></div>
+    </section>
+
+    <section>
+      <h2>Your catalog, as an agent sees it</h2>
+      <div id="items"><p class="empty">loading…</p></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section>
+      <h2>Agent Readiness</h2>
+      <div id="score"><p class="empty">loading…</p></div>
+    </section>
+
+    <section>
+      <h2>Verified Commerce History</h2>
+      <div id="history"><p class="empty">loading…</p></div>
+    </section>
+
+    <section>
+      <h2>Live</h2>
+      <div class="ticker" id="ticker"><p class="empty">Waiting for something to happen…</p></div>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
+const time = (iso) => new Date(iso).toLocaleTimeString([], { hour12: false });
+
+const api = async (p, o) => {
+  const res = await fetch(p, { ...o, headers: { "content-type": "application/json", ...(o?.headers ?? {}) } });
+  return { status: res.status, body: await res.json() };
+};
+
+let merchantId = new URLSearchParams(location.search).get("m");
+let socket = null;
+
+// ── merchant picker ─────────────────────────────────────────────────────────
+async function loadMerchants() {
+  const { body } = await api("/merchants");
+  if (!merchantId) merchantId = body.merchants[0]?.merchant_id;
+  $("pick").innerHTML = body.merchants
+    .map((m) => `<option value="${m.merchant_id}"${m.merchant_id === merchantId ? " selected" : ""}>${esc(m.name)} · ${esc(m.city)}</option>`)
+    .join("");
+  $("pick").onchange = () => { location.search = `?m=${$("pick").value}`; };
+}
+
+// ── catalog ─────────────────────────────────────────────────────────────────
+async function loadCatalog() {
+  const { body } = await api("/catalog");
+  const mine = body.items.filter((i) => i.merchant_id === merchantId);
+  $("items").innerHTML = mine.map((i) => {
+    const thumb = i.photo_url
+      ? `<img class="thumb" src="${i.photo_url}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'voice only'}))" />`
+      : `<div class="thumb ph">voice<br>only</div>`;
+    return `<div class="item">
+      ${thumb}
+      <div>
+        <div class="nm"><span class="dot ${i.transactable ? "live" : "held"}"></span>${esc(i.name)}</div>
+        <div class="sub">${i.transactable ? "agent can buy this" : esc(i.held_because.join("; "))}</div>
+      </div>
+      <div class="price">${i.price.confidence === 0 ? "—" : rupee(i.price.value)}</div>
+    </div>`;
+  }).join("") || `<p class="empty">No items.</p>`;
+}
+
+// ── clarifications ──────────────────────────────────────────────────────────
+async function loadAsks() {
+  const { body } = await api(`/clarifications?merchant_id=${merchantId}`);
+  const open = body.clarifications.filter((c) => c.status === "open");
+  if (open.length === 0) {
+    $("asks").innerHTML = `<p class="empty">Nothing to confirm right now.</p>`;
+    return;
+  }
+  $("asks").innerHTML = open.map((c) => `
+    <div class="ask">
+      <p>${esc(c.question)}</p>
+      <div class="askrow">
+        ${c.options.map((o) => `<button class="cta" data-id="${c.clarification_id}" data-v="${o}">${c.field === "price" ? rupee(o) : o}</button>`).join("")}
+        <input type="number" placeholder="or type it" data-in="${c.clarification_id}" />
+        <button class="ghost" data-send="${c.clarification_id}">Send</button>
+      </div>
+      <div class="sub" style="margin-top:8px">asked over ${esc(c.channel)}</div>
+    </div>`).join("");
+
+  const reply = async (id, value) => {
+    await api(`/clarifications/${id}/reply`, { method: "POST", body: JSON.stringify({ reply: value }) });
+    await Promise.all([loadAsks(), loadCatalog(), loadScore()]);
+  };
+  for (const b of document.querySelectorAll("[data-v]")) b.onclick = () => reply(b.dataset.id, Number(b.dataset.v));
+  for (const b of document.querySelectorAll("[data-send]")) {
+    b.onclick = () => {
+      const input = document.querySelector(`[data-in="${b.dataset.send}"]`);
+      if (input?.value) reply(b.dataset.send, Number(input.value));
+    };
+  }
+}
+
+// ── readiness ───────────────────────────────────────────────────────────────
+const bar = (v) => {
+  const pct = Math.round(v * 100);
+  const cls = pct >= 80 ? "" : pct >= 50 ? "mid" : "low";
+  return `<div class="track"><div class="fill ${cls}" style="width:${pct}%"></div></div><span class="mono">${pct}%</span>`;
+};
+
+async function loadScore() {
+  const { body: s } = await api(`/merchants/${merchantId}/readiness`);
+  $("score").innerHTML = `
+    <div class="scorebig">${s.score}<small> / 100</small></div>
+    <div class="sub" style="margin:6px 0 14px">${esc(s.explanation)}</div>
+    <div class="bars">
+      <div class="barrow"><span class="lbl">catalog confidence</span>${bar(s.components.catalog_confidence)}</div>
+      <div class="barrow"><span class="lbl">policy coverage</span>${bar(s.components.policy_coverage)}</div>
+      <div class="barrow"><span class="lbl">fulfillment record</span>${bar(s.components.fulfillment_reliability)}</div>
+    </div>
+    <div class="sub" style="margin-top:12px">Three parts, weighted equally — stated rather than hidden, because there is no evidence here about which matters most.</div>`;
+}
+
+// ── commerce history ────────────────────────────────────────────────────────
+async function loadHistory() {
+  const { body: h } = await api(`/merchants/${merchantId}/commerce-history`);
+  $("history").innerHTML = `
+    <dl class="hist">
+      <dt>Sales delivered &amp; confirmed</dt><dd>${h.completed_transactions}</dd>
+      <dt>Verified value</dt><dd>${rupee(h.total_verified_value)}</dd>
+      <dt>Fulfillment confirmed</dt><dd>${Math.round(h.fulfillment_confirmation_rate * 100)}%</dd>
+      <dt>Average negotiated discount</dt><dd>${h.negotiation_avg_discount_pct ?? "—"}%</dd>
+    </dl>
+    <div class="note ok" style="margin-top:12px">Signed and exportable. Every line is backed by a four-signature chain anyone can check — hand it to a lender as it is.</div>
+    <div class="qr">
+      <img src="/merchants/${merchantId}/qr.png" alt="QR to this dashboard" />
+      <div class="sub">The same sticker that takes UPI payments.<br>Now it opens onto something an agent can read too.</div>
+    </div>
+    <div class="mono" style="margin-top:10px">${esc(h.signed_report_hash)}</div>
+    <details style="margin-top:10px">
+      <summary class="sub" style="cursor:pointer">What this report does not claim</summary>
+      ${h.caveats.map((c) => `<div class="sub" style="margin-top:6px">· ${esc(c)}</div>`).join("")}
+    </details>`;
+}
+
+// ── live ticker ─────────────────────────────────────────────────────────────
+const seen = [];
+function renderTicker() {
+  if (seen.length === 0) return;
+  $("ticker").innerHTML = seen.slice(-40).reverse().map((e, idx) => `
+    <div class="tick ${e.type.split(".")[0]}${idx === 0 ? " new" : ""}">
+      <span class="t">${time(e.at)}</span>
+      <span><span class="m">${esc(e.message)}</span><div class="k">${e.type}</div></span>
+    </div>`).join("");
+}
+
+function connect() {
+  socket = io();
+  socket.on("connect", () => {
+    $("conn").textContent = "live";
+    $("conn").className = "pill live";
+    socket.emit("watch", { merchant_id: merchantId });
+  });
+  socket.on("disconnect", () => { $("conn").textContent = "offline"; $("conn").className = "pill warn"; });
+  socket.on("backlog", (events) => { seen.length = 0; seen.push(...events); renderTicker(); });
+  socket.on("event", (e) => {
+    if (e.merchant_id && e.merchant_id !== merchantId) return;
+    seen.push(e);
+    renderTicker();
+    // The dashboard reflects reality; it does not keep its own copy of it.
+    if (e.type.startsWith("clarification")) { loadAsks(); loadCatalog(); loadScore(); }
+    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); }
+  });
+}
+
+await loadMerchants();
+await Promise.all([loadCatalog(), loadAsks(), loadScore(), loadHistory()]);
+connect();
+</script>
+</body>
+</html>

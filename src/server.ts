@@ -2,6 +2,7 @@ import express, { type Request, type Response } from "express";
 import path from "node:path";
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server as IOServer } from "socket.io";
+import QRCode from "qrcode";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { buildCommerceHistory } from "./audit/history.js";
 import { readinessScore } from "./marketplace/readiness.js";
@@ -27,7 +28,7 @@ import {
   WhatsAppNotifier,
 } from "./structuring/whatsapp.js";
 import { priceSanity } from "./structuring/sanity.js";
-import { EventBus } from "./events/bus.js";
+import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { loadServingCatalog } from "./structuring/run.js";
 
 export interface AppOptions {
@@ -532,6 +533,28 @@ export async function createApp(options: AppOptions = {}) {
   const readinessFor = (merchantId: string) =>
     readinessScore(merchantId, catalogItems, structuring.policies, fulfillmentRecord(merchantId));
 
+  /**
+   * Milestone M — the merchant's QR, pointing at their dashboard.
+   *
+   * Deliberately the whole feature: one image, generated locally, no external
+   * service and nothing to scan into. It exists to close a visual loop — the
+   * same sticker on the counter, now opening onto something an agent can read.
+   */
+  app.get("/merchants/:id/qr.png", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const base = process.env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`;
+    const png = await QRCode.toBuffer(`${base}/merchant.html?m=${id}`, {
+      width: 320,
+      margin: 1,
+      color: { dark: "#0e1014", light: "#ffffff" },
+    });
+    res.type("image/png").send(png);
+  });
+
   app.get("/merchants/:id/readiness", (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!merchants.has(id)) {
@@ -858,13 +881,21 @@ export function attachRealtime(httpServer: HttpServer, bus: EventBus): IOServer 
   const io = new IOServer(httpServer, { cors: { origin: "*" } });
 
   io.on("connection", (socket) => {
+    // Until told otherwise a viewer sees everything.
+    socket.join(ROOM_ALL);
+
     // A viewer says what it wants to watch; it gets the backlog immediately so
     // a dashboard opened mid-transaction is not staring at an empty panel.
     socket.on("watch", (filter: { transaction_id?: string; merchant_id?: string }) => {
+      const scoped = Boolean(filter?.transaction_id || filter?.merchant_id);
+      // Narrowing means leaving the firehose — otherwise a scoped viewer would
+      // receive both the broadcast and its own room's copy.
+      if (scoped) socket.leave(ROOM_ALL);
       if (filter?.transaction_id) socket.join(`txn:${filter.transaction_id}`);
       if (filter?.merchant_id) socket.join(`merchant:${filter.merchant_id}`);
       socket.emit("backlog", bus.recent({ ...filter, limit: 200 }));
     });
+
     socket.emit("backlog", bus.recent({ limit: 200 }));
   });
 

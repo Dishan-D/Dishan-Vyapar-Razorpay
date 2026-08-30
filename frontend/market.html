@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Market · Vyapar-to-Agent</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .stage { position:relative; height:calc(100vh - 130px); min-height:460px; }
+  svg { width:100%; height:100%; display:block; }
+  .node circle { fill:var(--card); stroke:var(--line2); stroke-width:1.5; }
+  .node.hot circle { stroke:var(--ok); }
+  .node text { fill:var(--ink); font-size:12px; text-anchor:middle; font-weight:600; }
+  .node .sub { fill:var(--dim); font-size:10px; font-weight:400; }
+  .hub circle { fill:#16213a; stroke:var(--buyer); }
+  .wire { stroke:var(--line2); stroke-width:1.5; fill:none; }
+  .pulse { stroke-width:2.5; fill:none; stroke-dasharray:6 10; opacity:0; }
+  .caption { position:absolute; left:0; right:0; bottom:8px; text-align:center; color:var(--dim); font-size:13px; }
+  .caption strong { color:var(--ink); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Vyapar-to-Agent</span>
+  <nav class="tabs">
+    <a href="/">Shop</a>
+    <a href="/merchant.html">Merchant</a>
+    <a href="/shopper.html">Shopper</a>
+    <a href="/market.html" class="on">Market</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="tag">one buyer-agent, three shops that never had a website</span>
+  <span class="pill" id="conn">connecting…</span>
+</header>
+
+<div class="stage">
+  <svg id="svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
+  <div class="caption" id="cap">Waiting…</div>
+</div>
+
+<script type="module">
+const svg = document.getElementById("svg");
+const NS = "http://www.w3.org/2000/svg";
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+const COLOR = {
+  discovery: "#7aa7ff",
+  negotiation: "#f6c453",
+  payment: "#41d67f",
+  fulfillment: "#41d67f",
+  clarification: "#f6c453",
+  extraction: "#6f7889",
+  audit: "#7aa7ff",
+};
+
+const el = (name, attrs, parent) => {
+  const n = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  (parent ?? svg).appendChild(n);
+  return n;
+};
+
+const HUB = { x: 450, y: 280 };
+const nodes = new Map();
+
+const { merchants } = await (await fetch("/merchants")).json();
+
+// Merchants around the buyer-agent, evenly spaced.
+merchants.forEach((m, i) => {
+  const angle = (i / merchants.length) * Math.PI * 2 - Math.PI / 2;
+  const x = HUB.x + Math.cos(angle) * 300;
+  const y = HUB.y + Math.sin(angle) * 190;
+  nodes.set(m.merchant_id, { x, y, name: m.name, city: m.city });
+});
+
+for (const [, n] of nodes) el("path", { class: "wire", d: `M${HUB.x} ${HUB.y} Q ${(HUB.x + n.x) / 2} ${(HUB.y + n.y) / 2 - 40} ${n.x} ${n.y}` });
+
+const pulses = new Map();
+for (const [id, n] of nodes) {
+  pulses.set(id, el("path", { class: "pulse", d: `M${HUB.x} ${HUB.y} Q ${(HUB.x + n.x) / 2} ${(HUB.y + n.y) / 2 - 40} ${n.x} ${n.y}` }));
+}
+
+const hub = el("g", { class: "node hub" });
+el("circle", { cx: HUB.x, cy: HUB.y, r: 46 }, hub);
+el("text", { x: HUB.x, y: HUB.y - 2 }, hub).textContent = "buyer-agent";
+const hubSub = el("text", { x: HUB.x, y: HUB.y + 14, class: "sub" }, hub);
+hubSub.textContent = "idle";
+
+const groups = new Map();
+for (const [id, n] of nodes) {
+  const gEl = el("g", { class: "node" });
+  el("circle", { cx: n.x, cy: n.y, r: 42 }, gEl);
+  el("text", { x: n.x, y: n.y - 2 }, gEl).textContent = n.name.split(" ")[0];
+  el("text", { x: n.x, y: n.y + 14, class: "sub" }, gEl).textContent = n.city;
+  groups.set(id, gEl);
+}
+
+/** One event, one line lighting up. Nothing here is simulated — it is the bus. */
+function flash(merchantId, type, message) {
+  const family = type.split(".")[0];
+  const colour = COLOR[family] ?? "#7aa7ff";
+  document.getElementById("cap").innerHTML = `<strong>${esc(message)}</strong>`;
+
+  const pulse = merchantId ? pulses.get(merchantId) : null;
+  const group = merchantId ? groups.get(merchantId) : null;
+  if (!pulse || !group) {
+    hubSub.textContent = family;
+    return;
+  }
+
+  group.classList.add("hot");
+  hubSub.textContent = family;
+  pulse.setAttribute("stroke", colour);
+  pulse.animate(
+    [
+      { opacity: 0, strokeDashoffset: 120 },
+      { opacity: 1, strokeDashoffset: 60, offset: 0.3 },
+      { opacity: 0, strokeDashoffset: 0 },
+    ],
+    { duration: 1100, easing: "ease-out" },
+  );
+  setTimeout(() => group.classList.remove("hot"), 1100);
+}
+
+const socket = io();
+const conn = document.getElementById("conn");
+socket.on("connect", () => { conn.textContent = "live"; conn.className = "pill live"; });
+socket.on("disconnect", () => { conn.textContent = "offline"; conn.className = "pill warn"; });
+socket.on("event", (e) => flash(e.merchant_id, e.type, e.message));
+</script>
+</body>
+</html>

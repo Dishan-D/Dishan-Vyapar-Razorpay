@@ -17,7 +17,8 @@
     "milestone-l": "tsx --env-file-if-exists=.env scripts/milestone-l.ts",
     "milestone-h": "tsx --env-file-if-exists=.env scripts/milestone-h.ts",
     "milestone-j": "tsx --env-file-if-exists=.env scripts/milestone-j.ts",
-    "milestone-k": "tsx --env-file-if-exists=.env scripts/milestone-k.ts"
+    "milestone-k": "tsx --env-file-if-exists=.env scripts/milestone-k.ts",
+    "milestone-i": "tsx --env-file-if-exists=.env scripts/milestone-i.ts"
   },
   "engines": {
     "node": ">=20"
@@ -28,6 +29,7 @@
     "express": "^5.2.1",
     "jose": "^6.2.10",
     "openai": "^6.49.0",
+    "qrcode": "^1.5.4",
     "razorpay": "^2.9.8",
     "socket.io": "^4.8.3",
     "twilio": "^6.1.0",
@@ -37,6 +39,8 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
+    "@types/qrcode": "^1.5.6",
+    "socket.io-client": "^4.8.3",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   }

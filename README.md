@@ -10,7 +10,8 @@ Makes UPI-only Indian merchants transactable by an AI buyer-agent, end to end �
 
 Two gaps, not one. This builds what has to exist before any agentic-commerce feature works for that segment.
 
-See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the full spec: pipeline, schemas, and build sequence.
+See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the core spec and
+[PROJECT_CONTEXT_ADDENDUM.md](PROJECT_CONTEXT_ADDENDUM.md) for Milestones G–M.
 
 ## Status
 
@@ -22,6 +23,13 @@ See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the full spec: pipeline, schema
 | **D** | Mandates → gated Razorpay test-mode payment | ✅ done |
 | **E** | Fulfillment loop + audit view, over HTTP, persisted in SQLite | ✅ done |
 | **F** | Demo frontend + CLI walkthrough + pre-seeded scenarios | ✅ done |
+| **G** | Structuring as a 5-stage pipeline: sanity check + clarification loop | ✅ done |
+| **H** | Verified Commerce History — signed, exportable | ✅ done |
+| **I** | Real-time event bus + 3 live UI surfaces | ✅ done |
+| **J** | Agent Readiness Score + multi-merchant marketplace | ✅ done |
+| **K** | WhatsApp (Twilio) as the clarification channel | ✅ done |
+| **L** | Razorpay webhook, signature-verified | ✅ done |
+| **M** | Per-merchant QR | ✅ done |
 
 Each milestone is a runnable proof, not a claim:
 
@@ -32,6 +40,12 @@ npm run milestone-b   # structuring agent + confidence gate
 npm run milestone-c   # discovery + 4 negotiation cases
 npm run milestone-d   # mandates → payment, with the gate tested
 npm run milestone-e   # fulfillment + audit, end to end over HTTP
+npm run milestone-g   # sanity gate + clarification loop
+npm run milestone-h   # signed commerce history + tamper test
+npm run milestone-i   # realtime: two windows, correct order, scoped rooms
+npm run milestone-j   # readiness scores + marketplace comparison
+npm run milestone-k   # WhatsApp clarification loop
+npm run milestone-l   # Razorpay webhook + tamper test #9
 
 npm run serve         # API + demo UI on http://localhost:3000
 npm run demo          # the same walkthrough in the terminal, for recording
@@ -56,10 +70,29 @@ With real Razorpay keys the CLI walkthrough stops at `awaiting_payment` and says
 so — a `payment_id` only exists once someone pays in a browser, so the full path
 runs in the UI. See [docs/RAZORPAY_SETUP.md](docs/RAZORPAY_SETUP.md).
 
+## The four screens
+
+| Page | Who it's for | Shows |
+|---|---|---|
+| `/` | walkthrough | one shop, one transaction, the signed chain |
+| `/merchant.html` | the merchant | catalog as an agent sees it, questions waiting on them, readiness score, commerce history, live ticker |
+| `/shopper.html` | the buyer-agent | its own reasoning as it shops three merchants and picks one |
+| `/market.html` | the wide shot | one buyer-agent, three shops, lines lighting up per event |
+
 ## API
 
 | Endpoint | Stage | Does |
 |---|---|---|
+| `GET /merchants` | — | the three merchants, with readiness scores |
+| `GET /merchants/:id/readiness` | J | agent-readiness breakdown |
+| `GET /merchants/:id/commerce-history` | H | signed, verifiable trading record |
+| `GET /merchants/:id/qr.png` | M | QR to that merchant's dashboard |
+| `GET /clarifications` | G | open questions waiting on a merchant |
+| `POST /clarifications/:id/reply` | G | the merchant's answer |
+| `POST /marketplace/compare` | J | one intent, every merchant, one justified pick |
+| `POST /webhooks/razorpay` | L | signature-verified `payment.captured` |
+| `POST /webhooks/whatsapp` | K | inbound merchant replies from Twilio |
+| `GET /events` | I | replay buffer for a late-joining viewer |
 | `GET /catalog` | 1 | the agent-readable catalog, held items marked with why |
 | `POST /discover` | 2 | deterministic filtered search |
 | `POST /transactions` | 2–5a | find → haggle → sign → authorize an order, returns the negotiation log |
@@ -103,7 +136,9 @@ data/            sample products, merchant policies, offline fixtures
 
 | Stage | Uses a model? | Why |
 |---|---|---|
-| 1 Structuring | **yes** — vision + text | reading a photo and a Hinglish voice note is exactly what a model is for. Groq or Claude, same prompt and schema either way |
+| 1 Structuring — draft | **yes** — vision + text | reading a photo and a Hinglish voice note is exactly what a model is for. Groq or Claude, same prompt and schema either way |
+| 1 Structuring — sanity check | no | one LLM scoring its own confidence is one opinion checking itself. A z-score against the merchant's own prices is a second, independent, cheaper one |
+| 1 Structuring — clarification | no | the question is built from which gate fired; the merchant answers it |
 | 2 Discovery | no | a buyer-agent deserves an answer it can check; a filter is auditable, an embedding match isn't |
 | 3 Negotiation | **only for phrasing** | the merchant set a floor — no model gets to talk the system below it. Every number is deterministic; phrasing that loses or changes a rupee figure is discarded |
 | 4–7 Mandates, payment, fulfillment, audit | no | cryptography and money |
@@ -121,7 +156,11 @@ to real test-mode orders with no code change — see
 
 **Real:** all signing and verification, canonicalization, hash-linking, chain validation. This is the credibility core — there is no mocked `"signature": true` anywhere.
 
-**Simulated (and stated plainly rather than hidden):** merchant and buyer-agent run as one backend with separate keys; voice notes start from pre-transcribed text rather than live speech-to-text.
+**Also real:** the price-sanity maths, the Socket.io event flow, the Razorpay webhook signature check, the Verified Commerce History signing, and WhatsApp Sandbox messages when Twilio is configured.
+
+**Simulated (and stated plainly rather than hidden):** the three merchant personas run on one backend with separate keys; buyer-agent and merchant are likewise one process; voice notes start from pre-transcribed text rather than live speech-to-text; extraction confidence comes from hand-authored fixtures until you run `milestone-b -- --live`.
+
+**Falls back rather than failing:** with no `GROQ_API_KEY`/`ANTHROPIC_API_KEY` the fixtures stand in. With no Twilio, clarification questions queue in the dashboard instead of WhatsApp — same question, same loop. With no Razorpay keys, the gateway is simulated and its IDs are prefixed `sim_` so they can never be mistaken for real ones.
 
 ## What broke, and how I got out
 
