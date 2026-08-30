@@ -16,23 +16,40 @@ See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the full spec: pipeline, schema
 
 | Milestone | Scope | State |
 |---|---|---|
-| **A** | Mandate chain in isolation — sign, hash-link, verify, tamper-test | ✅ done |
-| B | Structuring agent (photo + voice-note → catalog, with confidence gating) | not started |
-| C | Bounded negotiation agent | not started |
-| D | Wire negotiation → mandates → Razorpay test-mode order | not started |
-| E | Fulfillment loop + audit view | not started |
+| **A** | Mandate chain — sign, hash-link, verify, tamper-test | ✅ done |
+| **B** | Structuring agent — photo + voice note → catalog, confidence gating | ✅ done |
+| **C** | Discovery + bounded negotiation | ✅ done |
+| **D** | Mandates → gated Razorpay test-mode payment | ✅ done |
+| **E** | Fulfillment loop + audit view, over HTTP, persisted in SQLite | ✅ done |
 | F | Demo frontend + pre-seeded scenarios | not started |
 
-## Run Milestone A
-
-No API keys, no network, no database — it generates ephemeral ES256 keys and runs entirely in-process.
+Each milestone is a runnable proof, not a claim:
 
 ```bash
 npm install
-npm run milestone-a
+npm run milestone-a   # signed 4-mandate chain + 8 tamper tests
+npm run milestone-b   # structuring agent + confidence gate
+npm run milestone-c   # discovery + 4 negotiation cases
+npm run milestone-d   # mandates → payment, with the gate tested
+npm run milestone-e   # fulfillment + audit, end to end over HTTP
+npm run serve         # the API on :3000
 ```
 
-It builds a full `intent → cart → payment → fulfillment` chain, verifies every signature and hash link, then runs eight tamper tests: seven mutations that **must** be rejected (flipped signature bytes, a price changed after signing, a real signature transplanted onto a re-priced cart, a re-pointed hash link, an inflated capture amount, a missing merchant signature, a hole in the middle of the chain) and one control that **must** still pass (reordering an object's keys — that's not tampering, and canonicalization has to absorb it).
+None of them need an API key or Razorpay credentials to run. With
+`ANTHROPIC_API_KEY` set, `milestone-b -- --live` runs the real extraction and
+`milestone-c -- --live` lets Claude phrase the haggle. With
+`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` set, orders are created against the real
+test-mode API.
+
+## API
+
+| Endpoint | Stage | Does |
+|---|---|---|
+| `GET /catalog` | 1 | the agent-readable catalog, held items marked with why |
+| `POST /discover` | 2 | deterministic filtered search |
+| `POST /transactions` | 2–5 | find → haggle → sign → pay, returns the negotiation log |
+| `POST /transactions/:id/confirm-fulfillment` | 6 | merchant signs that the goods changed hands |
+| `GET /transactions/:id/audit` | 7 | the full chain, re-verified at read time |
 
 ## How the chain works
 
@@ -46,15 +63,28 @@ It builds a full `intent → cart → payment → fulfillment` chain, verifies e
 ## Layout
 
 ```
-src/mandates/
-  canonical.ts   deterministic JSON + SHA-256
-  schema.ts      all 4 mandate types, catalog item, negotiation policy
-  keys.ts        the three signing identities
-  sign.ts        sign / verify, and what exactly each signature covers
-  chain.ts       builders, hash-linking, whole-chain verification
-scripts/
-  milestone-a.ts proof + tamper tests
+src/
+  structuring/   Stage 1 — extraction, confidence scoring, the gate
+  catalog/       Stage 2 — deterministic discovery
+  negotiation/   Stage 3 — bounded haggling; LLM phrasing only
+  mandates/      Stages 4/6 — schemas, canonical JSON, signing, chain verification
+  payments/      Stage 5 — Razorpay gateway + the pre-payment gate
+  fulfillment/   Stage 6 — merchant confirmation
+  audit/         Stage 7 — the verified timeline
+  db/            SQLite: transactions + append-only mandates
+  server.ts      the API
+scripts/         one runnable proof per milestone
+data/            sample products, merchant policies, offline fixtures
 ```
+
+## Where the AI is, and where it deliberately isn't
+
+| Stage | Uses a model? | Why |
+|---|---|---|
+| 1 Structuring | **yes** — vision + text | reading a photo and a Hinglish voice note is exactly what a model is for |
+| 2 Discovery | no | a buyer-agent deserves an answer it can check; a filter is auditable, an embedding match isn't |
+| 3 Negotiation | **only for phrasing** | the merchant set a floor — no model gets to talk the system below it. Every number is deterministic; phrasing that loses or changes a rupee figure is discarded |
+| 4–7 Mandates, payment, fulfillment, audit | no | cryptography and money |
 
 ## What's real vs. simulated
 

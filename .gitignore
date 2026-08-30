@@ -4,3 +4,5 @@ node_modules/
 dist/
 *.local.json
 data/catalog.json
+data/vyapar.db*
+data/keys.local.json

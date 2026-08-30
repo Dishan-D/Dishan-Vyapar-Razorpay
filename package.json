@@ -9,18 +9,24 @@
     "typecheck": "tsc --noEmit",
     "milestone-b": "tsx scripts/milestone-b.ts",
     "milestone-c": "tsx scripts/milestone-c.ts",
-    "milestone-d": "tsx scripts/milestone-d.ts"
+    "milestone-d": "tsx scripts/milestone-d.ts",
+    "milestone-e": "tsx scripts/milestone-e.ts",
+    "serve": "tsx src/server.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1",
     "jose": "^6.2.10",
     "razorpay": "^2.9.8",
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"
