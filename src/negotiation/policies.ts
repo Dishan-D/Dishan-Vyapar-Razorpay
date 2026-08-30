@@ -1,15 +1,16 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { NegotiationPolicy } from "../mandates/schema.js";
 
-const POLICIES_FILE = path.resolve("data", "negotiation_policies.json");
-
-export async function loadPolicies(): Promise<Map<string, NegotiationPolicy>> {
-  const doc = JSON.parse(await readFile(POLICIES_FILE, "utf8")) as { policies: NegotiationPolicy[] };
-  return new Map(doc.policies.map((p) => [p.item_id, p]));
+/**
+ * Negotiation policies now live with the merchant that set them, in
+ * data/merchants.json, and arrive via the structuring result. A floor price is
+ * the merchant's own decision about their margin — keeping it in a file beside
+ * their products, rather than in a global table, is closer to what it is.
+ */
+export function indexPolicies(policies: readonly NegotiationPolicy[]): Map<string, NegotiationPolicy> {
+  return new Map(policies.map((p) => [p.item_id, p]));
 }
 
-/** An item with no policy is not negotiable — that is a merchant decision, not an error. */
+/** An item with no policy is not negotiable — a merchant decision, not an error. */
 export function policyFor(
   policies: Map<string, NegotiationPolicy>,
   itemId: string,

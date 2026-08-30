@@ -1,0 +1,75 @@
+{
+  "_note": "Three merchant personas. Photos exist only for Meena's — Rafiq and Amma are text-only, which is the realistic case: most merchants send a voice note and nothing else. Amma's input is deliberately messy so Milestone G's two gates both fire on real data rather than on a contrived test case.",
+  "merchants": [
+    {
+      "merchant_id": "mer_meena",
+      "name": "Meena's Sarees",
+      "city": "Jaipur",
+      "whatsapp": "+919000000001",
+      "products": [
+        { "item_id": "itm_meena_001", "sample_id": "saree_blue", "photo_filename": "IMG_20260812_saree.jpg",
+          "voice_note": "yeh saree 1200 ka hai, cotton, blue, ek hi piece bacha hai" },
+        { "item_id": "itm_meena_002", "sample_id": "kurta_white", "photo_filename": "IMG_20260812_kurta.jpg",
+          "voice_note": "white cotton kurta, size L, 650 rupaye, chaar piece hain stock mein",
+          "payment_page_description": "Cotton kurta - Rs 650" },
+        { "item_id": "itm_meena_003", "sample_id": "bedsheet_double", "photo_filename": "IMG_20260813_chaadar.jpg",
+          "voice_note": "double bed ki chaadar hai, printed, rate abhi fix nahi kiya hai, dekh ke bataunga, do teen piece honge shayad" },
+        { "item_id": "itm_meena_004", "sample_id": "dupatta_silk", "photo_filename": "IMG_20260813_dupatta.jpg",
+          "voice_note": "silk dupatta, maroon colour, 800 ka, stock godown mein dekhna padega kitna bacha hai" },
+        { "item_id": "itm_meena_005", "sample_id": "towel_set", "photo_filename": "IMG_20260814_towel.jpg",
+          "voice_note": "towel ka set, teen towel, 450 rupaye set ka, cotton hai, das set pade hain" }
+      ],
+      "policies": [
+        { "item_id": "itm_meena_001", "list_price": 1200, "floor_price": 1050, "max_rounds": 2 },
+        { "item_id": "itm_meena_002", "list_price": 650,  "floor_price": 570,  "max_rounds": 2 },
+        { "item_id": "itm_meena_005", "list_price": 450,  "floor_price": 410,  "max_rounds": 2 }
+      ]
+    },
+    {
+      "merchant_id": "mer_rafiq",
+      "name": "Rafiq Mobile Accessories",
+      "city": "Bangalore",
+      "whatsapp": "+919000000002",
+      "products": [
+        { "item_id": "itm_rafiq_001", "sample_id": "case_silicone",
+          "voice_note": "silicone phone cover hai, black, 250 ka, bahut saare hain, bees piece" },
+        { "item_id": "itm_rafiq_002", "sample_id": "charger_20w",
+          "voice_note": "20 watt fast charger, type C, 450 rupaye, aath piece stock mein" },
+        { "item_id": "itm_rafiq_003", "sample_id": "earphones_wired",
+          "voice_note": "wired earphone, 3.5mm jack, 350 ka, pandrah piece hain" },
+        { "item_id": "itm_rafiq_004", "sample_id": "screenguard_temper",
+          "voice_note": "tempered glass screen guard, 150 rupaye, tees piece pade hain" }
+      ],
+      "policies": [
+        { "item_id": "itm_rafiq_001", "list_price": 250, "floor_price": 140, "max_rounds": 5 },
+        { "item_id": "itm_rafiq_002", "list_price": 450, "floor_price": 280, "max_rounds": 5 },
+        { "item_id": "itm_rafiq_003", "list_price": 350, "floor_price": 190, "max_rounds": 5 },
+        { "item_id": "itm_rafiq_004", "list_price": 150, "floor_price": 80,  "max_rounds": 5 }
+      ]
+    },
+    {
+      "merchant_id": "mer_amma",
+      "name": "Amma's Snacks",
+      "city": "Chennai",
+      "whatsapp": "+919000000003",
+      "products": [
+        { "item_id": "itm_amma_001", "sample_id": "murukku",
+          "voice_note": "murukku packet, 90 rupees, fresh today, twenty packets iruku" },
+        { "item_id": "itm_amma_002", "sample_id": "mixture",
+          "voice_note": "kaara mixture, 110 rupees oru packet, pathinanju packet iruku" },
+        { "item_id": "itm_amma_003", "sample_id": "laddu_box",
+          "voice_note": "laddu box, six pieces, 120 rupees, ten box iruku" },
+        { "item_id": "itm_amma_004", "sample_id": "adhirasam",
+          "voice_note": "adhirasam, onnu packet 1100 rupees, ettu packet iruku" },
+        { "item_id": "itm_amma_005", "sample_id": "banana_chips",
+          "voice_note": "vazhakka chips, rate innum pakka pannala, ennoda paiyan sollum, konjam iruku" }
+      ],
+      "policies": [
+        { "item_id": "itm_amma_001", "list_price": 90,  "floor_price": 75,  "max_rounds": 3 },
+        { "item_id": "itm_amma_002", "list_price": 110, "floor_price": 90,  "max_rounds": 3 },
+        { "item_id": "itm_amma_003", "list_price": 120, "floor_price": 100, "max_rounds": 3 },
+        { "item_id": "itm_amma_004", "list_price": 110, "floor_price": 90,  "max_rounds": 3 }
+      ]
+    }
+  ]
+}

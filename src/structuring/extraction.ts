@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CatalogItem } from "../mandates/schema.js";
+import type { SanityResult, SanityVerdict } from "./sanity.js";
 
 /**
  * What the structuring agent is asked to return.
@@ -55,6 +56,8 @@ export function fromWire(wire: ExtractionWire): Extraction {
 
 /** A merchant's raw, unstructured input for one product. */
 export interface RawProduct {
+  /** Stable across runs, so negotiation policies can name it. */
+  item_id: string;
   sample_id: string;
   merchant_id: string;
   /** Pre-transcribed voice note. Real speech-to-text is out of scope — see README. */
@@ -90,7 +93,7 @@ export const CONFIDENCE_FLOOR = 0.6;
  * stock the model was unsure about is written into the catalog flagged, and
  * `assertTransactable` below is what stops it reaching a mandate.
  */
-export function toCatalogItem(raw: RawProduct, record: ExtractionRecord, index: number): CatalogItem {
+export function toCatalogItem(raw: RawProduct, record: ExtractionRecord): CatalogItem {
   const e = record.extraction;
   const missingPrice = e.price_value === null;
   const missingStock = e.stock_quantity === null;
@@ -100,7 +103,7 @@ export function toCatalogItem(raw: RawProduct, record: ExtractionRecord, index: 
   const stockConfidence = missingStock ? 0 : e.stock_confidence;
 
   return {
-    item_id: `itm_${String(index + 1).padStart(3, "0")}`,
+    item_id: raw.item_id,
     merchant_id: raw.merchant_id,
     name: e.name,
     category: e.category,
@@ -117,16 +120,71 @@ export function toCatalogItem(raw: RawProduct, record: ExtractionRecord, index: 
   };
 }
 
-/** Why an item is held back, for display. Empty array means it is transactable. */
-export function gateReasons(item: CatalogItem): string[] {
+/** What tripped the gate, if anything. */
+export type GateTrigger = "price_confidence" | "stock_confidence" | "price_sanity";
+
+export interface GateOutcome {
+  held: boolean;
+  triggers: GateTrigger[];
+  reasons: string[];
+}
+
+/**
+ * The combined gate (Addendum G.1.3).
+ *
+ * An item is held if the model was unsure about its price or stock, OR if the
+ * merchant's own price history says the number is out of family. Which condition
+ * fired is recorded, not just that one did — the clarification question is
+ * different for each, and "please review this item" is not a question anyone can
+ * answer.
+ *
+ * The addendum names price-confidence and sanity; stock confidence is kept from
+ * the original §3 Stage 1 gate rather than dropped, since an item whose stock
+ * count is unknown still cannot be sold.
+ */
+export function evaluateGate(item: CatalogItem, sanity?: SanityResult): GateOutcome {
+  const triggers: GateTrigger[] = [];
   const reasons: string[] = [];
+
   if (item.price.confidence < CONFIDENCE_FLOOR) {
+    triggers.push("price_confidence");
     reasons.push(`price confidence ${item.price.confidence.toFixed(2)} < ${CONFIDENCE_FLOOR}`);
   }
   if (item.stock.confidence < CONFIDENCE_FLOOR) {
+    triggers.push("stock_confidence");
     reasons.push(`stock confidence ${item.stock.confidence.toFixed(2)} < ${CONFIDENCE_FLOOR}`);
   }
-  return reasons;
+  if (sanity?.check === "fail") {
+    triggers.push("price_sanity");
+    reasons.push(`price out of family — ${sanity.reason}`);
+  }
+
+  return { held: triggers.length > 0, triggers, reasons };
+}
+
+/** Why an item is held back, for display. Empty array means it is transactable. */
+export function gateReasons(item: CatalogItem, sanity?: SanityResult): string[] {
+  return evaluateGate(item, sanity).reasons;
+}
+
+/**
+ * Provenance for one field's journey through the gate (Addendum G.2).
+ * Kept alongside the CatalogItem, never inside it — the transactable record
+ * stays clean and this stays queryable on its own.
+ */
+export interface ExtractionAudit {
+  item_id: string;
+  merchant_id: string;
+  field: "price";
+  llm_confidence: number;
+  sanity_check: SanityVerdict;
+  sanity_reason: string;
+  gate_result: "held" | "passed";
+  gate_triggers: GateTrigger[];
+  clarification_sent: boolean;
+  clarification_channel: "whatsapp" | "dashboard" | null;
+  resolved_value: number | null;
+  resolved_at: string | null;
 }
 
 export class NotTransactableError extends Error {
@@ -143,8 +201,8 @@ export class NotTransactableError extends Error {
  * merchant to something — negotiation, cart mandate, payment — calls this first.
  * A flag nobody checks is decoration; this is what makes it a gate.
  */
-export function assertTransactable(item: CatalogItem): void {
-  const reasons = gateReasons(item);
+export function assertTransactable(item: CatalogItem, sanity?: SanityResult): void {
+  const reasons = gateReasons(item, sanity);
   if (item.needs_merchant_confirmation || reasons.length > 0) {
     throw new NotTransactableError(item, reasons.length > 0 ? reasons : ["flagged for confirmation"]);
   }

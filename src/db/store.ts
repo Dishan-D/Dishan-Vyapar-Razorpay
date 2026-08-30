@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import type { MandateChain } from "../mandates/chain.js";
+import type { Clarification } from "../structuring/clarify.js";
 import { CHAIN_ORDER, type Mandate, type MandateType } from "../mandates/schema.js";
 import { mandateHash } from "../mandates/sign.js";
 
@@ -28,6 +29,14 @@ export class Store {
         merchant_id    TEXT NOT NULL,
         buyer_agent_id TEXT NOT NULL,
         created_at     TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS clarifications (
+        clarification_id TEXT PRIMARY KEY,
+        merchant_id      TEXT NOT NULL,
+        item_id          TEXT NOT NULL,
+        json             TEXT NOT NULL,
+        status           TEXT NOT NULL,
+        sent_at          TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS orders (
         transaction_id TEXT PRIMARY KEY,
@@ -112,6 +121,41 @@ export class Store {
     return this.db
       .prepare(`SELECT order_id, amount_paise, status FROM orders WHERE transaction_id = ?`)
       .get(transactionId) as { order_id: string; amount_paise: number; status: string } | undefined;
+  }
+
+  // ── Clarifications (Addendum G.4) ─────────────────────────────────────────
+
+  /** One open question per item at a time — a merchant should not get two pings about one product. */
+  saveClarification(c: Clarification): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO clarifications (clarification_id, merchant_id, item_id, json, status, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(c.clarification_id, c.merchant_id, c.item_id, JSON.stringify(c), c.status, c.sent_at);
+  }
+
+  listClarifications(merchantId?: string): Clarification[] {
+    const rows = merchantId
+      ? (this.db
+          .prepare(`SELECT json FROM clarifications WHERE merchant_id = ? ORDER BY sent_at`)
+          .all(merchantId) as Array<{ json: string }>)
+      : (this.db.prepare(`SELECT json FROM clarifications ORDER BY sent_at`).all() as Array<{ json: string }>);
+    return rows.map((r) => JSON.parse(r.json) as Clarification);
+  }
+
+  getClarification(id: string): Clarification | undefined {
+    const row = this.db
+      .prepare(`SELECT json FROM clarifications WHERE clarification_id = ?`)
+      .get(id) as { json: string } | undefined;
+    return row ? (JSON.parse(row.json) as Clarification) : undefined;
+  }
+
+  openClarificationFor(itemId: string): Clarification | undefined {
+    const row = this.db
+      .prepare(`SELECT json FROM clarifications WHERE item_id = ? AND status = 'open' LIMIT 1`)
+      .get(itemId) as { json: string } | undefined;
+    return row ? (JSON.parse(row.json) as Clarification) : undefined;
   }
 
   loadChain(transactionId: string): MandateChain | undefined {

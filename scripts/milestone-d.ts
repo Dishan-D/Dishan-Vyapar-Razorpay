@@ -12,7 +12,7 @@ import { Keyring } from "../src/mandates/keys.js";
 import { discover } from "../src/catalog/discovery.js";
 import { negotiate } from "../src/negotiation/engine.js";
 import { templateLine } from "../src/negotiation/phrasing.js";
-import { loadPolicies } from "../src/negotiation/policies.js";
+import { indexPolicies } from "../src/negotiation/policies.js";
 import { runStructuring } from "../src/structuring/run.js";
 import { SimulatedGateway, type OrderRequest, type OrderResult, type PaymentGateway, type PaymentResult } from "../src/payments/gateway.js";
 import { authorizeCart, payForCart, settlePayment, PaymentRefused } from "../src/payments/pay.js";
@@ -98,7 +98,8 @@ async function main(): Promise<void> {
 
   const keyring = await Keyring.generate();
   const structuring = await runStructuring(false);
-  const policies = await loadPolicies();
+  const policies = indexPolicies(structuring.policies);
+
   // The end-to-end leg runs simulated so it does not depend on .env; the real
   // Checkout boundary is covered separately by CheckoutGateway below.
   const gateway = new SimulatedGateway();
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
   const policy = policies.get(item.item_id);
   if (!policy) throw new Error(`no negotiation policy for ${item.item_id}`);
 
-  const buyer = { buyer_agent_id: "agent_xyz", max_price: query.max_price, opening_offer: 800 };
+  const buyer = { buyer_agent_id: "agent_xyz", max_price: query.max_price, opening_offer: 1100 };
   const outcome = negotiate(item, policy, buyer);
   for (const turn of outcome.log) console.log(`  ${dim(`r${turn.round}`)} ${templateLine(turn)}`);
   if (outcome.status !== "agreed") {

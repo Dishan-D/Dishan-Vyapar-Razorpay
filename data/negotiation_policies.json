@@ -1,8 +1,0 @@
-{
-  "_note": "Merchant-set once per item (PROJECT_CONTEXT.md §4.2). The floor is the merchant's own decision and the only thing standing between an AI buyer and their margin — nothing in the pipeline can move it, and no model is asked to.",
-  "policies": [
-    { "item_id": "itm_001", "list_price": 1200, "floor_price": 950,  "max_rounds": 3, "set_by": "merchant", "set_at": "2026-08-30T10:05:00Z" },
-    { "item_id": "itm_002", "list_price": 650,  "floor_price": 550,  "max_rounds": 3, "set_by": "merchant", "set_at": "2026-08-30T10:05:00Z" },
-    { "item_id": "itm_005", "list_price": 450,  "floor_price": 400,  "max_rounds": 2, "set_by": "merchant", "set_at": "2026-08-30T10:05:00Z" }
-  ]
-}

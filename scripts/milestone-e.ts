@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     heading("POST /transactions");
     const created = await call("/transactions", {
       method: "POST",
-      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 800 }),
+      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 1100 }),
     });
     if (created.status !== 201) {
       console.log(`  ${r(`unexpected ${created.status}`)} ${JSON.stringify(created.body)}`);

@@ -9,10 +9,13 @@ import { loadOrCreateKeyring } from "./mandates/keystore.js";
 import type { CatalogItem } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
-import { loadPolicies } from "./negotiation/policies.js";
+import { indexPolicies } from "./negotiation/policies.js";
 import { gatewayFromEnv, publishableKeyId, type PaymentGateway } from "./payments/gateway.js";
 import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
+import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
+import { clarificationMessage, DashboardNotifier, type Notifier } from "./structuring/notify.js";
+import { priceSanity } from "./structuring/sanity.js";
 import { loadServingCatalog } from "./structuring/run.js";
 
 export interface AppOptions {
@@ -22,15 +25,43 @@ export interface AppOptions {
    * whose result depends on the developer's local config proves nothing.
    */
   gateway?: PaymentGateway;
+  /** Override where merchant questions go. Defaults to the dashboard queue. */
+  notifier?: Notifier;
 }
 
 export async function createApp(options: AppOptions = {}) {
   const keyring = await loadOrCreateKeyring();
   const store = new Store();
   const gateway = options.gateway ?? gatewayFromEnv();
-  const policies = await loadPolicies();
+
   const structuring = await loadServingCatalog();
-  const catalog: CatalogItem[] = structuring.items;
+  const policies = indexPolicies(structuring.policies);
+  const catalogItems = structuring.items;
+  const merchants = new Map(structuring.merchants.map((m) => [m.merchant_id, m]));
+  const notifier: Notifier = options.notifier ?? new DashboardNotifier();
+
+  /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
+  const sanityFor = (item: CatalogItem) => priceSanity(item, catalogItems);
+
+  /**
+   * Ask about everything currently held (Addendum G.4). Runs at boot so the
+   * dashboard has a queue to show; an item already asked about is not asked
+   * about twice.
+   */
+  async function openClarifications(): Promise<void> {
+    for (const item of catalogItems) {
+      if (!item.needs_merchant_confirmation) continue;
+      if (store.openClarificationFor(item.item_id)) continue;
+
+      const draft = draftClarification(item, sanityFor(item), notifier.channel);
+      if (!draft) continue;
+
+      const merchant = merchants.get(item.merchant_id);
+      const delivery = await notifier.send(merchant?.whatsapp ?? item.merchant_id, clarificationMessage(draft));
+      store.saveClarification({ ...draft, channel: delivery.channel });
+    }
+  }
+  await openClarifications();
 
   const app = express();
   app.use(express.json());
@@ -40,7 +71,13 @@ export async function createApp(options: AppOptions = {}) {
   app.use("/media", express.static(path.resolve("data", "sample_products")));
 
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, gateway: gateway.kind, catalog_size: catalog.length });
+    res.json({
+      ok: true,
+      gateway: gateway.kind,
+      merchants: structuring.merchants.length,
+      catalog_size: catalogItems.length,
+      clarification_channel: notifier.channel,
+    });
   });
 
   /**
@@ -59,12 +96,15 @@ export async function createApp(options: AppOptions = {}) {
   app.get("/catalog", (_req, res) => {
     res.json({
       provider: structuring.provider,
-      items: catalog.map((item) => {
+      items: catalogItems.map((item) => {
         const photo = structuring.photos[item.item_id];
+        const sanity = sanityFor(item);
         return {
           ...item,
           transactable: !item.needs_merchant_confirmation,
-          held_because: gateReasons(item),
+          held_because: gateReasons(item, sanity),
+          sanity,
+          audit: structuring.audits[item.item_id] ?? null,
           photo_url: photo?.present && photo.filename ? `/media/${photo.filename}` : null,
           photo_filename: photo?.filename ?? null,
         };
@@ -78,7 +118,7 @@ export async function createApp(options: AppOptions = {}) {
       res.status(400).json({ error: "`want` is required" });
       return;
     }
-    res.json(discover(catalog, { want, max_price, category }));
+    res.json(discover(catalogItems, { want, max_price, category }));
   });
 
   /**
@@ -102,7 +142,7 @@ export async function createApp(options: AppOptions = {}) {
       } = req.body ?? {};
 
       // The intent's category constraint is applied at discovery, not just at payment.
-      const found = discover(catalog, { want, max_price, category });
+      const found = discover(catalogItems, { want, max_price, category });
       const item = found.matches[0]?.item;
       if (!item) {
         res.status(404).json({ error: "no offerable match", withheld: found.withheld });
@@ -213,7 +253,7 @@ export async function createApp(options: AppOptions = {}) {
       res.status(409).json({ error: "no authorized order for this transaction" });
       return;
     }
-    const item = catalog.find((i) => i.item_id === chain.cart?.item_id);
+    const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
     if (!item) {
       res.status(409).json({ error: `catalog no longer has ${chain.cart?.item_id}` });
       return;
@@ -238,6 +278,98 @@ export async function createApp(options: AppOptions = {}) {
       }
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  app.get("/merchants", (_req, res) => {
+    res.json({
+      merchants: structuring.merchants.map((m) => ({
+        ...m,
+        items: catalogItems.filter((i) => i.merchant_id === m.merchant_id).length,
+        held: catalogItems.filter((i) => i.merchant_id === m.merchant_id && i.needs_merchant_confirmation).length,
+      })),
+    });
+  });
+
+  /** The open questions waiting on a merchant (Addendum G.4). */
+  app.get("/clarifications", (req: Request, res: Response) => {
+    const merchantId = typeof req.query.merchant_id === "string" ? req.query.merchant_id : undefined;
+    res.json({ channel: notifier.channel, clarifications: store.listClarifications(merchantId) });
+  });
+
+  /**
+   * The merchant's answer (Addendum G.1.5). Accepts what someone would actually
+   * type — "110", "₹110", "Rs 110" — rather than demanding a clean number.
+   */
+  app.post("/clarifications/:id/reply", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const clarification = store.getClarification(id);
+    if (!clarification) {
+      res.status(404).json({ error: `no such clarification: ${id}` });
+      return;
+    }
+    if (clarification.status === "resolved") {
+      res.status(409).json({ error: "already resolved" });
+      return;
+    }
+
+    const raw = req.body?.reply ?? req.body?.value;
+    const value = typeof raw === "number" ? raw : parseReply(String(raw ?? ""));
+    if (value === null) {
+      res.status(400).json({ error: `could not read a number from "${raw}"` });
+      return;
+    }
+
+    const index = catalogItems.findIndex((i) => i.item_id === clarification.item_id);
+    if (index < 0) {
+      res.status(409).json({ error: `catalog no longer has ${clarification.item_id}` });
+      return;
+    }
+
+    const outcome = applyResolution(catalogItems[index]!, clarification, value, (updated) =>
+      priceSanity(updated, catalogItems.map((i) => (i.item_id === updated.item_id ? updated : i))),
+    );
+    catalogItems[index] = outcome.item;
+
+    store.saveClarification({
+      ...clarification,
+      status: "resolved",
+      resolved_value: value,
+      resolved_at: new Date().toISOString(),
+    });
+
+    const audit = structuring.audits[clarification.item_id];
+    if (audit) {
+      audit.clarification_sent = true;
+      audit.clarification_channel = clarification.channel;
+      audit.resolved_value = value;
+      audit.resolved_at = new Date().toISOString();
+      audit.gate_result = outcome.cleared ? "passed" : "held";
+    }
+
+    // An item can be wrong in more than one way. The merchant answered what they
+    // were asked; if something else is still missing, that is a new question,
+    // not a failure of theirs. Asking it is what makes this a loop.
+    let followUp: string | null = null;
+    if (!outcome.cleared) {
+      const next = draftClarification(outcome.item, sanityFor(outcome.item), notifier.channel);
+      if (next && next.trigger !== clarification.trigger) {
+        const merchant = merchants.get(outcome.item.merchant_id);
+        void notifier
+          .send(merchant?.whatsapp ?? outcome.item.merchant_id, clarificationMessage(next))
+          .then((delivery) => store.saveClarification({ ...next, channel: delivery.channel }));
+        store.saveClarification(next);
+        followUp = next.question;
+      }
+    }
+
+    res.json({
+      clarification_id: id,
+      item_id: clarification.item_id,
+      resolved_value: value,
+      transactable: outcome.cleared,
+      still_held_because: outcome.remaining,
+      follow_up: followUp,
+    });
   });
 
   /** Stage 6 — the merchant says the goods changed hands. */
@@ -279,7 +411,7 @@ export async function createApp(options: AppOptions = {}) {
     res.json({ transactions: store.listTransactions() });
   });
 
-  return { app, store, keyring, catalog, gateway };
+  return { app, store, keyring, catalog: catalogItems, gateway, structuring, notifier };
 }
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()!);

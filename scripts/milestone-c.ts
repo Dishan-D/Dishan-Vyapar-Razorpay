@@ -10,7 +10,7 @@
 import { discover } from "../src/catalog/discovery.js";
 import { negotiate, type BuyerMandate, type NegotiationOutcome } from "../src/negotiation/engine.js";
 import { phraseTurns, templateLine } from "../src/negotiation/phrasing.js";
-import { loadPolicies } from "../src/negotiation/policies.js";
+import { indexPolicies } from "../src/negotiation/policies.js";
 import { hasCredentials } from "../src/structuring/extract.js";
 import { activeProvider, providerLabel } from "../src/llm/provider.js";
 import { runStructuring, writeCatalog } from "../src/structuring/run.js";
@@ -76,8 +76,9 @@ async function main(): Promise<void> {
   }
   const structuring = await runStructuring(live);
   await writeCatalog(structuring);
+  const policies = indexPolicies(structuring.policies);
   const catalog = structuring.items;
-  const policies = await loadPolicies();
+
 
   if (live && !hasCredentials()) {
     console.log(`\n  ${y("--live requested but no model credentials found")} ${dim("— using deterministic phrasing")}`);
@@ -127,40 +128,67 @@ async function main(): Promise<void> {
   // ── Stage 3, three cases ──────────────────────────────────────────────────
   heading("Negotiation");
   const agentId = "agent_xyz";
-  const results = [
-    await runCase(
-      "Case 1 — buyer opens above the floor",
-      "agreed",
-      item,
-      policy,
-      { buyer_agent_id: agentId, max_price: 1500, opening_offer: 1000 },
-      live,
-    ),
-    await runCase(
-      "Case 2 — buyer opens below the floor, converges within max_rounds",
-      "agreed",
-      item,
-      policy,
-      { buyer_agent_id: agentId, max_price: 1500, opening_offer: 800 },
-      live,
-    ),
-    await runCase(
-      "Case 3 — buyer's ceiling is below the floor, rounds run out",
-      "no_deal",
-      item,
-      policy,
-      { buyer_agent_id: agentId, max_price: 900, opening_offer: 800 },
-      live,
-    ),
-    await runCase(
-      "Case 4 — buyer already at its ceiling, walks away early",
-      "no_deal",
-      item,
-      policy,
-      { buyer_agent_id: agentId, max_price: 850, opening_offer: 850 },
-      live,
-    ),
+  const byId = new Map(catalog.map((i) => [i.item_id, i]));
+
+  /** Each case picks the merchant whose policy actually exercises it. */
+  const cases: Array<{
+    label: string;
+    expect: "agreed" | "no_deal";
+    item_id: string;
+    max_price: number;
+    opening_offer: number;
+  }> = [
+    {
+      label: "Case 1 — buyer opens above the floor (Meena, tight band)",
+      expect: "agreed",
+      item_id: "itm_meena_001",
+      max_price: 1500,
+      opening_offer: 1100,
+    },
+    {
+      // Rafiq's persona is the wide negotiation band — five rounds and a floor
+      // well under list. Meena's two-round policy cannot converge from a lowball
+      // by design, so running this case against her would be testing the wrong
+      // merchant, not finding a bug.
+      label: "Case 2 — buyer lowballs, converges within max_rounds (Rafiq, wide band)",
+      expect: "agreed",
+      item_id: "itm_rafiq_002",
+      max_price: 500,
+      opening_offer: 200,
+    },
+    {
+      label: "Case 3 — buyer's ceiling is below the floor, rounds run out",
+      expect: "no_deal",
+      item_id: "itm_meena_001",
+      max_price: 900,
+      opening_offer: 800,
+    },
+    {
+      label: "Case 4 — buyer already at its ceiling, walks away early",
+      expect: "no_deal",
+      item_id: "itm_meena_001",
+      max_price: 850,
+      opening_offer: 850,
+    },
   ];
+
+  const results: boolean[] = [];
+  for (const c of cases) {
+    const target = byId.get(c.item_id);
+    const targetPolicy = policies.get(c.item_id);
+    if (!target || !targetPolicy) {
+      console.log(`  ${r(`missing item or policy for ${c.item_id}`)}`);
+      results.push(false);
+      continue;
+    }
+    results.push(
+      await runCase(c.label, c.expect, target, targetPolicy, {
+        buyer_agent_id: agentId,
+        max_price: c.max_price,
+        opening_offer: c.opening_offer,
+      }, live),
+    );
+  }
 
   // ── The Stage 1 gate still holds here ─────────────────────────────────────
   heading("Gate still applies at Stage 3");
@@ -168,7 +196,7 @@ async function main(): Promise<void> {
   let gateHeld = false;
   if (held) {
     try {
-      negotiate(held, { ...policy, item_id: held.item_id }, {
+      negotiate(held, { ...policies.values().next().value!, item_id: held.item_id }, {
         buyer_agent_id: agentId,
         max_price: 5000,
         opening_offer: 5000,

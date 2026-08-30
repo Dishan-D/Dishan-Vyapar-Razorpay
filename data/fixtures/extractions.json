@@ -1,70 +1,227 @@
 {
-  "_note": "HAND-AUTHORED STAND-INS, NOT RECORDED MODEL OUTPUT. Written to make Stage 1's gate runnable and demonstrable without an API key. Confidence values are what a careful reader would assign to these voice notes, chosen so the gate is exercised in both directions. Re-record with `npm run milestone-b -- --live` once a key is set, and replace this file with the real output before claiming these numbers came from the model.",
+  "_note": "HAND-AUTHORED STAND-INS, NOT RECORDED MODEL OUTPUT. Written so Stage 1's gates are runnable and demonstrable without an API key. Confidence values are what a careful reader would assign to these voice notes, chosen so both gates fire on real-looking data. Re-record with `npm run milestone-b -- --live` once GROQ_API_KEY or ANTHROPIC_API_KEY is set, and replace this file before claiming these numbers came from a model.",
   "extractions": {
     "saree_blue": {
       "name": "Blue Cotton Saree",
       "name_confidence": 0.93,
       "category": "apparel.saree",
       "category_confidence": 0.96,
-      "attributes": { "material": "cotton", "color": "blue" },
+      "attributes": {
+        "material": "cotton",
+        "color": "blue"
+      },
       "attributes_confidence": 0.9,
       "price_value": 1200,
       "price_confidence": 0.94,
       "stock_quantity": 1,
       "stock_confidence": 0.9,
-      "notes": "Price and stock both stated plainly — '1200 ka hai' and 'ek hi piece bacha hai'. Material and colour stated."
+      "notes": "Price and stock both stated plainly — '1200 ka hai' and 'ek hi piece bacha hai'."
     },
     "kurta_white": {
       "name": "White Cotton Kurta",
       "name_confidence": 0.95,
       "category": "apparel.kurta",
       "category_confidence": 0.96,
-      "attributes": { "material": "cotton", "color": "white", "size": "L" },
+      "attributes": {
+        "material": "cotton",
+        "color": "white",
+        "size": "L"
+      },
       "attributes_confidence": 0.94,
       "price_value": 650,
       "price_confidence": 0.97,
       "stock_quantity": 4,
       "stock_confidence": 0.92,
-      "notes": "Price stated twice and agrees with the Payment Page description. Size and count both stated."
+      "notes": "Price stated twice and agrees with the Payment Page description."
     },
     "bedsheet_double": {
       "name": "Printed Double Bedsheet",
       "name_confidence": 0.88,
       "category": "home.bedsheet",
       "category_confidence": 0.91,
-      "attributes": { "size": "double", "pattern": "printed" },
+      "attributes": {
+        "size": "double",
+        "pattern": "printed"
+      },
       "attributes_confidence": 0.85,
       "price_value": null,
       "price_confidence": 0.05,
       "stock_quantity": 2,
       "stock_confidence": 0.25,
-      "notes": "Merchant explicitly has not set a price — 'rate abhi fix nahi kiya hai'. Stock is a guess he hedged twice ('do teen', 'shayad'), so the count is not usable."
+      "notes": "Merchant explicitly has not set a price — 'rate abhi fix nahi kiya hai'. Stock hedged twice."
     },
     "dupatta_silk": {
       "name": "Maroon Silk Dupatta",
       "name_confidence": 0.94,
       "category": "apparel.dupatta",
       "category_confidence": 0.95,
-      "attributes": { "material": "silk", "color": "maroon" },
+      "attributes": {
+        "material": "silk",
+        "color": "maroon"
+      },
       "attributes_confidence": 0.92,
       "price_value": 800,
       "price_confidence": 0.93,
       "stock_quantity": null,
       "stock_confidence": 0.05,
-      "notes": "Price stated plainly. Stock is explicitly unknown — merchant has to check the godown — so no count was invented."
+      "notes": "Price stated plainly. Stock explicitly unknown — merchant has to check the godown."
     },
     "towel_set": {
       "name": "Cotton Towel Set (3 pieces)",
       "name_confidence": 0.92,
       "category": "home.towel",
       "category_confidence": 0.93,
-      "attributes": { "material": "cotton", "pieces": "3" },
+      "attributes": {
+        "material": "cotton",
+        "pieces": "3"
+      },
       "attributes_confidence": 0.9,
       "price_value": 450,
       "price_confidence": 0.93,
       "stock_quantity": 10,
       "stock_confidence": 0.91,
-      "notes": "Price is per set and stated as such. Ten sets stated. Piece count is part of the product, not the stock count — kept as an attribute."
+      "notes": "Price is per set and stated as such. Piece count is part of the product, not the stock count."
+    },
+    "case_silicone": {
+      "name": "Black Silicone Phone Case",
+      "name_confidence": 0.93,
+      "category": "mobile.case",
+      "category_confidence": 0.94,
+      "attributes": {
+        "material": "silicone",
+        "color": "black"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 250,
+      "price_confidence": 0.94,
+      "stock_quantity": 20,
+      "stock_confidence": 0.9,
+      "notes": "Price and count both stated plainly ('250 ka', 'bees piece')."
+    },
+    "charger_20w": {
+      "name": "20W Type-C Fast Charger",
+      "name_confidence": 0.93,
+      "category": "mobile.charger",
+      "category_confidence": 0.94,
+      "attributes": {
+        "wattage": "20W",
+        "connector": "Type-C"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 450,
+      "price_confidence": 0.95,
+      "stock_quantity": 8,
+      "stock_confidence": 0.91,
+      "notes": "Wattage, connector, price and count all stated."
+    },
+    "earphones_wired": {
+      "name": "Wired Earphones (3.5mm)",
+      "name_confidence": 0.93,
+      "category": "mobile.audio",
+      "category_confidence": 0.94,
+      "attributes": {
+        "connector": "3.5mm",
+        "type": "wired"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 350,
+      "price_confidence": 0.94,
+      "stock_quantity": 15,
+      "stock_confidence": 0.9,
+      "notes": "Price and count stated ('350 ka', 'pandrah piece')."
+    },
+    "screenguard_temper": {
+      "name": "Tempered Glass Screen Guard",
+      "name_confidence": 0.93,
+      "category": "mobile.screenguard",
+      "category_confidence": 0.94,
+      "attributes": {
+        "material": "tempered glass"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 150,
+      "price_confidence": 0.95,
+      "stock_quantity": 30,
+      "stock_confidence": 0.91,
+      "notes": "Price and count stated ('150 rupaye', 'tees piece')."
+    },
+    "murukku": {
+      "name": "Murukku Packet",
+      "name_confidence": 0.93,
+      "category": "food.snack",
+      "category_confidence": 0.94,
+      "attributes": {
+        "type": "murukku",
+        "freshness": "made today"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 90,
+      "price_confidence": 0.93,
+      "stock_quantity": 20,
+      "stock_confidence": 0.9,
+      "notes": "Price and count stated plainly in Tamil-English ('90 rupees', 'twenty packets')."
+    },
+    "mixture": {
+      "name": "Kaara Mixture Packet",
+      "name_confidence": 0.93,
+      "category": "food.snack",
+      "category_confidence": 0.94,
+      "attributes": {
+        "type": "mixture",
+        "flavour": "spicy"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 110,
+      "price_confidence": 0.94,
+      "stock_quantity": 15,
+      "stock_confidence": 0.9,
+      "notes": "Per-packet price stated, count stated ('pathinanju' = fifteen)."
+    },
+    "laddu_box": {
+      "name": "Laddu Box (6 pieces)",
+      "name_confidence": 0.93,
+      "category": "food.snack",
+      "category_confidence": 0.94,
+      "attributes": {
+        "type": "laddu",
+        "pieces": "6"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 120,
+      "price_confidence": 0.93,
+      "stock_quantity": 10,
+      "stock_confidence": 0.9,
+      "notes": "Box price and count stated. Piece count is part of the product."
+    },
+    "adhirasam": {
+      "name": "Adhirasam Packet",
+      "name_confidence": 0.93,
+      "category": "food.snack",
+      "category_confidence": 0.94,
+      "attributes": {
+        "type": "adhirasam"
+      },
+      "attributes_confidence": 0.9,
+      "price_value": 1100,
+      "price_confidence": 0.91,
+      "stock_quantity": 8,
+      "stock_confidence": 0.9,
+      "notes": "Merchant said '1100 rupees' clearly and without hedging, so the reading itself is confident."
+    },
+    "banana_chips": {
+      "name": "Vazhakka (Banana) Chips",
+      "name_confidence": 0.9,
+      "category": "food.snack",
+      "category_confidence": 0.92,
+      "attributes": {
+        "type": "banana chips"
+      },
+      "attributes_confidence": 0.85,
+      "price_value": null,
+      "price_confidence": 0.05,
+      "stock_quantity": null,
+      "stock_confidence": 0.2,
+      "notes": "No price set — 'rate innum pakka pannala', son will decide. Quantity only 'konjam' (a little), not a count."
     }
   }
 }

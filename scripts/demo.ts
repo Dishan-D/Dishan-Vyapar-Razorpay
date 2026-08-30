@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     step(3, 6, "They haggle — the part no agent protocol does");
     const { body: deal } = await api("/transactions", {
       method: "POST",
-      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 800 }),
+      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 1100 }),
     });
     for (const t of deal.log) {
       const who = t.actor === "buyer" ? b("buyer   ") : y("merchant");

@@ -60,8 +60,15 @@ async function main(): Promise<void> {
   );
 
   heading("Extracted catalog");
+  let lastMerchant = "";
   for (const item of result.items) {
-    const reasons = gateReasons(item);
+    if (item.merchant_id !== lastMerchant) {
+      lastMerchant = item.merchant_id;
+      const m = result.merchants.find((x) => x.merchant_id === item.merchant_id);
+      console.log(`\n  ${bold(m?.name ?? item.merchant_id)} ${dim(m?.city ?? "")}`);
+    }
+    const sanity = result.sanity[item.item_id];
+    const reasons = gateReasons(item, sanity);
     const flag = item.needs_merchant_confirmation ? r("● HELD") : g("● LIVE");
     const price = item.price.value === 0 ? dim("not stated") : `₹${item.price.value}`;
     const stock = item.stock.confidence === 0 ? dim("not stated") : `${item.stock.quantity} in stock`;
@@ -72,6 +79,10 @@ async function main(): Promise<void> {
         `   ·   ${stock} ${dim("conf")} ${conf(item.stock.confidence)}`,
     );
     console.log(`         ${dim(`"${item.source.raw_text}"`)}`);
+    if (sanity) {
+      const mark = sanity.check === "fail" ? r("sanity fail") : sanity.check === "pass" ? g("sanity pass") : dim("sanity skipped");
+      console.log(`         ${mark} ${dim(sanity.reason)}`);
+    }
     if (reasons.length > 0) {
       console.log(`         ${r("held:")} ${reasons.join(", ")}`);
     }
@@ -83,7 +94,7 @@ async function main(): Promise<void> {
   let allowed = 0;
   for (const item of result.items) {
     try {
-      assertTransactable(item);
+      assertTransactable(item, result.sanity[item.item_id]);
       allowed++;
       console.log(`  ${g("✅ transactable")}  ${item.item_id}  ${dim(item.name)}`);
     } catch (err) {
