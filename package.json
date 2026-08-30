@@ -26,6 +26,7 @@
     "jose": "^6.2.10",
     "openai": "^6.49.0",
     "razorpay": "^2.9.8",
+    "socket.io": "^4.8.3",
     "zod": "^4.5.4"
   },
   "devDependencies": {

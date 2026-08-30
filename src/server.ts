@@ -1,5 +1,7 @@
 import express, { type Request, type Response } from "express";
 import path from "node:path";
+import { createServer, type Server as HttpServer } from "node:http";
+import { Server as IOServer } from "socket.io";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
@@ -16,6 +18,7 @@ import { gateReasons } from "./structuring/extraction.js";
 import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
 import { clarificationMessage, DashboardNotifier, type Notifier } from "./structuring/notify.js";
 import { priceSanity } from "./structuring/sanity.js";
+import { EventBus } from "./events/bus.js";
 import { loadServingCatalog } from "./structuring/run.js";
 
 export interface AppOptions {
@@ -27,6 +30,8 @@ export interface AppOptions {
   gateway?: PaymentGateway;
   /** Override where merchant questions go. Defaults to the dashboard queue. */
   notifier?: Notifier;
+  /** Share a bus with a caller that wants to watch without a socket. */
+  bus?: EventBus;
 }
 
 export async function createApp(options: AppOptions = {}) {
@@ -39,6 +44,7 @@ export async function createApp(options: AppOptions = {}) {
   const catalogItems = structuring.items;
   const merchants = new Map(structuring.merchants.map((m) => [m.merchant_id, m]));
   const notifier: Notifier = options.notifier ?? new DashboardNotifier();
+  const bus = options.bus ?? new EventBus();
 
   /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
   const sanityFor = (item: CatalogItem) => priceSanity(item, catalogItems);
@@ -59,9 +65,34 @@ export async function createApp(options: AppOptions = {}) {
       const merchant = merchants.get(item.merchant_id);
       const delivery = await notifier.send(merchant?.whatsapp ?? item.merchant_id, clarificationMessage(draft));
       store.saveClarification({ ...draft, channel: delivery.channel });
+
+      bus.emit({
+        type: "extraction.held",
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `${item.name} held — ${draft.trigger.replace(/_/g, " ")}`,
+        data: { triggers: [draft.trigger] },
+      });
+      bus.emit({
+        type: "clarification.sent",
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Asked ${merchant?.name ?? item.merchant_id}: ${draft.question}`,
+        data: { channel: delivery.channel, question: draft.question, options: draft.options },
+      });
     }
   }
   await openClarifications();
+
+  for (const item of catalogItems) {
+    if (item.needs_merchant_confirmation) continue;
+    bus.emit({
+      type: "extraction.completed",
+      merchant_id: item.merchant_id,
+      item_id: item.item_id,
+      message: `${item.name} is agent-readable at ₹${item.price.value}`,
+    });
+  }
 
   const app = express();
 
@@ -142,6 +173,14 @@ export async function createApp(options: AppOptions = {}) {
           { verifiedByGateway: true },
         );
         store.appendMandate(transactionId, paid.payment);
+        bus.emit({
+          type: "payment.captured",
+          transaction_id: transactionId,
+          merchant_id: item.merchant_id,
+          item_id: item.item_id,
+          message: `Razorpay confirmed capture of ${paid.payment_id}`,
+          data: { payment_id: paid.payment_id, order_id: paid.order_id, via: "webhook" },
+        });
         res.json({ status: "settled", transaction_id: transactionId, payment_id: paid.payment_id });
       } catch (err) {
         if (err instanceof PaymentRefused) {
@@ -207,7 +246,13 @@ export async function createApp(options: AppOptions = {}) {
       res.status(400).json({ error: "`want` is required" });
       return;
     }
-    res.json(discover(catalogItems, { want, max_price, category }));
+    const result = discover(catalogItems, { want, max_price, category });
+    bus.emit({
+      type: "discovery.queried",
+      message: `Buyer-agent searched for "${want}" — ${result.matches.length} offer(s), ${result.withheld.length} withheld`,
+      data: { want, max_price, matches: result.matches.length },
+    });
+    res.json(result);
   });
 
   /**
@@ -244,18 +289,56 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
+      bus.emit({
+        type: "discovery.queried",
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Buyer-agent is looking at ${item.name}`,
+        data: { want, max_price },
+      });
+
       const outcome = negotiate(item, policy, { buyer_agent_id, max_price, opening_offer });
       const lines = phrase
         ? await phraseTurns(item, outcome.log)
         : outcome.log.map(templateLine);
       const log = outcome.log.map((turn, i) => ({ ...turn, message: lines[i]! }));
 
+      const publishTurns = (transactionId?: string) => {
+        for (const [i, turn] of outcome.log.entries()) {
+          bus.emit({
+            type: turn.actor === "buyer" ? "negotiation.offer_made" : "negotiation.countered",
+            ...(transactionId ? { transaction_id: transactionId } : {}),
+            merchant_id: item.merchant_id,
+            item_id: item.item_id,
+            message: lines[i]!,
+            data: { round: turn.round, actor: turn.actor, amount: turn.amount, rationale: turn.rationale },
+          });
+        }
+      };
+
       if (outcome.status === "no_deal") {
+        publishTurns();
+        bus.emit({
+          type: "negotiation.no_deal",
+          merchant_id: item.merchant_id,
+          item_id: item.item_id,
+          message: `No deal on ${item.name} — ${outcome.reason}`,
+          data: { reason: outcome.reason },
+        });
         res.json({ status: "no_deal", item_id: item.item_id, reason: outcome.reason, log });
         return;
       }
 
       const transaction_id = `txn_${Date.now().toString(36)}`;
+      publishTurns(transaction_id);
+      bus.emit({
+        type: "negotiation.agreed",
+        transaction_id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Agreed ₹${outcome.final_price} for ${item.name}`,
+        data: { final_price: outcome.final_price, list_price: item.price.value, rounds: outcome.rounds },
+      });
       store.createTransaction({
         transaction_id,
         item_id: item.item_id,
@@ -290,6 +373,14 @@ export async function createApp(options: AppOptions = {}) {
       // Authorize only. The order is a request to be paid, not a payment.
       const order = await authorizeCart(chain, item, keyring, gateway);
       store.saveOrder(transaction_id, order);
+      bus.emit({
+        type: "payment.order_created",
+        transaction_id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Order ${order.order_id} opened for ₹${outcome.final_price}`,
+        data: { order_id: order.order_id, amount_paise: order.amount_paise },
+      });
 
       const common = {
         transaction_id,
@@ -310,6 +401,14 @@ export async function createApp(options: AppOptions = {}) {
 
       const paid = await settlePayment(chain, item, keyring, gateway, order, undefined);
       store.appendMandate(transaction_id, paid.payment);
+      bus.emit({
+        type: "payment.captured",
+        transaction_id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Payment captured — ₹${outcome.final_price} for ${item.name}`,
+        data: { payment_id: paid.payment_id, order_id: paid.order_id, amount: outcome.final_price },
+      });
       res.status(201).json({ ...common, status: "paid", payment_id: paid.payment_id });
     } catch (err) {
       if (err instanceof PaymentRefused) {
@@ -354,6 +453,14 @@ export async function createApp(options: AppOptions = {}) {
         razorpay_signature: req.body?.razorpay_signature,
       });
       store.appendMandate(id, paid.payment);
+      bus.emit({
+        type: "payment.captured",
+        transaction_id: id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Payment captured — ${paid.payment_id}`,
+        data: { payment_id: paid.payment_id, order_id: paid.order_id },
+      });
       res.status(201).json({
         status: "paid",
         transaction_id: id,
@@ -367,6 +474,17 @@ export async function createApp(options: AppOptions = {}) {
       }
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  /** Replay, for a viewer that arrived late. */
+  app.get("/events", (req: Request, res: Response) => {
+    res.json({
+      events: bus.recent({
+        ...(typeof req.query.transaction_id === "string" ? { transaction_id: req.query.transaction_id } : {}),
+        ...(typeof req.query.merchant_id === "string" ? { merchant_id: req.query.merchant_id } : {}),
+        limit: Number(req.query.limit ?? 100),
+      }),
+    });
   });
 
   app.get("/merchants", (_req, res) => {
@@ -451,6 +569,16 @@ export async function createApp(options: AppOptions = {}) {
       }
     }
 
+    bus.emit({
+      type: "clarification.resolved",
+      merchant_id: clarification.merchant_id,
+      item_id: clarification.item_id,
+      message: outcome.cleared
+        ? `${clarification.item_name} confirmed at ${clarification.field === "price" ? `₹${value}` : `${value} in stock`} — now sellable`
+        : `${clarification.item_name} set to ${value}, still held`,
+      data: { value, cleared: outcome.cleared, follow_up: followUp },
+    });
+
     res.json({
       clarification_id: id,
       item_id: clarification.item_id,
@@ -475,6 +603,14 @@ export async function createApp(options: AppOptions = {}) {
         evidence_photo_ref: req.body?.evidence_photo_ref ?? null,
       });
       store.appendMandate(chain.transaction_id, fulfillment);
+      bus.emit({
+        type: "fulfillment.confirmed",
+        transaction_id: chain.transaction_id,
+        merchant_id: chain.cart?.merchant_id,
+        item_id: chain.cart?.item_id,
+        message: `Merchant confirmed handover`,
+        data: { note: req.body?.evidence_note ?? null },
+      });
       res.status(201).json({ status: "fulfilled", transaction_id: chain.transaction_id });
     } catch (err) {
       if (err instanceof FulfillmentRefused) {
@@ -493,23 +629,63 @@ export async function createApp(options: AppOptions = {}) {
       res.status(404).json({ error: `no such transaction: ${id}` });
       return;
     }
-    res.json(await buildAuditBundle(chain, keyring));
+    const bundle = await buildAuditBundle(chain, keyring);
+    bus.emit({
+      type: "audit.chain_verified",
+      transaction_id: id,
+      merchant_id: chain.cart?.merchant_id,
+      message: bundle.verified
+        ? `Chain verified — ${bundle.timeline.filter((t) => t.present).length} signed mandates`
+        : `Chain REJECTED — ${bundle.failures.join("; ")}`,
+      data: { verified: bundle.verified, status: bundle.status },
+    });
+    res.json(bundle);
   });
 
   app.get("/transactions", (_req, res) => {
     res.json({ transactions: store.listTransactions() });
   });
 
-  return { app, store, keyring, catalog: catalogItems, gateway, structuring, notifier };
+  return { app, store, keyring, catalog: catalogItems, gateway, structuring, notifier, bus };
+}
+
+/**
+ * Attach the realtime layer to a listening HTTP server.
+ *
+ * Separate from createApp because the bus works perfectly well without a socket
+ * — the milestone scripts subscribe in-process — and an Express app has no
+ * server to attach to until someone listens.
+ */
+export function attachRealtime(httpServer: HttpServer, bus: EventBus): IOServer {
+  const io = new IOServer(httpServer, { cors: { origin: "*" } });
+
+  io.on("connection", (socket) => {
+    // A viewer says what it wants to watch; it gets the backlog immediately so
+    // a dashboard opened mid-transaction is not staring at an empty panel.
+    socket.on("watch", (filter: { transaction_id?: string; merchant_id?: string }) => {
+      if (filter?.transaction_id) socket.join(`txn:${filter.transaction_id}`);
+      if (filter?.merchant_id) socket.join(`merchant:${filter.merchant_id}`);
+      socket.emit("backlog", bus.recent({ ...filter, limit: 200 }));
+    });
+    socket.emit("backlog", bus.recent({ limit: 200 }));
+  });
+
+  bus.attach(io);
+  return io;
 }
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()!);
 if (isMain) {
   const port = Number(process.env.PORT ?? 3000);
   createApp()
-    .then(({ app, gateway }) => {
-      app.listen(port, () => {
-        console.log(`Vyapar-to-Agent listening on http://localhost:${port}  (gateway: ${gateway.kind})`);
+    .then(({ app, gateway, bus, notifier }) => {
+      const httpServer = createServer(app);
+      attachRealtime(httpServer, bus);
+      httpServer.listen(port, () => {
+        console.log(
+          `Vyapar-to-Agent on http://localhost:${port}  ` +
+            `(gateway: ${gateway.kind}, clarifications: ${notifier.channel}, realtime: on)`,
+        );
       });
     })
     .catch((err) => {
