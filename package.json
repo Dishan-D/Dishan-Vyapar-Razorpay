@@ -8,7 +8,8 @@
     "milestone-a": "tsx scripts/milestone-a.ts",
     "typecheck": "tsc --noEmit",
     "milestone-b": "tsx scripts/milestone-b.ts",
-    "milestone-c": "tsx scripts/milestone-c.ts"
+    "milestone-c": "tsx scripts/milestone-c.ts",
+    "milestone-d": "tsx scripts/milestone-d.ts"
   },
   "engines": {
     "node": ">=20"
@@ -16,6 +17,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
     "jose": "^6.2.10",
+    "razorpay": "^2.9.8",
     "zod": "^4.5.4"
   },
   "devDependencies": {
