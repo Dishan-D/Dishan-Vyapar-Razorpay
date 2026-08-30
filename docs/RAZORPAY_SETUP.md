@@ -77,14 +77,33 @@ exercises the boundary against a stand-in gateway with the same signature
 scheme — a missing signature, a forged one, and a valid signature reused for a
 different payment id are all refused; only the genuine callback settles.
 
-**Pay with a test instrument** in the Checkout window:
+**Pay with a test instrument** in the Checkout window.
 
-- Card `4111 1111 1111 1111`, any future expiry, any CVV, any name.
-- Or UPI, using the test VPA `success@razorpay` (and `failure@razorpay` to
-  demo the failure path).
+Use a **domestic** card. The generic `4111 1111 1111 1111` that most payment docs
+use is classified as *international*, and test accounts have international
+payments switched off — Checkout fails with "International cards are not
+supported", which looks like a broken integration but is an account setting
+doing exactly its job.
 
-Razorpay publishes the current list under Docs → Payments → Test Card Details;
-check there if one of the above is rejected.
+| Network | Number | Type |
+|---|---|---|
+| Visa | `4100 2800 0000 1007` | debit |
+| Mastercard | `5555 5100 0008 1006` | credit |
+| RuPay | `6527 6589 0000 1005` | credit |
+
+Any future expiry, any CVV, any name. On the OTP page, pick **Success**.
+
+**UPI is the easier demo path** — no card fields to fill on camera:
+
+- `success@razorpay` → payment succeeds
+- `failure@razorpay` → payment fails
+
+One test-mode quirk worth knowing before you record: *cancelling* a UPI payment
+in test mode still reports success. Use `failure@razorpay` to show a failure,
+not the cancel button.
+
+Current lists: Razorpay Docs → Payments → [Test Card Details](https://razorpay.com/docs/payments/payments/test-card-details/)
+and [Test UPI Details](https://razorpay.com/docs/payments/payments/test-upi-details/).
 
 **One caveat, stated plainly:** the Razorpay half of this has never run against
 the live test-mode API, because this machine has no keys. The order-creation and
