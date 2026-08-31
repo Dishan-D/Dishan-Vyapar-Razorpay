@@ -3,166 +3,226 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Shopper · Vyapar-to-Agent</title>
+<title>Buyer agent · Vyapar</title>
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .wrap { max-width:860px; margin:0 auto; padding:22px 26px 70px; display:grid; gap:18px; }
-  .ask { display:grid; grid-template-columns:1fr 132px 132px auto; gap:11px; align-items:end; }
-  @media (max-width:780px){ .ask { grid-template-columns:1fr; } }
-  .thread { display:grid; gap:11px; }
-  .msg { max-width:90%; padding:12px 15px; border-radius:15px; font-size:14px; line-height:1.55; }
-  .msg.agent { background:var(--card-2); border:1px solid var(--line); border-bottom-left-radius:5px; }
-  .msg.think { background:transparent; border:1px dashed var(--line-2); color:var(--ink-3); font-size:13px; }
-  .msg.me { background:linear-gradient(180deg,#3585e6,var(--s1)); color:#fff; margin-left:auto; border-bottom-right-radius:5px; font-weight:550; }
-  .msg .why { color:var(--ink-3); font-size:12px; margin-top:5px; }
-  .offers { display:grid; gap:11px; }
-  .offer { border:1px solid var(--line); border-radius:12px; padding:13px; background:var(--card); }
-  .offer.win { border-color:var(--good); background:var(--good-bg); }
-  .offer h4 { margin:0 0 2px; font-size:14.5px; }
-  .offer .row { display:flex; justify-content:space-between; gap:10px; font-size:13.5px; align-items:baseline; }
-  .offer .rd { color:var(--ink-3); font-size:12px; }
-  .turns { margin-top:9px; display:grid; gap:3px; }
-  .turns div { font-size:11.5px; color:var(--ink-2); font-family:var(--mono); }
-  .verdict { font-size:13.5px; color:var(--ink-2); }
-  .verdict + .verdict { margin-top:4px; }
+  .wrap { max-width:900px; margin:0 auto; padding:18px 26px 72px; display:grid; gap:16px; }
+  .askbar { display:grid; grid-template-columns:1fr auto; gap:10px; }
+  .askbar input { font-size:15px; padding:11px 13px; }
+  .examples { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
+  .ex { font-size:12px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:4px 11px; }
+  .ex:hover { color:var(--ink); border-color:var(--border-2); }
+
+  .run { display:grid; gap:0; }
+  .rstep { display:grid; grid-template-columns:24px 1fr; gap:13px; padding:14px 0; }
+  .rstep + .rstep { border-top:1px solid var(--border); }
+  .rstep .icn { width:24px; height:24px; border-radius:7px; background:var(--surface-3); display:grid; place-items:center;
+                font-size:10px; font-weight:650; color:var(--ink-3); text-transform:uppercase; }
+  .rstep.model .icn { background:var(--blue-2); color:var(--blue); }
+  .rstep .hd { font-size:14px; font-weight:550; letter-spacing:-.01em; }
+  .rstep .nt { font-size:12.5px; color:var(--ink-3); margin-top:2px; }
+  .badge { font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; font-weight:650;
+           padding:2px 7px; border-radius:5px; background:var(--surface-3); color:var(--ink-3); margin-left:7px; vertical-align:1px; }
+  .badge.model { background:var(--blue-2); color:var(--blue); }
+
+  .offers { display:grid; gap:10px; margin-top:12px; }
+  .offer { border:1px solid var(--border); border-radius:var(--r-sm); padding:14px; }
+  .offer.win { border-color:var(--green-3); background:var(--green-2); }
+  .offer .top { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .offer .mn { font-size:14px; font-weight:600; }
+  .offer .rd { font-size:11.5px; color:var(--ink-3); }
+  .path { display:flex; align-items:center; gap:7px; margin:11px 0 3px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+  .path b { font-weight:600; font-size:14px; }
+  .path .ar { color:var(--ink-4); font-size:12px; }
+  .path .fin { color:var(--green); }
+  .eff { display:flex; justify-content:space-between; font-size:12.5px; color:var(--ink-2); margin-top:9px; padding-top:9px; border-top:1px solid var(--border); }
+
+  .verdict { border:1px solid var(--green-3); background:var(--green-2); border-radius:var(--r); padding:16px; }
+  .verdict .h { font-size:15px; font-weight:600; color:#0d5c3a; }
+  .verdict .why { font-size:13px; color:#0d5c3a; margin-top:6px; }
+
+  .ba { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:700px){ .ba { grid-template-columns:1fr; } }
+  .bacard { border:1px solid var(--border); border-radius:var(--r-sm); padding:14px; }
+  .bacard.before { background:var(--surface-2); }
+  .bacard.after { border-color:var(--green-3); background:var(--green-2); }
+  .bacard h4 { margin:0 0 3px; font-size:12.5px; font-weight:600; }
+  .bacard .big { font-size:26px; font-weight:600; letter-spacing:-.03em; margin:9px 0 2px; font-variant-numeric:tabular-nums; }
+  .balist { display:grid; gap:5px; margin-top:11px; font-size:12px; }
+  .balist div { display:flex; justify-content:space-between; gap:10px; color:var(--ink-2); }
 </style>
 </head>
 <body>
-<header>
-  <span class="brand">Vyapar-to-Agent</span>
-  <nav class="tabs">
-    <a href="/">Shop</a>
-    <a href="/merchant.html">Merchant</a>
-    <a href="/shopper.html" class="on">Shopper</a>
-    <a href="/market.html">Market</a>
-  </nav>
-  <span class="spacer"></span>
-  <span class="pill" id="conn">connecting…</span>
-</header>
+<div id="nav"></div>
+
+<div class="pagehead">
+  <h1>Buyer agent</h1>
+  <p>Say what you want. It shops three merchants, haggles with each, and picks one.</p>
+</div>
 
 <div class="wrap">
   <section>
-    <h2><span class="n">1</span>Tell the buyer-agent what you want</h2>
-    <div class="ask">
-      <div><label for="want">What are you after?</label><input id="want" value="silicone phone case" /></div>
-      <div><label for="max">Most you'll pay</label><input id="max" type="number" value="320" /></div>
-      <div><label for="open">Open at</label><input id="open" type="number" value="220" /></div>
-      <button class="cta" id="go">Send it shopping</button>
+    <h2>What are you looking for?</h2>
+    <div class="askbar" style="margin-top:12px">
+      <input id="goal" value="I need a silicone phone case, nothing over ₹300" />
+      <button class="btn primary big" id="go">Send agent</button>
+    </div>
+    <div class="examples">
+      <button class="ex">a blue cotton saree under ₹1500</button>
+      <button class="ex">murukku, up to ₹120</button>
+      <button class="ex">phone cover, max ₹250</button>
     </div>
   </section>
 
-  <section>
-    <h2><span class="n">2</span>The agent's thinking</h2>
-    <div class="thread" id="thread"><p class="empty">Nothing yet.</p></div>
+  <section id="runcard" style="display:none">
+    <h2>Agent run</h2>
+    <p class="hint">Every step, and who decided it.</p>
+    <div class="run" id="run" style="margin-top:8px"></div>
+  </section>
+
+  <section id="bacard" style="display:none">
+    <h2>Why this shop was reachable at all</h2>
+    <p class="hint">What a machine could do with this merchant before and after.</p>
+    <div class="ba" id="ba" style="margin-top:14px"></div>
   </section>
 </div>
 
 <script type="module">
+import { boot, api, rupee, esc, note } from "/ui.js";
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
-const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const api = async (p, o) => {
-  const res = await fetch(p, { ...o, headers: { "content-type": "application/json", ...(o?.headers ?? {}) } });
-  return { status: res.status, body: await res.json() };
-};
+let config = {};
 
-const thread = $("thread");
-let first = true;
-function say(kind, html) {
-  if (first) { thread.innerHTML = ""; first = false; }
-  const el = document.createElement("div");
-  el.className = `msg ${kind}`;
-  el.innerHTML = html;
-  thread.appendChild(el);
-  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  return el;
+const stepRow = (icon, head, body = "", model = false) => `
+  <div class="rstep ${model ? "model" : ""} enter">
+    <span class="icn">${icon}</span>
+    <div><div class="hd">${head}${model ? '<span class="badge model">model</span>' : '<span class="badge">rules</span>'}</div>${body}</div>
+  </div>`;
+
+function offerCard(o, won) {
+  const path = o.outcome.log.filter((t) => t.amount !== null);
+  const chain = path.map((t, i) =>
+    `${i ? '<span class="ar">→</span>' : ""}<b class="${i === path.length-1 && o.eligible ? "fin" : ""}">${rupee(t.amount)}</b>`).join("");
+  return `<div class="offer ${won ? "win" : ""}">
+    <div class="top">
+      <div><div class="mn">${esc(o.merchant_name)}</div><div class="rd">${esc(o.item_name)} · list ${rupee(o.list_price)}</div></div>
+      <span class="chip">Readiness ${o.readiness.score}</span>
+    </div>
+    <div class="path">${chain || '<span class="rd">no offers exchanged</span>'}</div>
+    ${o.eligible
+      ? `<div class="eff"><span>Effective price, after their delivery record</span><b>${rupee(o.effective_price)}</b></div>`
+      : `<div class="eff"><span>${esc(o.note)}</span><b>no deal</b></div>`}
+  </div>`;
 }
 
-/**
- * The agent narrates as it goes. Each line is a real step it took — the pauses
- * exist so a viewer can follow the reasoning, not to fake work that isn't happening.
- */
-async function shop() {
-  thread.innerHTML = "";
-  first = true;
+async function run() {
+  const goal = $("goal").value.trim();
+  if (!goal) return;
   $("go").disabled = true;
+  $("runcard").style.display = "";
+  $("bacard").style.display = "none";
+  $("run").innerHTML = stepRow("···", "Thinking…");
 
-  const want = $("want").value;
-  const max_price = Number($("max").value);
-  const opening_offer = Number($("open").value);
+  const { status, body } = await api("/agent/run", { method: "POST", body: JSON.stringify({ goal }) });
 
-  say("me", `${esc(want)} — up to ${rupee(max_price)}.`);
-  await sleep(400);
+  if (status >= 500) { $("run").innerHTML = note("bad", esc(body.error ?? "the run failed")); $("go").disabled = false; return; }
 
-  const thinking = say("think", "Looking for shops that stock it…");
-  const { body: cmp } = await api("/marketplace/compare", {
-    method: "POST",
-    body: JSON.stringify({ want, max_price, opening_offer }),
-  });
-
-  if (cmp.offers.length === 0) {
-    thinking.remove();
-    say("agent", "Nobody I can reach stocks that right now.");
-    $("go").disabled = false;
-    return;
-  }
-
-  thinking.textContent = `Found ${cmp.offers.length} shop(s). Haggling with each, separately.`;
-  await sleep(600);
-
-  const cards = cmp.offers.map((o) => {
-    const win = cmp.selected?.merchant_id === o.merchant_id;
-    return `<div class="offer${win ? " win" : ""}">
-      <div class="row"><h4>${esc(o.merchant_name)}</h4><span class="rd">readiness ${o.readiness.score}/100</span></div>
-      <div class="rd">${esc(o.item_name)} · list ${rupee(o.list_price)}</div>
-      <div class="turns">${o.outcome.log.map((t) => `<div>r${t.round} ${t.actor === "buyer" ? "me" : "them"} ${t.amount ? rupee(t.amount) : "—"} <span style="opacity:.6">${esc(t.rationale)}</span></div>`).join("")}</div>
-      <div class="row" style="margin-top:8px">
-        <strong>${o.eligible ? rupee(o.final_price) : "no deal"}</strong>
-        <span class="rd">${o.eligible ? `${rupee(o.effective_price)} once I price in their record` : esc(o.note)}</span>
-      </div>
-    </div>`;
-  }).join("");
-
-  say("agent", `<div class="offers">${cards}</div>`);
-  await sleep(500);
-
-  say("agent", cmp.reasoning.map((line) => `<div class="verdict">${esc(line)}</div>`).join(""));
-
-  if (cmp.selected) {
-    await sleep(400);
-    say("think", `Buying from ${esc(cmp.selected.merchant_name)}…`);
-    // item_id, not the name: the agent already chose a shop, and two of them
-    // stock this under the same name. Re-searching would quietly pick the cheaper.
-    const { status, body } = await api("/transactions", {
-      method: "POST",
-      body: JSON.stringify({
-        want: cmp.selected.item_name,
-        item_id: cmp.selected.item_id,
-        max_price,
-        opening_offer,
-      }),
-    });
-    if (status === 201) {
-      say("agent",
-        body.status === "awaiting_payment"
-          ? `Order <span class="mono">${esc(body.order_id)}</span> opened for ${rupee(body.final_price)} — waiting on Razorpay Checkout.<div class="why">A payment id only exists once someone actually pays.</div>`
-          : `Paid ${rupee(body.final_price)}. <span class="mono">${esc(body.payment_id)}</span><div class="why">Signed chain: <a href="/transactions/${body.transaction_id}/audit" target="_blank">audit it</a></div>`);
+  const html = [];
+  for (const t of body.trace) {
+    if (t.stage === "understand") {
+      const i = t.intent;
+      html.push(stepRow("01", esc(t.headline),
+        `<div class="nt">${esc(t.note)}</div>
+         <dl class="kv" style="margin-top:9px"><dt>want</dt><dd>${esc(i.want)}</dd><dt>ceiling</dt><dd>${rupee(i.max_price)}</dd><dt>opens at</dt><dd>${rupee(i.opening_offer)}</dd></dl>`,
+        t.decided_by === "model"));
+    } else if (t.stage === "shop") {
+      html.push(stepRow("02", esc(t.headline),
+        `<div class="offers">${t.offers.map((o) => offerCard(o, body.comparison?.selected?.merchant_id === o.merchant_id)).join("")}</div>`));
+    } else if (t.stage === "choose") {
+      const last = t.reasoning[t.reasoning.length - 1];
+      html.push(stepRow("03", esc(t.headline),
+        `<div class="verdict" style="margin-top:10px"><div class="h">Recommended: ${esc(body.merchant)}</div><div class="why">${esc(last)}</div></div>`));
+    } else if (t.stage === "sign") {
+      html.push(stepRow("04", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
+    } else if (t.stage === "pay") {
+      html.push(stepRow("05", esc(t.headline),
+        `<dl class="kv" style="margin-top:8px">${t.order_id ? `<dt>order</dt><dd>${esc(t.order_id)}</dd>` : ""}${t.payment_id ? `<dt>payment</dt><dd>${esc(t.payment_id)}</dd>` : ""}</dl>${t.note ? `<div class="nt">${esc(t.note)}</div>` : ""}`));
+    } else if (t.stage === "wait") {
+      html.push(stepRow("06", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
     } else {
-      say("agent", `Couldn't complete: ${esc(body.error ?? body.reason ?? "unknown")}`);
+      html.push(stepRow("—", esc(t.headline), t.reasons ? `<div class="nt">${esc(t.reasons.join("; "))}</div>` : ""));
     }
   }
+  $("run").innerHTML = html.join("");
 
+  if (body.status === "awaiting_payment" && config.razorpay_key_id) {
+    $("run").insertAdjacentHTML("beforeend",
+      `<div class="rstep"><span class="icn">₹</span><div>
+        <div class="hd">Waiting for a human</div>
+        <div class="nt">A payment id only exists once someone actually pays. The agent stops here rather than inventing one.</div>
+        <button class="btn go" id="pay" style="margin-top:11px">Pay ${rupee(body.final_price)} via Razorpay</button>
+      </div></div>`);
+    $("pay").onclick = () => checkout(body);
+  }
+
+  if (body.comparison?.selected) await showBeforeAfter(body.comparison.selected.merchant_id);
   $("go").disabled = false;
 }
 
-$("go").onclick = shop;
+function checkout(run) {
+  new window.Razorpay({
+    key: config.razorpay_key_id, order_id: run.order_id, amount: run.amount_paise,
+    currency: "INR", name: "Vyapar", description: `${run.item_id} · ${rupee(run.final_price)}`,
+    handler: async (response) => {
+      const { status, body } = await api(`/transactions/${run.transaction_id}/settle-payment`, {
+        method: "POST", body: JSON.stringify(response) });
+      $("pay").outerHTML = status === 201
+        ? note("ok", `Paid. <span class="mono">${esc(body.payment_id)}</span> · <a href="/transactions/${run.transaction_id}/audit" target="_blank">audit the chain</a>`)
+        : note("bad", esc((body.reasons ?? [body.error]).join("; ")));
+    },
+  }).open();
+}
 
-const socket = io();
-socket.on("connect", () => { $("conn").textContent = "live"; $("conn").className = "pill live"; });
-socket.on("disconnect", () => { $("conn").textContent = "offline"; $("conn").className = "pill warn"; });
+async function showBeforeAfter(merchantId) {
+  const { body } = await api(`/merchants/${merchantId}/before-after`);
+  $("bacard").style.display = "";
+  const line = (k, v) => `<div><span>${k}</span><b>${v}</b></div>`;
+  $("ba").innerHTML = `
+    <div class="bacard before">
+      <h4>Before</h4>
+      <p class="hint">${esc(body.before.headline)}</p>
+      <div class="big">${body.before.structured_fields}</div>
+      <div class="hint">machine-readable fields</div>
+      <div class="balist">
+        ${line("Products an agent can see", body.before.products_an_agent_can_see)}
+        ${line("Can be queried", body.before.can_be_queried ? "yes" : "no")}
+        ${line("Can be bought from", body.before.can_be_transacted_with ? "yes" : "no")}
+      </div>
+      <p class="hint" style="margin-top:11px">${esc(body.before.why)}</p>
+      <div class="mono" style="margin-top:9px">${esc(JSON.stringify(body.before.machine_readable))}</div>
+    </div>
+    <div class="bacard after">
+      <h4>After</h4>
+      <p class="hint">${esc(body.after.headline)}</p>
+      <div class="big">${body.after.structured_fields}</div>
+      <div class="hint">machine-readable fields</div>
+      <div class="balist">
+        ${line("Products an agent can see", body.after.products_an_agent_can_see)}
+        ${line("Ready to buy", body.after.products_an_agent_can_buy)}
+        ${line("Held for confirmation", body.after.products_held_for_confirmation)}
+      </div>
+      <p class="hint" style="margin-top:11px">${esc(body.after.why)}</p>
+      <div class="mono" style="margin-top:9px">${esc(JSON.stringify(body.after.machine_readable))}</div>
+    </div>`;
+}
+
+$("go").onclick = run;
+$("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+for (const b of document.querySelectorAll(".ex")) b.onclick = () => { $("goal").value = b.textContent; run(); };
+
+config = await boot({});
 </script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </body>
 </html>

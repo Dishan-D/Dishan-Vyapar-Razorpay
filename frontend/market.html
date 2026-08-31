@@ -7,57 +7,43 @@
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .stage { position:relative; height:calc(100vh - 132px); min-height:470px; }
+  .stage { position:relative; height:calc(100vh - 132px); min-height:480px; }
   svg { width:100%; height:100%; display:block; }
-  .node circle { fill:#fff; stroke:var(--line-2); stroke-width:1.5; filter:drop-shadow(0 6px 14px rgba(26,23,20,.10)); }
-  .node.hot circle { stroke:var(--good); stroke-width:2.5; }
-  .node text { fill:var(--ink); font-size:12.5px; text-anchor:middle; font-weight:650; }
-  .node .sub { fill:var(--ink-3); font-size:10px; font-weight:500; }
-  .hub circle { fill:#fff; stroke:var(--s1); stroke-width:2.5; }
-  .wire { stroke:var(--line-2); stroke-width:1.5; fill:none; }
-  .pulse { stroke-width:3; fill:none; stroke-dasharray:7 11; opacity:0; stroke-linecap:round; }
+  .node circle { fill:var(--surface); stroke:var(--border-2); stroke-width:1.25; }
+  .node.hot circle { stroke:var(--green); stroke-width:2; }
+  .node text { fill:var(--ink); font-size:12.5px; text-anchor:middle; font-weight:550; letter-spacing:-.01em; }
+  .node .sub { fill:var(--ink-4); font-size:10px; font-weight:450; }
+  .hub circle { fill:var(--surface); stroke:var(--ink); stroke-width:1.75; }
+  .wire { stroke:var(--border); stroke-width:1.25; fill:none; }
+  .pulse { stroke-width:2.5; fill:none; stroke-dasharray:6 10; opacity:0; stroke-linecap:round; }
   .caption {
-    position:absolute; left:50%; transform:translateX(-50%); bottom:16px;
-    background:rgba(255,255,255,.9); backdrop-filter:blur(8px);
-    border:1px solid var(--line); border-radius:999px; padding:9px 20px;
-    color:var(--ink-2); font-size:13.5px; box-shadow:var(--shadow); max-width:90%;
+    position:absolute; left:50%; transform:translateX(-50%); bottom:22px;
+    background:var(--surface); border:1px solid var(--border); border-radius:999px;
+    padding:9px 18px; color:var(--ink-2); font-size:13px; box-shadow:var(--shadow-md); max-width:88%;
   }
-  .caption strong { color:var(--ink); font-weight:650; }
+  .caption strong { color:var(--ink); font-weight:550; }
+  .caption .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; margin-right:8px; }
 </style>
 </head>
 <body>
-<header>
-  <span class="brand">Vyapar-to-Agent</span>
-  <nav class="tabs">
-    <a href="/">Shop</a>
-    <a href="/merchant.html">Merchant</a>
-    <a href="/shopper.html">Shopper</a>
-    <a href="/market.html" class="on">Market</a>
-  </nav>
-  <span class="spacer"></span>
-  <span class="tag">one buyer-agent, three shops that never had a website</span>
-  <span class="pill" id="conn">connecting…</span>
-</header>
+<div id="nav"></div>
 
 <div class="stage">
   <svg id="svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
-  <div class="caption" id="cap">Waiting…</div>
+  <div class="caption" id="cap"><span class="lbl">idle</span>Waiting for activity…</div>
 </div>
 
 <script type="module">
+import { boot, esc as escape } from "/ui.js";
 const svg = document.getElementById("svg");
 const NS = "http://www.w3.org/2000/svg";
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const esc = escape;
 
 /* Event families share the ticker's colours, so the two views read as one system. */
+/* Same families, same colours as the merchant activity stream. */
 const COLOR = {
-  discovery: "#2a78d6",
-  negotiation: "#eb6834",
-  payment: "#0ca30c",
-  fulfillment: "#0ca30c",
-  clarification: "#fab219",
-  extraction: "#8a8078",
-  audit: "#2a78d6",
+  discovery: "#2a78d6", negotiation: "#eb6834", payment: "#127a4d",
+  fulfillment: "#127a4d", clarification: "#a86a09", extraction: "#8b909e", audit: "#2a78d6",
 };
 
 const el = (name, attrs, parent) => {
@@ -106,7 +92,8 @@ for (const [id, n] of nodes) {
 function flash(merchantId, type, message) {
   const family = type.split(".")[0];
   const colour = COLOR[family] ?? "#2a78d6";
-  document.getElementById("cap").innerHTML = `<strong>${esc(message)}</strong>`;
+  document.getElementById("cap").innerHTML =
+    `<span class="lbl">${esc(family)}</span><strong>${esc(message)}</strong>`;
 
   const pulse = merchantId ? pulses.get(merchantId) : null;
   const group = merchantId ? groups.get(merchantId) : null;
@@ -129,11 +116,7 @@ function flash(merchantId, type, message) {
   setTimeout(() => group.classList.remove("hot"), 1100);
 }
 
-const socket = io();
-const conn = document.getElementById("conn");
-socket.on("connect", () => { conn.textContent = "live"; conn.className = "pill live"; });
-socket.on("disconnect", () => { conn.textContent = "offline"; conn.className = "pill warn"; });
-socket.on("event", (e) => flash(e.merchant_id, e.type, e.message));
+await boot({ onEvent: (e) => flash(e.merchant_id, e.type, e.message) });
 </script>
 </body>
 </html>

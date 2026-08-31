@@ -35,6 +35,19 @@ The confidence scores are the part that matters. They are read by a gate: anythi
 - Attributes: only what is stated or plainly visible. Do not pad the record with likely-sounding attributes.
 - Write the product name in English as a shopper would search for it, even though the input is Hinglish.
 
+Categories are a fixed list. Pick the closest one; never invent a value, and use a *.other before forcing a bad fit:
+- apparel.saree / apparel.kurta / apparel.dupatta / apparel.other — clothing and textiles worn
+- home.bedsheet / home.towel / home.other — household textiles
+- mobile.case — phone covers and cases of any material
+- mobile.charger — chargers, cables, adapters, power banks
+- mobile.audio — earphones, headphones, speakers
+- mobile.screenguard — screen protectors, tempered glass
+- mobile.other — any other phone accessory
+- food.snack — anything edible: savoury snacks, sweets, chips, mixtures. One bucket, deliberately.
+- other — genuinely none of the above
+
+The shop's own trade is the strongest hint you have. A phone accessories shop is not selling food; a snack shop is not selling sarees. If the item and the shop disagree, re-read the item.
+
 In notes, say in one line what each uncertain reading was based on.`;
 
 const MEDIA_TYPES: Record<string, "image/png" | "image/jpeg" | "image/webp" | "image/gif"> = {
@@ -48,6 +61,7 @@ const MEDIA_TYPES: Record<string, "image/png" | "image/jpeg" | "image/webp" | "i
 /** The merchant's input as text. Shared, so both providers get the same wording. */
 function describeInput(raw: RawProduct): string {
   return [
+    raw.merchant_name ? `Shop: ${raw.merchant_name}` : null,
     raw.photo_filename ? `Photo filename: ${raw.photo_filename}` : null,
     `Voice note (transcribed): "${raw.voice_note}"`,
     raw.payment_page_description

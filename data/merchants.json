@@ -1,5 +1,5 @@
 {
-  "_note": "Three merchant personas. Photos exist only for Meena's — Rafiq and Amma are text-only, which is the realistic case: most merchants send a voice note and nothing else. Amma's input is deliberately messy so Milestone G's two gates both fire on real data rather than on a contrived test case.",
+  "_note": "Three merchant personas. Each has exactly one piece of existing digital infrastructure — a UPI VPA and the QR sticker that goes with it. That QR moves money and carries no information: an agent that scans it learns nothing about what is for sale. Everything else here (the catalog, the floors, the mandates) is what this project adds on top of that one asset. Photos exist only for Meena's; Rafiq and Amma are voice-note only, which is the realistic case.",
   "merchants": [
     {
       "merchant_id": "mer_meena",
@@ -58,7 +58,10 @@
           "floor_price": 410,
           "max_rounds": 2
         }
-      ]
+      ],
+      "upi_vpa": "meenasarees@okhdfcbank",
+      "since": "2019",
+      "qr_note": "Printed QR taped to the counter"
     },
     {
       "merchant_id": "mer_rafiq",
@@ -112,7 +115,10 @@
           "floor_price": 80,
           "max_rounds": 5
         }
-      ]
+      ],
+      "upi_vpa": "rafiqmobile@ybl",
+      "since": "2021",
+      "qr_note": "Soundbox on the shelf"
     },
     {
       "merchant_id": "mer_amma",
@@ -182,7 +188,10 @@
           "floor_price": 230,
           "max_rounds": 3
         }
-      ]
+      ],
+      "upi_vpa": "ammasnacks@paytm",
+      "since": "2022",
+      "qr_note": "QR sticker on the sweet jar"
     }
   ]
 }

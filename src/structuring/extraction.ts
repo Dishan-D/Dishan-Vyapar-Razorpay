@@ -3,6 +3,38 @@ import type { CatalogItem } from "../mandates/schema.js";
 import type { SanityResult, SanityVerdict } from "./sanity.js";
 
 /**
+ * The categories an extraction may use.
+ *
+ * A fixed list, not free text, because the price-sanity check groups by category
+ * — and a model left to phrase its own returns "Saree", "sweets", "Snacks" and
+ * "" for four items that belong together. Every group then has one member, every
+ * baseline is too small, and the check silently skips everything. Constraining
+ * the field is what makes the comparison possible at all.
+ *
+ * Edible goods share one bucket on purpose: a snack shop's stock is one price
+ * family, and splitting sweets from savouries would halve the baseline for no
+ * gain.
+ */
+export const CATEGORIES = [
+  "apparel.saree",
+  "apparel.kurta",
+  "apparel.dupatta",
+  "apparel.other",
+  "home.bedsheet",
+  "home.towel",
+  "home.other",
+  "mobile.case",
+  "mobile.charger",
+  "mobile.audio",
+  "mobile.screenguard",
+  "mobile.other",
+  "food.snack",
+  "other",
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+/**
  * What the structuring agent is asked to return.
  *
  * Richer than the CatalogItem it becomes: the model scores confidence on every
@@ -15,8 +47,8 @@ export const ExtractionSchema = z.object({
   name: z.string().describe("Product name as a shopper would search for it, in English"),
   name_confidence: z.number().min(0).max(1),
   category: z
-    .string()
-    .describe("Dotted category path, e.g. apparel.saree, home.bedsheet, apparel.kurta"),
+    .enum(CATEGORIES)
+    .describe("The closest matching category. Pick from the list; use *.other rather than inventing one."),
   category_confidence: z.number().min(0).max(1),
   attributes: z
     .record(z.string(), z.string())
@@ -60,6 +92,8 @@ export interface RawProduct {
   item_id: string;
   sample_id: string;
   merchant_id: string;
+  /** The shop this came from. A phone shop does not sell snacks. */
+  merchant_name?: string;
   /** Pre-transcribed voice note. Real speech-to-text is out of scope — see README. */
   voice_note: string;
   /** Filename carries a loose hint, exactly as a merchant's phone gallery would. */

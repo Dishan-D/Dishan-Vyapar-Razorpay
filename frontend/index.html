@@ -3,122 +3,94 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Vyapar-to-Agent</title>
+<title>Vyapar</title>
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .wrap { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); gap:18px;
-          padding:22px 26px 70px; max-width:1500px; margin:0 auto; align-items:start; }
-  @media (max-width:1040px){ .wrap { grid-template-columns:1fr; } }
-  .col { display:grid; gap:18px; min-width:0; }
+  .wrap { display:grid; grid-template-columns:minmax(0,1.08fr) minmax(0,1fr); gap:20px;
+          padding:18px 26px 72px; max-width:1460px; margin:0 auto; align-items:start; }
+  @media (max-width:1060px){ .wrap { grid-template-columns:1fr; } }
+  .col { display:grid; gap:16px; min-width:0; }
 
-  .shop + .shop { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
-  .shophead { display:flex; align-items:baseline; gap:9px; margin-bottom:11px; }
-  .shophead .nm { font-weight:700; font-size:14.5px; }
+  .shop { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
+  .shop + .shop { margin-top:14px; }
+  .shophead { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--surface-2); }
+  .avatar { width:34px; height:34px; border-radius:9px; object-fit:cover; border:1px solid var(--border); background:var(--surface-3); flex:none; }
+  .avatar.ph { display:grid; place-items:center; font-size:13px; font-weight:600; color:var(--ink-3); }
+  .shophead .nm { font-size:13.5px; font-weight:600; }
+  .shophead .meta { font-size:11.5px; color:var(--ink-3); margin-top:1px; }
+  .shophead .vpa { font-family:var(--mono); font-size:10.5px; color:var(--ink-4); }
 
+  .plist { padding:4px 16px 14px; }
   .product {
-    display:grid; grid-template-columns:78px 1fr auto; gap:14px; align-items:center;
-    width:100%; text-align:left; padding:11px; border-radius:12px;
-    background:var(--card); border:1px solid var(--line); color:inherit;
-    transition:border-color .14s, box-shadow .14s, transform .07s;
+    display:grid; grid-template-columns:56px 1fr auto; gap:14px; align-items:center;
+    width:100%; text-align:left; padding:13px 0; background:none; border:0;
+    border-bottom:1px solid var(--border); color:inherit; transition:opacity .12s;
   }
-  .product + .product { margin-top:9px; }
-  .product:hover:not(:disabled) { border-color:var(--s1); box-shadow:var(--shadow); }
-  .product:active:not(:disabled) { transform:translateY(1px); }
-  .product.sel { border-color:var(--good); background:var(--good-bg); }
-  .product:disabled { background:var(--card-2); }
-  .thumb { width:78px; height:78px; border-radius:10px; object-fit:cover; background:var(--plane-2); border:1px solid var(--line); }
-  .thumb.ph { display:grid; place-items:center; color:var(--ink-3); font-size:10px; text-align:center; line-height:1.35; padding:5px; }
-  .pname { font-weight:640; font-size:14.5px; margin-bottom:2px; }
-  .pmeta { color:var(--ink-3); font-size:12.5px; }
-  .pprice { font-family:var(--mono); font-size:14px; text-align:right; white-space:nowrap; }
-  .pprice small { display:block; font-family:inherit; font-size:11px; color:var(--ink-3); font-weight:500; margin-top:2px; }
-  .conf { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
-  .heldmsg { margin-top:8px; font-size:12.5px; color:#a02724; background:var(--crit-bg); border:1px solid #f2c3c1; border-radius:9px; padding:7px 10px; }
+  .plist .product:last-child { border-bottom:0; }
+  .product:hover:not(:disabled) .pname { color:var(--blue); }
+  .product:disabled { opacity:.62; }
+  .thumb { width:56px; height:56px; border-radius:9px; object-fit:cover; border:1px solid var(--border); background:var(--surface-3); }
+  .thumb.ph { display:grid; place-items:center; color:var(--ink-4); font-size:9px; text-align:center; line-height:1.3; padding:4px; }
+  .pname { font-size:14px; font-weight:550; letter-spacing:-.01em; }
+  .pmeta { color:var(--ink-3); font-size:12px; margin-top:1px; }
+  .prow { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
+  .pright { text-align:right; }
+  .pright .avail { font-size:11px; color:var(--ink-3); margin-top:3px; }
+  .heldwhy { margin-top:7px; font-size:11.5px; color:var(--red); }
 
-  .mandate { display:grid; gap:12px; }
-  .fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .presets { display:flex; gap:8px; flex-wrap:wrap; }
-
-  .stagecard { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px; box-shadow:var(--shadow); }
-  .stagecard.idle { opacity:.55; box-shadow:none; }
-  .sh { display:flex; align-items:center; gap:11px; }
-  .num { width:23px; height:23px; border-radius:50%; display:grid; place-items:center; flex:none;
-         font-size:11px; font-weight:700; border:1.5px solid var(--line-2); color:var(--ink-3); background:var(--card); }
-  .num.on { background:var(--good); border-color:var(--good); color:#fff; }
-  .num.no { background:var(--critical); border-color:var(--critical); color:#fff; }
-  .st { font-weight:650; font-size:14.5px; }
-  .sbody { margin-top:13px; }
+  .fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+  .presets { display:flex; gap:7px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
+<div id="nav"></div>
 
-<header>
-  <span class="brand">Vyapar-to-Agent</span>
-  <nav class="tabs">
-    <a href="/" class="on">Shop</a>
-    <a href="/merchant.html">Merchant</a>
-    <a href="/shopper.html">Shopper</a>
-    <a href="/market.html">Market</a>
-  </nav>
-  <span class="spacer"></span>
-  <span class="tag">a UPI-only shop, made transactable by an AI buyer-agent</span>
-  <span class="pill" id="src">catalog: —</span>
-  <span class="pill" id="gw">gateway: —</span>
-</header>
+<div class="pagehead">
+  <h1>Discover products</h1>
+  <p>Three local merchants · verified availability</p>
+</div>
 
 <div class="wrap">
   <div class="col">
-    <section>
-      <h2><span class="n">1</span>The shops</h2>
-      <p class="sub" style="margin:-6px 0 14px">
-        Built from photos and Hinglish voice notes. Pick something to buy —
-        greyed items can't be sold yet, and say why.
-      </p>
-      <div id="products"><p class="empty">loading…</p></div>
-    </section>
+    <div id="products"><section><p class="empty">Loading…</p></section></div>
 
     <section>
-      <h2>What the buyer-agent may do</h2>
-      <div class="mandate">
-        <div class="fields">
-          <div><label for="max">Spending ceiling</label><input id="max" type="number" value="1500" /></div>
-          <div><label for="open">Opening offer</label><input id="open" type="number" value="1100" /></div>
-        </div>
-        <div class="presets">
-          <button class="ghost" data-max="1500" data-open="1100">Fair buyer</button>
-          <button class="ghost" data-max="900" data-open="800">Can't afford it</button>
-          <button class="ghost" data-max="5000" data-open="1300">Generous buyer</button>
-        </div>
-        <p class="sub" style="margin:0">
-          These limits are signed into the Intent Mandate. The agent cannot exceed the
-          ceiling, and no shop will go below its own floor.
-        </p>
+      <h2>Buyer mandate</h2>
+      <p class="hint">Signed into the Intent Mandate. The agent cannot exceed the ceiling; no shop goes below its own floor.</p>
+      <div class="fields">
+        <div><label for="max">Ceiling</label><input id="max" type="number" value="1500" /></div>
+        <div><label for="open">Opening offer</label><input id="open" type="number" value="1100" /></div>
+      </div>
+      <div class="presets">
+        <button class="btn secondary" data-max="1500" data-open="1100">Fair buyer</button>
+        <button class="btn secondary" data-max="900" data-open="800">Can't afford it</button>
+        <button class="btn secondary" data-max="5000" data-open="1300">Generous</button>
       </div>
     </section>
   </div>
 
   <div class="col">
-    <section style="box-shadow:none; background:transparent; border:none; padding:0">
-      <h2 style="margin-bottom:6px">The transaction</h2>
-      <p class="sub" id="flowsub" style="margin:0 0 14px">Pick a product to begin.</p>
+    <section id="txncard">
+      <h2>Transaction</h2>
+      <p class="hint" id="flowsub">Select a product to begin.</p>
 
-      <div style="display:grid; gap:12px">
-        <div class="stagecard idle" id="c-neg">
-          <div class="sh"><span class="num" id="n-neg">1</span><span class="st">Discover &amp; negotiate</span></div>
-          <div class="sbody" id="b-neg"><p class="empty">Nothing yet.</p></div>
+      <div class="tl" style="margin-top:18px">
+        <div class="step idle" id="s-neg"><span class="mk">01</span>
+          <div class="st">Discover &amp; negotiate</div>
+          <div class="sbody" id="b-neg"><p class="empty">Not started.</p></div>
         </div>
-        <div class="stagecard idle" id="c-pay">
-          <div class="sh"><span class="num" id="n-pay">2</span><span class="st">Pay</span></div>
-          <div class="sbody" id="b-pay"><p class="empty">Nothing yet.</p></div>
+        <div class="step idle" id="s-pay"><span class="mk">02</span>
+          <div class="st">Payment</div>
+          <div class="sbody" id="b-pay"><p class="empty">Not started.</p></div>
         </div>
-        <div class="stagecard idle" id="c-ful">
-          <div class="sh"><span class="num" id="n-ful">3</span><span class="st">Shopkeeper confirms handover</span></div>
-          <div class="sbody" id="b-ful"><p class="empty">Nothing yet.</p></div>
+        <div class="step idle" id="s-ful"><span class="mk">03</span>
+          <div class="st">Fulfillment</div>
+          <div class="sbody" id="b-ful"><p class="empty">Not started.</p></div>
         </div>
-        <div class="stagecard idle" id="c-aud">
-          <div class="sh"><span class="num" id="n-aud">4</span><span class="st">Signed audit chain</span></div>
-          <div class="sbody" id="b-aud"><p class="empty">Nothing yet.</p></div>
+        <div class="step idle" id="s-aud"><span class="mk">04</span>
+          <div class="st">Audit</div>
+          <div class="sbody" id="b-aud"><p class="empty">Not started.</p></div>
         </div>
       </div>
     </section>
@@ -126,92 +98,83 @@
 </div>
 
 <script type="module">
+import { boot, api, rupee, esc, note } from "/ui.js";
 const $ = (id) => document.getElementById(id);
-const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 
-let config = { gateway: "simulated", requires_checkout: false, razorpay_key_id: null };
-let items = [];
-let merchants = [];
-let txnId = null;
+let config = {}; let items = []; let merchants = []; let txnId = null;
 
-const api = async (p, o) => {
-  const res = await fetch(p, { ...o, headers: { "content-type": "application/json", ...(o?.headers ?? {}) } });
-  return { status: res.status, body: await res.json() };
+const STEPS = ["neg","pay","ful","aud"];
+STEPS.forEach((k,i) => { $(`s-${k}`).querySelector(".mk").dataset.n = String(i+1).padStart(2,"0"); });
+
+function setStep(key, state, html) {
+  const step = $(`s-${key}`), mk = step.querySelector(".mk");
+  step.className = `step ${state}`;
+  mk.textContent = state === "done" ? "✓" : state === "failed" ? "✕" : mk.dataset.n;
+  if (html !== undefined) { $(`b-${key}`).innerHTML = html; $(`b-${key}`).classList.add("enter"); }
+}
+function resetFlow() { txnId = null; for (const k of STEPS) setStep(k, "idle", `<p class="empty">Not started.</p>`); }
+
+// ── shops ───────────────────────────────────────────────────────────────────
+const confChip = (label, v) => {
+  const cls = v < 0.6 ? "bad" : v >= 0.85 ? "ok" : "warn";
+  return `<span class="chip ${cls}">${label} ${Math.round(v*100)}%</span>`;
 };
-const note = (kind, text) => `<div class="note ${kind}">${text}</div>`;
 
-["neg","pay","ful","aud"].forEach((k,i) => { $(`n-${k}`).dataset.n = String(i+1); });
-
-function setStage(key, state, html) {
-  const card = $(`c-${key}`), num = $(`n-${key}`);
-  card.classList.toggle("idle", state === "idle");
-  num.classList.toggle("on", state === "done");
-  num.classList.toggle("no", state === "failed");
-  num.textContent = state === "done" ? "✓" : state === "failed" ? "✕" : num.dataset.n;
-  if (html !== undefined) $(`b-${key}`).innerHTML = html;
-}
-function resetFlow() {
-  txnId = null;
-  for (const k of ["neg","pay","ful","aud"]) setStage(k, "idle", `<p class="empty">Nothing yet.</p>`);
-}
-
-// ── the shops ───────────────────────────────────────────────────────────────
-function chip(label, v) {
-  const cls = v < 0.6 ? "bad" : v >= 0.85 ? "good" : "warn";
-  const icon = v < 0.6 ? "✕" : v >= 0.85 ? "✓" : "!";
-  return `<span class="chip ${cls}">${icon} ${label} ${v.toFixed(2)}</span>`;
-}
-
-function productCard(item) {
+function productRow(item) {
   const held = !item.transactable;
-  const attrs = Object.entries(item.attributes).map(([k,v]) => `${k}: ${v}`).join(" · ");
+  const attrs = Object.entries(item.attributes).map(([k,v]) => v).join(" · ");
   const thumb = item.photo_url
-    ? `<img class="thumb" src="${item.photo_url}" alt="${esc(item.name)}"
-           onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'voice note only'}))" />`
-    : `<div class="thumb ph">voice note<br>only</div>`;
+    ? `<img class="thumb" src="${item.photo_url}" alt=""
+           onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'voice note'}))" />`
+    : `<div class="thumb ph">voice<br>note</div>`;
   return `<button class="product" data-id="${item.item_id}" ${held ? "disabled" : ""}>
     ${thumb}
     <div>
       <div class="pname">${esc(item.name)}</div>
       <div class="pmeta">${esc(attrs)}</div>
-      <div class="conf">${chip("price", item.price.confidence)}${chip("stock", item.stock.confidence)}</div>
-      ${held ? `<div class="heldmsg">Can't be sold yet — ${esc(item.held_because.join("; "))}</div>` : ""}
+      <div class="prow">
+        <span class="state ${held ? "held" : "ok"}"><span class="dot ${held ? "held" : "ok"}"></span>${held ? "Held" : "Available"}</span>
+        ${confChip("Price", item.price.confidence)}
+      </div>
+      ${held ? `<div class="heldwhy">Waiting for merchant clarification — ${esc(item.held_because.join("; "))}</div>` : ""}
     </div>
-    <div class="pprice">
-      ${item.price.confidence === 0 ? "—" : rupee(item.price.value)}
-      <small>${item.price.confidence === 0 ? "no price given" : item.stock.confidence === 0 ? "stock unknown" : `${item.stock.quantity} in stock`}</small>
+    <div class="pright">
+      <div class="money lg">${item.price.confidence === 0 ? "—" : rupee(item.price.value)}</div>
+      <div class="avail">${item.price.confidence === 0 ? "no price set" : item.stock.confidence === 0 ? "stock unknown" : `${item.stock.quantity} in stock`}</div>
     </div>
   </button>`;
 }
 
 async function loadCatalog() {
   const [{ body: cat }, { body: ms }] = await Promise.all([api("/catalog"), api("/merchants")]);
-  items = cat.items;
-  merchants = ms.merchants;
-  $("src").textContent = `catalog: ${cat.provider === "fixture" ? "fixtures" : "extracted live"}`;
-  if (cat.provider !== "fixture") $("src").className = "pill live";
+  items = cat.items; merchants = ms.merchants;
 
   $("products").innerHTML = merchants.map((m) => {
     const mine = items.filter((i) => i.merchant_id === m.merchant_id);
+    const photo = mine.find((i) => i.photo_url)?.photo_url;
+    const avatar = photo
+      ? `<img class="avatar" src="${photo}" alt="" />`
+      : `<div class="avatar ph">${esc(m.name[0])}</div>`;
     return `<div class="shop">
       <div class="shophead">
-        <span class="nm">${esc(m.name)}</span>
-        <span class="sub">${esc(m.city)}</span>
-        <span class="spacer"></span>
-        <span class="chip">readiness ${m.readiness.score}</span>
+        ${avatar}
+        <div style="flex:1;min-width:0">
+          <div class="nm">${esc(m.name)}</div>
+          <div class="meta">${esc(m.city)} · ${mine.length} products · <span class="vpa">${esc(m.upi_vpa)}</span></div>
+        </div>
+        <span class="chip">Readiness ${m.readiness.score}</span>
       </div>
-      ${mine.map(productCard).join("")}
+      <div class="plist">${mine.map(productRow).join("")}</div>
     </div>`;
   }).join("");
 
   for (const el of document.querySelectorAll(".product[data-id]")) el.onclick = () => start(el.dataset.id);
 }
 
-// ── the transaction ─────────────────────────────────────────────────────────
+// ── transaction ─────────────────────────────────────────────────────────────
 const renderTurns = (log) => log.map((t) => `<div class="turn ${t.actor}">
-  <span class="r">r${t.round}</span><span class="who">${t.actor}</span>
-  <span><span class="msg">${esc(t.message)}</span><div class="why">${esc(t.rationale)}</div></span>
+  <div class="side"><div class="who">${t.actor}</div><div class="rd">round ${t.round}</div></div>
+  <div class="body"><div class="amt">${t.amount ? rupee(t.amount) : "—"}</div><div class="why">Rule: ${esc(t.rationale)}</div></div>
 </div>`).join("");
 
 async function start(itemId) {
@@ -220,134 +183,105 @@ async function start(itemId) {
   const merchant = merchants.find((m) => m.merchant_id === item.merchant_id);
 
   resetFlow();
-  for (const el of document.querySelectorAll(".product")) el.classList.remove("sel");
-  document.querySelector(`.product[data-id="${itemId}"]`)?.classList.add("sel");
+  $("flowsub").textContent = `${item.name} · ${merchant?.name ?? item.merchant_id}`;
+  setStep("neg", "active", `<p class="empty">Negotiating…</p>`);
 
-  $("flowsub").textContent = `Buying ${item.name} from ${merchant?.name ?? item.merchant_id}`;
-  setStage("neg", "active", `<p class="empty">Negotiating…</p>`);
+  // item_id pins the shop: two merchants stock the same case under one name.
+  const { status, body } = await api("/transactions", { method: "POST", body: JSON.stringify({
+    want: item.name, item_id: item.item_id,
+    max_price: Number($("max").value), opening_offer: Number($("open").value),
+  })});
 
-  // item_id pins the shop: two merchants stock the same case, and a name search
-  // would quietly pick whichever is cheaper rather than the one clicked.
-  const { status, body } = await api("/transactions", {
-    method: "POST",
-    body: JSON.stringify({
-      want: item.name, item_id: item.item_id,
-      max_price: Number($("max").value), opening_offer: Number($("open").value),
-    }),
-  });
-
-  if (status === 409) { setStage("neg","failed", note("warn", esc(body.error))); return; }
-  if (status === 404) { setStage("neg","failed", note("warn","Nothing offerable matched that.")); return; }
-
+  if (status === 409) return setStep("neg","failed", note("warn", esc(body.error)));
+  if (status === 404) return setStep("neg","failed", note("warn","Nothing offerable matched."));
   if (body.status === "no_deal") {
-    setStage("neg","failed", renderTurns(body.log) + note("bad", esc(body.reason)));
-    setStage("pay","idle", note("warn","No payment attempted. The shop's floor held."));
+    setStep("neg","failed", renderTurns(body.log) + note("bad", esc(body.reason)));
+    setStep("pay","idle", note("warn","No payment attempted — the merchant's floor held."));
     return;
   }
-  if (status !== 201) { setStage("neg","failed", note("bad", esc(body.error ?? "unexpected error"))); return; }
+  if (status !== 201) return setStep("neg","failed", note("bad", esc(body.error ?? "unexpected error")));
 
   txnId = body.transaction_id;
-  setStage("neg","done", renderTurns(body.log) +
-    note("ok", `Agreed at <strong>${rupee(body.final_price)}</strong> — above the shop's floor, within the agent's ceiling.`));
-
-  const orderRow = `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>`;
+  setStep("neg","done", renderTurns(body.log) +
+    note("ok", `Agreed at <strong>${rupee(body.final_price)}</strong> — above the shop's floor, within the mandate.`));
 
   if (body.status === "awaiting_payment") {
-    setStage("pay","active",
-      note("warn", `Order opened for ${rupee(body.final_price)}. Complete it in Razorpay Checkout.`) +
-      orderRow + `<button class="cta" id="reopen" style="margin-top:10px">Open Razorpay Checkout</button>`);
+    setStep("pay","active",
+      note("warn", `Order open for ${rupee(body.final_price)}. Complete it in Razorpay Checkout.`) +
+      `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>` +
+      `<button class="btn go" id="reopen" style="margin-top:12px">Open Checkout</button>`);
     $("reopen").onclick = () => openCheckout(body);
-    await loadAudit();
-    openCheckout(body);
-    return;
+    await loadAudit(); openCheckout(body); return;
   }
 
-  setStage("pay","done", note("ok", `Paid ${rupee(body.final_price)}`) +
+  setStep("pay","done", note("ok","Payment confirmed") +
     `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>` +
     (body.gateway === "simulated" ? note("warn","Simulated gateway — add Razorpay test keys for real IDs.") : ""));
-  awaitFulfillment();
-  await loadAudit();
+  awaitFulfillment(); await loadAudit();
 }
 
 function openCheckout(deal) {
   if (!config.razorpay_key_id || typeof window.Razorpay !== "function") {
-    $("b-pay").innerHTML += note("bad", "Razorpay Checkout could not load.");
-    return;
+    $("b-pay").innerHTML += note("bad","Razorpay Checkout could not load."); return;
   }
   new window.Razorpay({
     key: config.razorpay_key_id, order_id: deal.order_id, amount: deal.amount_paise,
-    currency: "INR", name: "Vyapar-to-Agent",
-    description: `${deal.item_id} · agreed ${rupee(deal.final_price)}`,
+    currency: "INR", name: "Vyapar", description: `${deal.item_id} · ${rupee(deal.final_price)}`,
     handler: async (response) => {
       // Not trusted here — the server verifies the signature against the order
       // it authorized before it will sign a Payment Mandate.
       const { status, body } = await api(`/transactions/${deal.transaction_id}/settle-payment`, {
-        method: "POST", body: JSON.stringify(response),
-      });
+        method: "POST", body: JSON.stringify(response) });
       if (status !== 201) { $("b-pay").innerHTML += note("bad", esc((body.reasons ?? [body.error]).join("; "))); return; }
-      setStage("pay","done", note("ok", `Paid ${rupee(deal.final_price)}`) +
+      setStep("pay","done", note("ok","Payment confirmed") +
         `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>`);
-      awaitFulfillment();
-      await loadAudit();
+      awaitFulfillment(); await loadAudit();
     },
-    modal: { ondismiss: () => {
-      $("b-pay").innerHTML += note("warn","Checkout dismissed — the order stands unpaid, and no payment mandate was issued.");
-    }},
+    modal: { ondismiss: () => { $("b-pay").innerHTML += note("warn","Checkout dismissed — the order stands unpaid, and no payment mandate was issued."); } },
   }).open();
 }
 
 function awaitFulfillment() {
-  setStage("ful","active",
-    note("warn","Paid, but not delivered. Nothing here infers a handover — only the shopkeeper's signature can.") +
-    `<button class="cta warm" id="confirm">Shopkeeper: I handed it over</button>`);
+  setStep("ful","active",
+    note("warn","Awaiting merchant handover. Nothing here infers delivery — only the shopkeeper's signature closes it.") +
+    `<button class="btn primary" id="confirm" style="margin-top:12px">Merchant: I handed it over</button>`);
   $("confirm").onclick = async () => {
     $("confirm").disabled = true;
     const { status, body } = await api(`/transactions/${txnId}/confirm-fulfillment`, {
-      method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
-    });
-    setStage("ful", status === 201 ? "done" : "failed",
-      status === 201 ? note("ok","Handover signed by the shopkeeper.")
+      method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }) });
+    setStep("ful", status === 201 ? "done" : "failed",
+      status === 201 ? note("ok","Delivered — signed by the merchant.")
                      : note("bad", esc((body.reasons ?? [body.error]).join("; "))));
     await loadAudit();
   };
 }
 
+const MANDATE_LABEL = { intent:"Intent", cart:"Negotiation", payment:"Payment", fulfillment:"Fulfillment" };
+
 async function loadAudit() {
   if (!txnId) return;
   const { body } = await api(`/transactions/${txnId}/audit`);
-  const chain = body.timeline.map((s) => {
-    if (!s.present) return `<div class="link idle"><span class="mk">○</span>
-      <div><div class="lname">${s.stage}</div><div class="ldet">${esc(s.headline)}</div></div></div>`;
-    const sigs = s.signatures.map((x) => `<span class="${x.verified ? "y":"n"}">${x.verified ? "✔":"✘"} ${x.role}</span>`).join("  ");
-    return `<div class="link"><span class="mk">${s.verified ? "✅":"❌"}</span>
-      <div><div class="lname">${s.stage}</div><div class="ltxt">${esc(s.headline)}</div>
-      ${s.detail.map((d) => `<div class="ldet">${esc(d)}</div>`).join("")}
-      <div class="lhash">${esc(s.hash)}</div><div class="sigs">${sigs}</div></div></div>`;
+  const rows = body.timeline.map((s) => {
+    const label = MANDATE_LABEL[s.stage] ?? s.stage;
+    if (!s.present) return `<div class="turn" style="opacity:.5"><div class="side"><div class="who">${label}</div></div>
+      <div class="body"><div class="why">${esc(s.headline)}</div></div></div>`;
+    return `<div class="turn"><div class="side"><div class="who">${label}</div></div>
+      <div class="body">
+        <div style="font-size:13px">${s.verified ? "✓" : "✕"} ${esc(s.headline)}</div>
+        <div class="mono" style="margin-top:3px">${esc(s.hash.slice(0,30))}…</div>
+        <div class="why">signed by ${s.signatures.map((x) => esc(x.role)).join(", ")}</div>
+      </div></div>`;
   }).join("");
-
-  setStage("aud", body.verified ? "done" : "failed",
-    (body.verified
-      ? note("ok","CHAIN VERIFIED — every signature and hash link re-checked just now, not read from a stored flag.")
-      : note("bad", esc(body.failures.join("; ")))) +
-    `<div>${chain}</div><div class="mono" style="margin-top:11px">status ${body.status} · ${esc(body.fingerprint)}</div>`);
+  setStep("aud", body.verified ? "done" : "failed",
+    (body.verified ? note("ok","Chain verified — every signature and hash link re-checked just now.")
+                   : note("bad", esc(body.failures.join("; ")))) + rows);
 }
 
-// ── wiring ──────────────────────────────────────────────────────────────────
-for (const p of document.querySelectorAll(".presets .ghost")) {
+for (const p of document.querySelectorAll(".presets .btn")) {
   p.onclick = () => { $("max").value = p.dataset.max; $("open").value = p.dataset.open; };
 }
 
-api("/config").then(({ body }) => {
-  config = body;
-  const gw = $("gw");
-  gw.textContent = `gateway: ${body.gateway}${body.requires_checkout ? " · Checkout" : ""}`;
-  if (body.gateway === "razorpay") gw.className = "pill live";
-});
-
-// A resolved clarification changes what is sellable — reflect it without a refresh.
-const socket = io();
-socket.on("event", (e) => { if (e.type.startsWith("clarification")) loadCatalog(); });
-
+config = await boot({ onEvent: (e) => { if (e.type.startsWith("clarification")) loadCatalog(); } });
 resetFlow();
 loadCatalog();
 </script>

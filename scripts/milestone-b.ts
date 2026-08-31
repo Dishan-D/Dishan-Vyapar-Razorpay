@@ -52,6 +52,14 @@ async function main(): Promise<void> {
   } else {
     console.log(`  ${y("fixtures")} ${dim("— hand-authored stand-ins, not recorded model output")}`);
   }
+  const counts = Object.entries(result.sourceCounts).map(([k, v]) => `${v} ${k}`).join(" · ");
+  console.log(`  ${dim("per item:")} ${counts}`);
+  if (result.failures.length > 0) {
+    console.log(`  ${y(`${result.failures.length} item(s) fell back to fixtures`)}`);
+    for (const f of result.failures.slice(0, 3)) {
+      console.log(`     ${dim(`${f.sample_id}: ${f.error.slice(0, 90)}`)}`);
+    }
+  }
   console.log(
     `  ${dim("photos attached:")} ${result.photosUsed}/${result.items.length}` +
       (result.photosUsed === 0

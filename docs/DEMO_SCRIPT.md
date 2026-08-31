@@ -13,16 +13,35 @@ the same live event bus.
 
 ---
 
+## The UPI thread — say this once, early
+
+Every one of these three merchants already has exactly one piece of digital
+infrastructure: a UPI VPA and the QR sticker that goes with it.
+
+| | |
+|---|---|
+| Meena's Sarees | `meenasarees@okhdfcbank`, on UPI since 2019 |
+| Rafiq Mobile Accessories | `rafiqmobile@ybl`, since 2021 |
+| Amma's Snacks | `ammasnacks@paytm`, since 2022 |
+
+That QR moves money and carries no information. An agent that scans it learns
+where to send rupees and **nothing about what it would be buying**. That is the
+gap, stated in one object: `{"upi_vpa": "ammasnacks@paytm"}`.
+
+Everything this project adds sits on top of that one asset, and the money still
+lands in the same place it always did — the merchant changes nothing about how
+they get paid. The VPAs are visible under each shop name on `/`, and the
+before/after panel on `/shopper.html` makes the point checkable.
+
 ## The header, on every page
 
 | Element | Means |
 |---|---|
-| `catalog: fixtures` | Extraction confidence came from hand-authored stand-ins. Reads `extracted live` once you run `npm run milestone-b -- --live`. |
-| `gateway: razorpay · Checkout` | Real Razorpay test-mode keys are loaded. Reads `simulated` without them, and IDs are then prefixed `sim_`. |
-| `live` (green) | Socket.io is connected. Everything on the page updates without a refresh. |
+| Catalog · `Fixtures` / `Extracted Live` | Whether confidence came from hand-authored stand-ins or a real model run. |
+| Gateway · `Razorpay · Checkout` / `Simulated` | Whether real test-mode keys are loaded. Simulated IDs are prefixed `sim_`. |
+| ● Live | Socket.io is connected; everything updates without a refresh. |
 
-Worth pointing at once, early: the badges are the honesty layer. They say which
-parts are real *right now*, on this run.
+The pills are the honesty layer. They say which parts are real *on this run*.
 
 ---
 
@@ -102,18 +121,42 @@ discovery/audit).
 
 ---
 
-## 3 · `/shopper.html` — The buyer-agent's view
+## 3 · `/shopper.html` — The buyer agent
 
-**What it is:** the agent narrating its own reasoning as a chat thread.
+**What it is:** the agentic path, end to end. You type a sentence; the agent does
+the rest and shows every step it took.
 
-Ask for something two shops both stock — **`silicone phone case`** is the one
-seeded for this — and it queries every merchant, haggles with each **separately**,
-shows both negotiation logs, then picks one.
+> *"I need a silicone phone case, nothing over ₹300"*
 
-The line that matters: each offer shows the agreed price *and* the price
-**adjusted for that merchant's delivery record**. A cheaper offer from someone who
-may not hand the goods over is not actually cheaper. The reasoning underneath
-says which won and why.
+**Step 01 · Understand** carries a blue `model` badge. This is the one place a
+model touches the buying path: turning a sentence into a mandate with a ceiling.
+Everything below it is badged `rules`. Say that out loud — *the model sets the
+budget, it never spends against it.*
+
+**Step 02 · Shop.** Every merchant queried, each haggled with **separately**, both
+negotiation paths drawn as `₹220 → ₹248 → ₹234`. Under each, the **effective
+price** — the agreed price adjusted for that shop's delivery record. A cheaper
+offer from someone who may not hand the goods over is not actually cheaper.
+
+**Step 03 · Choose**, with the reason in plain words.
+**Step 04 · Sign** — and note the mandate carries the shopper's *own sentence* in
+`prompt_playback`, so the signed record says what it was for.
+**Step 05 · Pay.** With real Razorpay keys the agent stops at the order and hands
+off to Checkout — it will not invent a payment id.
+
+### The before/after panel
+
+Below the run, for whichever shop won:
+
+| | Before | After |
+|---|---|---|
+| machine-readable fields | **1** | **32** |
+| products an agent can see | 0 | 8 |
+| can be queried | no | yes |
+| can be bought from | no | yes |
+
+The "before" is not a strawman. It is literally `{"upi_vpa":"rafiqmobile@ybl"}` —
+the whole of that shop's machine-readable existence today.
 
 ---
 
@@ -149,9 +192,14 @@ perfectly. The only thing that caught it was her own price history — one LLM
 scoring its own confidence is one opinion checking itself. Tap **₹110**. The item
 goes green, the readiness score moves.
 
-**1:20 — `/shopper.html` · the marketplace.** Ask for `silicone phone case`.
-Two shops, two independent haggles, one pick — justified on price *and*
-reliability, not price alone.
+**1:20 — `/shopper.html` · the agent buys something.** Type the sentence and
+send it. Point at the **`model`** badge on step 01 and the **`rules`** badges on
+everything under it: *"the model reads what I asked for and sets the budget. It
+never picks a price."* Two shops, two independent haggles, one justified pick.
+
+Then scroll to the before/after panel: **1 field → 32 fields.** *"Before this,
+the only machine-readable thing about Rafiq's shop was where to send money."*
+That is the USP, on screen, in numbers.
 
 **2:10 — `/` · one transaction end to end.** Click the saree. Read one grey
 rationale line aloud. *"Half the gap toward the floor. Meena set that floor.

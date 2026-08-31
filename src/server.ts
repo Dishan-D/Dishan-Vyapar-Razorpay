@@ -7,6 +7,7 @@ import { buildAuditBundle } from "./audit/bundle.js";
 import { buildCommerceHistory } from "./audit/history.js";
 import { readinessScore } from "./marketplace/readiness.js";
 import { compareMerchants } from "./marketplace/compare.js";
+import { parseIntent } from "./agent/intent.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
@@ -62,8 +63,14 @@ export async function createApp(options: AppOptions = {}) {
     options.notifier ?? (twilioConfig ? new WhatsAppNotifier(twilioConfig) : new DashboardNotifier());
   const bus = options.bus ?? new EventBus();
 
+  // Items the merchant has personally answered for. Kept beside the catalog
+  // rather than encoded in a confidence value, so nothing the model returns can
+  // ever be mistaken for a human's word.
+  const merchantConfirmed = new Set<string>(structuring.merchantConfirmed);
+
   /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
-  const sanityFor = (item: CatalogItem) => priceSanity(item, catalogItems);
+  const sanityFor = (item: CatalogItem) =>
+    priceSanity(item, catalogItems, { merchantConfirmed: merchantConfirmed.has(item.item_id) });
 
   /**
    * Ask about everything currently held (Addendum G.4). Runs at boot so the
@@ -232,6 +239,8 @@ export async function createApp(options: AppOptions = {}) {
       gateway: gateway.kind,
       merchants: structuring.merchants.length,
       catalog_size: catalogItems.length,
+      catalog_provider: structuring.provider,
+      catalog_sources: structuring.sourceCounts,
       clarification_channel: notifier.channel,
     });
   });
@@ -639,6 +648,236 @@ export async function createApp(options: AppOptions = {}) {
   });
 
   /**
+   * What a shopper's one digital asset actually gets them — before and after.
+   *
+   * This is the project's claim, made checkable rather than asserted. "Before"
+   * is not a strawman: a UPI VPA really is the whole of most of these merchants'
+   * machine-readable presence. It moves money and answers no questions.
+   */
+  app.get("/merchants/:id/before-after", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = merchants.get(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const mine = catalogItems.filter((i) => i.merchant_id === id);
+    const sellable = mine.filter((i) => !i.needs_merchant_confirmation);
+
+    res.json({
+      merchant: { merchant_id: id, name: merchant.name, city: merchant.city },
+      before: {
+        headline: "One UPI QR. Nothing an agent can read.",
+        machine_readable: { upi_vpa: merchant.upi_vpa },
+        upi_since: merchant.since,
+        qr_note: merchant.qr_note,
+        // Everything the merchant "has" that a machine cannot use.
+        unstructured_inputs: mine.map((i) => ({
+          voice_note: i.source.raw_text,
+          photo: structuring.photos[i.item_id]?.filename ?? null,
+        })),
+        structured_fields: 1,
+        products_an_agent_can_see: 0,
+        can_be_queried: false,
+        can_be_negotiated_with: false,
+        can_be_transacted_with: false,
+        why: "A VPA is a destination for money, not a description of goods. An agent that scans this QR learns where to send rupees and nothing about what it would be buying.",
+      },
+      after: {
+        headline: "Same shop, same UPI. Now machine-readable.",
+        machine_readable: { upi_vpa: merchant.upi_vpa, catalog_endpoint: `/catalog?merchant=${id}` },
+        structured_fields: mine.length * 8,
+        products_an_agent_can_see: mine.length,
+        products_an_agent_can_buy: sellable.length,
+        products_held_for_confirmation: mine.length - sellable.length,
+        can_be_queried: true,
+        can_be_negotiated_with: sellable.some((i) => policies.has(i.item_id)),
+        can_be_transacted_with: sellable.length > 0,
+        sample_record: sellable[0] ?? mine[0] ?? null,
+        why: "The same voice notes, read once and written down in a shape an agent can filter, haggle over, and pay against — with the payment still landing on the same UPI ID it always did.",
+      },
+    });
+  });
+
+  /**
+   * The agentic path: a sentence in, a completed purchase out.
+   *
+   * The only model call is the first step — turning what a person said into a
+   * mandate with a ceiling. Every step after it is deterministic, and every step
+   * is returned in `trace` so the run can be argued with rather than trusted.
+   */
+  app.post("/agent/run", async (req: Request, res: Response) => {
+    const goal = typeof req.body?.goal === "string" ? req.body.goal.trim() : "";
+    if (!goal) {
+      res.status(400).json({ error: "`goal` is required — say what you want in a sentence" });
+      return;
+    }
+    const autoConfirm = req.body?.auto_confirm !== false;
+    const trace: Array<Record<string, unknown>> = [];
+    const step = (
+      stage: string,
+      headline: string,
+      detail: Record<string, unknown> = {},
+      decidedBy: "model" | "rules" = "rules",
+    ) => {
+      trace.push({ stage, headline, decided_by: decidedBy, at: new Date().toISOString(), ...detail });
+    };
+
+    try {
+      // 1 — language → mandate
+      const { intent, parsedBy } = await parseIntent(goal);
+      step(
+        "understand",
+        `Read that as: ${intent.want}, ceiling ₹${intent.max_price}`,
+        { intent, parsed_by: parsedBy, note: intent.reasoning },
+        parsedBy === "rules" ? "rules" : "model",
+      );
+      bus.emit({ type: "discovery.queried", message: `Agent understood: "${goal}" → ${intent.want} under ₹${intent.max_price}` });
+
+      // 2 — every merchant, in parallel, each haggled with separately
+      const views = structuring.merchants.map((m) => ({
+        merchant_id: m.merchant_id,
+        name: m.name,
+        readiness: readinessFor(m.merchant_id),
+      }));
+      const comparison = compareMerchants(
+        intent.want,
+        { buyer_agent_id: "agent_xyz", max_price: intent.max_price, opening_offer: intent.opening_offer },
+        views,
+        catalogItems,
+        policies,
+      );
+      step("shop", `Checked ${views.length} shops; ${comparison.offers.length} stock it`, {
+        offers: comparison.offers.map((o) => ({
+          merchant_id: o.merchant_id,
+          merchant_name: o.merchant_name,
+          item_id: o.item_id,
+          item_name: o.item_name,
+          readiness: o.readiness.score,
+          final_price: o.final_price,
+          effective_price: o.effective_price,
+          rounds: o.outcome.rounds,
+          log: o.outcome.log,
+          eligible: o.eligible,
+          note: o.note,
+        })),
+      });
+
+      if (!comparison.selected) {
+        step("stop", "No shop reached a price inside the mandate", { reasoning: comparison.reasoning });
+        res.json({ goal, intent, status: "no_deal", trace, comparison });
+        return;
+      }
+
+      const chosen = comparison.selected;
+      step("choose", `Chose ${chosen.merchant_name} at ₹${chosen.final_price}`, {
+        reasoning: comparison.reasoning,
+        merchant_id: chosen.merchant_id,
+        effective_price: chosen.effective_price,
+      });
+
+      // 3 — mandates + order, through exactly the path a human click takes
+      const item = catalogItems.find((i) => i.item_id === chosen.item_id)!;
+      const transaction_id = `txn_${Date.now().toString(36)}`;
+      store.createTransaction({
+        transaction_id,
+        item_id: item.item_id,
+        merchant_id: item.merchant_id,
+        buyer_agent_id: "agent_xyz",
+      });
+
+      const mandateIntent = await buildIntentMandate(
+        {
+          issuer: keyring.get("buyer_agent").kid,
+          buyer_agent_id: "agent_xyz",
+          constraints: { max_price: intent.max_price, category: "", ttl_seconds: 600 },
+          prompt_playback: goal,
+        },
+        keyring,
+      );
+      store.appendMandate(transaction_id, mandateIntent);
+
+      const cart = await buildCartMandate(
+        mandateIntent,
+        {
+          item_id: item.item_id,
+          final_price: { value: chosen.final_price!, currency: "INR" },
+          merchant_id: item.merchant_id,
+        },
+        keyring,
+      );
+      store.appendMandate(transaction_id, cart);
+      step("sign", "Intent and cart mandates signed", {
+        transaction_id,
+        prompt_playback: goal,
+        note: "the shopper's own words are inside the signed intent, so the mandate says what it was for",
+      });
+
+      const chain: MandateChain = { transaction_id, intent: mandateIntent, cart };
+      const order = await authorizeCart(chain, item, keyring, gateway);
+      store.saveOrder(transaction_id, order);
+      bus.emit({
+        type: "payment.order_created",
+        transaction_id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Agent opened order ${order.order_id} for ₹${chosen.final_price}`,
+      });
+
+      if (gateway.requiresCheckout) {
+        step("pay", `Order ${order.order_id} opened — needs a human at Checkout`, {
+          order_id: order.order_id,
+          amount_paise: order.amount_paise,
+          note: "a payment id only exists once someone actually pays; the agent stops here rather than inventing one",
+        });
+        res.status(201).json({
+          goal, intent, status: "awaiting_payment", transaction_id,
+          order_id: order.order_id, amount_paise: order.amount_paise,
+          final_price: chosen.final_price, merchant: chosen.merchant_name,
+          item_id: item.item_id, trace, comparison,
+        });
+        return;
+      }
+
+      const paid = await settlePayment(chain, item, keyring, gateway, order, undefined);
+      store.appendMandate(transaction_id, paid.payment);
+      chain.payment = paid.payment;
+      bus.emit({
+        type: "payment.captured",
+        transaction_id,
+        merchant_id: item.merchant_id,
+        item_id: item.item_id,
+        message: `Agent paid ₹${chosen.final_price} to ${chosen.merchant_name}`,
+      });
+      void confirmSale(item.merchant_id, item.name, chosen.final_price!);
+      step("pay", `Paid ₹${chosen.final_price}`, { order_id: paid.order_id, payment_id: paid.payment_id });
+
+      // 4 — and here the agent stops, because it cannot hand goods over
+      if (autoConfirm) {
+        step("wait", "Paid, not delivered", {
+          note: "the agent has no way to confirm a handover — only the shopkeeper's signature closes this",
+          status: "payment_confirmed_awaiting_fulfillment",
+        });
+      }
+
+      res.status(201).json({
+        goal, intent, status: "paid", transaction_id,
+        order_id: paid.order_id, payment_id: paid.payment_id,
+        final_price: chosen.final_price, merchant: chosen.merchant_name,
+        item_id: item.item_id, trace, comparison,
+      });
+    } catch (err) {
+      if (err instanceof PaymentRefused) {
+        step("refused", "Payment refused before any gateway call", { reasons: err.reasons });
+        res.status(402).json({ goal, status: "refused", reasons: err.reasons, trace });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err), trace });
+    }
+  });
+
+  /**
    * Milestone H — the merchant's verifiable trading record, signed.
    * Not a lending product; a repackaging of what the chains already prove.
    */
@@ -694,8 +933,14 @@ export async function createApp(options: AppOptions = {}) {
     const index = catalogItems.findIndex((i) => i.item_id === clarification.item_id);
     if (index < 0) return null;
 
+    if (clarification.field === "price") merchantConfirmed.add(clarification.item_id);
+
     const outcome = applyResolution(catalogItems[index]!, clarification, value, (updated) =>
-      priceSanity(updated, catalogItems.map((i) => (i.item_id === updated.item_id ? updated : i))),
+      priceSanity(
+        updated,
+        catalogItems.map((i) => (i.item_id === updated.item_id ? updated : i)),
+        { merchantConfirmed: merchantConfirmed.has(updated.item_id) },
+      ),
     );
     catalogItems[index] = outcome.item;
 

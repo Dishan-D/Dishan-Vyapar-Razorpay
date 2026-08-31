@@ -25,6 +25,12 @@ export interface Merchant {
   name: string;
   city: string;
   whatsapp: string;
+  /** The one piece of digital infrastructure they already had. */
+  upi_vpa: string;
+  /** Year they started taking UPI. */
+  since: string;
+  /** Where the QR physically lives in the shop. */
+  qr_note: string;
 }
 
 interface MerchantSeed extends Merchant {
@@ -44,8 +50,13 @@ export interface StructuringResult {
   /** Per-field provenance through the gate (Addendum G.2), keyed by item_id. */
   audits: Record<string, ExtractionAudit>;
   sanity: Record<string, SanityResult>;
+  /** Items whose price the merchant answered for directly. */
+  merchantConfirmed: string[];
   policies: NegotiationPolicy[];
   provider: ExtractionSource;
+  /** Per-item source counts, so a partial live run cannot misreport itself. */
+  sourceCounts: Partial<Record<ExtractionSource, number>>;
+  failures: Array<{ sample_id: string; error: string }>;
   photosUsed: number;
   photos: Record<string, PhotoRef>;
 }
@@ -69,6 +80,7 @@ export async function loadRawProducts(): Promise<RawProduct[]> {
       out.push({
         ...p,
         merchant_id: m.merchant_id,
+        merchant_name: m.name,
         ...(havePhoto && photoPath ? { photo_path: photoPath } : {}),
       });
     }
@@ -99,14 +111,28 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
   const raws = await loadRawProducts();
   const useLive = live && hasCredentials();
 
+  const fixtures = await loadFixtures();
   let records: ExtractionRecord[];
+  const failures: Array<{ sample_id: string; error: string }> = [];
+
   if (useLive) {
     // Sequential on purpose: image requests are the expensive part and both
     // providers rate-limit them, so a burst buys nothing but 429s.
+    //
+    // Per item, not per run: a rate limit on the twelfth product used to throw
+    // away the eleven extractions that had already succeeded and cost money.
+    // A failed item falls back to its fixture and is reported, so a partial run
+    // is still a usable catalog that says which parts are which.
     records = [];
-    for (const raw of raws) records.push(await extractLive(raw));
+    for (const raw of raws) {
+      try {
+        records.push(await extractLive(raw));
+      } catch (err) {
+        failures.push({ sample_id: raw.sample_id, error: err instanceof Error ? err.message : String(err) });
+        records.push(await extractFromFixture(raw, fixtures));
+      }
+    }
   } else {
-    const fixtures = await loadFixtures();
     records = await Promise.all(raws.map((raw) => extractFromFixture(raw, fixtures)));
   }
 
@@ -153,13 +179,29 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
   );
 
   return {
-    merchants: seed.map(({ merchant_id, name, city, whatsapp }) => ({ merchant_id, name, city, whatsapp })),
+    merchants: seed.map(({ merchant_id, name, city, whatsapp, upi_vpa, since, qr_note }) => ({
+      merchant_id, name, city, whatsapp, upi_vpa, since, qr_note,
+    })),
     items,
     records,
     audits,
     sanity,
+    merchantConfirmed: [],
     policies,
-    provider: records[0]?.provider ?? "fixture",
+    // The run is only "live" if every record came back live. A catalog that is
+    // half model output and half stand-ins must not claim to be either.
+    provider: records.every((r) => r.provider === "groq")
+      ? "groq"
+      : records.every((r) => r.provider === "claude")
+        ? "claude"
+        : records.some((r) => r.provider !== "fixture")
+          ? ((records.find((r) => r.provider !== "fixture")!.provider) as ExtractionSource)
+          : "fixture",
+    sourceCounts: records.reduce(
+      (acc, r) => ({ ...acc, [r.provider]: (acc[r.provider] ?? 0) + 1 }),
+      {} as Partial<Record<ExtractionSource, number>>,
+    ),
+    failures,
     photosUsed: raws.filter((r) => r.photo_path).length,
     photos,
   };
@@ -169,6 +211,7 @@ export async function writeCatalog(result: StructuringResult): Promise<string> {
   const doc = {
     generated_at: new Date().toISOString(),
     provider: result.provider,
+    sourceCounts: result.sourceCounts,
     ...(result.provider === "fixture"
       ? { warning: "Confidence values come from hand-authored fixtures, not a live model call." }
       : {}),
@@ -176,6 +219,7 @@ export async function writeCatalog(result: StructuringResult): Promise<string> {
     photos: result.photos,
     audits: result.audits,
     sanity: result.sanity,
+    merchantConfirmed: result.merchantConfirmed,
     policies: result.policies,
     items: result.items,
   };
@@ -185,10 +229,12 @@ export async function writeCatalog(result: StructuringResult): Promise<string> {
 
 interface CatalogDoc {
   provider: ExtractionSource;
+  sourceCounts?: Partial<Record<ExtractionSource, number>>;
   merchants?: Merchant[];
   photos?: Record<string, PhotoRef>;
   audits?: Record<string, ExtractionAudit>;
   sanity?: Record<string, SanityResult>;
+  merchantConfirmed?: string[];
   policies?: NegotiationPolicy[];
   items: CatalogItem[];
 }
@@ -209,15 +255,24 @@ export async function readCatalog(): Promise<CatalogItem[]> {
 export async function loadServingCatalog(): Promise<StructuringResult> {
   if (await exists(CATALOG_FILE)) {
     const doc = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as CatalogDoc;
-    if (doc.items?.length && doc.merchants?.length) {
+
+    // A cache written before a schema change is worse than no cache: it looks
+    // fine and quietly serves fields that no longer exist. Any merchant missing
+    // one of the current fields invalidates the whole file.
+    const currentShape = doc.merchants?.every((m) => m.upi_vpa && m.whatsapp && m.city) ?? false;
+
+    if (doc.items?.length && doc.merchants?.length && currentShape) {
       return {
         merchants: doc.merchants,
         items: doc.items,
         records: [],
         audits: doc.audits ?? {},
         sanity: doc.sanity ?? {},
+        merchantConfirmed: doc.merchantConfirmed ?? [],
         policies: doc.policies ?? [],
         provider: doc.provider ?? "fixture",
+        sourceCounts: doc.sourceCounts ?? {},
+        failures: [],
         photosUsed: Object.values(doc.photos ?? {}).filter((p) => p.present).length,
         photos: doc.photos ?? {},
       };

@@ -47,7 +47,11 @@ export const RATIO_THRESHOLD = 2;
  * Items with no usable price are excluded from the baseline too — an unpriced
  * item is not evidence about what this merchant charges.
  */
-export function priceSanity(item: CatalogItem, catalog: readonly CatalogItem[]): SanityResult {
+export function priceSanity(
+  item: CatalogItem,
+  catalog: readonly CatalogItem[],
+  opts: { merchantConfirmed?: boolean } = {},
+): SanityResult {
   const peers = catalog
     .filter(
       (p) =>
@@ -64,8 +68,11 @@ export function priceSanity(item: CatalogItem, catalog: readonly CatalogItem[]):
   }
 
   // A price the merchant stated directly, in answer to being asked, is not
-  // re-litigated. They have already seen the objection and overruled it.
-  if (item.price.confidence >= 1) {
+  // re-litigated — they have seen the objection and overruled it. This must be
+  // an explicit flag: an earlier version inferred it from `confidence === 1`,
+  // and live models return exactly 1.00 often enough that real extractions were
+  // being waved through as merchant-confirmed.
+  if (opts.merchantConfirmed) {
     return { check: "skipped", reason: "price confirmed by the merchant directly", n: peers.length };
   }
 
