@@ -13,7 +13,8 @@ export type EventType =
   | "payment.order_created"
   | "payment.captured"
   | "fulfillment.confirmed"
-  | "audit.chain_verified";
+  | "audit.chain_verified"
+  | "agent.step";
 
 export interface VyaparEvent {
   type: EventType;

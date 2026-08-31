@@ -730,17 +730,43 @@ export async function createApp(options: AppOptions = {}) {
     // uses the configured gateway, which with real keys hands off to Checkout.
     const useTestRail = req.body?.settle === "test_rail";
     const runGateway: PaymentGateway = useTestRail ? testRail : gateway;
+    // The client sends its own run id so it can subscribe to the steps before
+    // the response comes back — otherwise it would only learn the id at the end,
+    // which is exactly when live progress stops being useful.
+    const runId = typeof req.body?.run_id === "string" && req.body.run_id
+      ? String(req.body.run_id).slice(0, 64)
+      : `run_${Date.now().toString(36)}`;
+
     const trace: Array<Record<string, unknown>> = [];
+    const startedAt = Date.now();
+
     const step = (
       stage: string,
       headline: string,
       detail: Record<string, unknown> = {},
       decidedBy: "model" | "rules" = "rules",
     ) => {
-      trace.push({ stage, headline, decided_by: decidedBy, at: new Date().toISOString(), ...detail });
+      const elapsed_ms = Date.now() - startedAt;
+      const entry = { stage, headline, decided_by: decidedBy, at: new Date().toISOString(), elapsed_ms, ...detail };
+      trace.push(entry);
+
+      console.log(
+        `[agent ${runId}] ${String(elapsed_ms).padStart(5)}ms  ${stage.padEnd(10)} ${decidedBy.padEnd(5)}  ${headline}`,
+      );
+
+      // Published as it happens, so a watcher sees the run unfold rather than a
+      // spinner followed by everything at once.
+      bus.emit({
+        type: "agent.step",
+        message: headline,
+        data: { run_id: runId, stage, decided_by: decidedBy, elapsed_ms },
+      });
     };
 
     try {
+      console.log(`[agent ${runId}] goal: "${goal}" (settle: ${useTestRail ? "test_rail" : "gateway"})`);
+      step("start", "Reading what you asked for…");
+
       // 1 — language → mandate
       const { intent, parsedBy, fallbackReason } = await parseIntent(goal);
       if (fallbackReason) {
@@ -765,6 +791,7 @@ export async function createApp(options: AppOptions = {}) {
         name: m.name,
         readiness: readinessFor(m.merchant_id),
       }));
+      step("shopping", `Checking ${views.length} shops…`);
       const comparison = compareMerchants(
         intent.want,
         { buyer_agent_id: "agent_xyz", max_price: intent.max_price, opening_offer: intent.opening_offer },
@@ -790,7 +817,8 @@ export async function createApp(options: AppOptions = {}) {
 
       if (!comparison.selected) {
         step("stop", "No shop reached a price inside the mandate", { reasoning: comparison.reasoning });
-        res.json({ goal, intent, status: "no_deal", trace, comparison });
+        console.log(`[agent ${runId}] no deal in ${Date.now() - startedAt}ms`);
+        res.json({ run_id: runId, goal, intent, status: "no_deal", trace, comparison });
         return;
       }
 
@@ -855,8 +883,9 @@ export async function createApp(options: AppOptions = {}) {
           amount_paise: order.amount_paise,
           note: "a payment id only exists once someone actually pays; the agent stops here rather than inventing one",
         });
+        console.log(`[agent ${runId}] handed off to checkout in ${Date.now() - startedAt}ms`);
         res.status(201).json({
-          goal, intent, status: "awaiting_payment", transaction_id,
+          run_id: runId, goal, intent, status: "awaiting_payment", transaction_id,
           order_id: order.order_id, amount_paise: order.amount_paise,
           final_price: chosen.final_price, merchant: chosen.merchant_name,
           item_id: item.item_id, trace, comparison,
@@ -891,8 +920,9 @@ export async function createApp(options: AppOptions = {}) {
         status: "payment_confirmed_awaiting_fulfillment",
       });
 
+      console.log(`[agent ${runId}] done in ${Date.now() - startedAt}ms`);
       res.status(201).json({
-        goal, intent, status: "paid", transaction_id,
+        run_id: runId, goal, intent, status: "paid", transaction_id,
         order_id: paid.order_id, payment_id: paid.payment_id,
         rail: useTestRail ? "test_rail" : "razorpay",
         final_price: chosen.final_price, merchant: chosen.merchant_name,
@@ -901,10 +931,13 @@ export async function createApp(options: AppOptions = {}) {
     } catch (err) {
       if (err instanceof PaymentRefused) {
         step("refused", "Payment refused before any gateway call", { reasons: err.reasons });
-        res.status(402).json({ goal, status: "refused", reasons: err.reasons, trace });
+        res.status(402).json({ run_id: runId, goal, status: "refused", reasons: err.reasons, trace });
         return;
       }
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err), trace });
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[agent ${runId}] failed after ${Date.now() - startedAt}ms:`, message);
+      step("failed", `The run stopped: ${message}`);
+      res.status(500).json({ run_id: runId, error: message, trace });
     }
   });
 

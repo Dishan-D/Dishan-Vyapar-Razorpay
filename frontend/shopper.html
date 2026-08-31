@@ -19,6 +19,13 @@
   .railtoggle b { font-size:13px; font-weight:550; display:block; }
   .railtoggle .hint { display:block; margin-top:2px; }
   .rail { font-size:11px; color:var(--ink-3); margin-top:6px; }
+  .liveline { display:flex; align-items:center; gap:9px; padding:9px 0; font-size:13px; color:var(--ink-2); }
+  .liveline + .liveline { border-top:1px solid var(--border); }
+  .liveline .el { font-family:var(--mono); font-size:10.5px; color:var(--ink-4); margin-left:auto; font-variant-numeric:tabular-nums; }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.5px solid var(--border-2); border-top-color:var(--ink-3); animation:spin .7s linear infinite; flex:none; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .liveline.done .spin { border:0; }
+  .liveline.done .spin::after { content:"✓"; color:var(--green); font-size:11px; }
   .warnrow { display:flex; gap:8px; align-items:flex-start; font-size:12px; color:var(--amber);
              background:var(--amber-2); border:1px solid var(--amber-3); border-radius:var(--r-sm);
              padding:8px 10px; margin-top:8px; }
@@ -132,18 +139,69 @@ function offerCard(o, won) {
   </div>`;
 }
 
+let activeRunId = null;
+const liveSteps = [];
+
+/** Steps arrive over the socket while the request is still open. */
+function renderLive() {
+  $("run").innerHTML = liveSteps.map((s, i) => {
+    const last = i === liveSteps.length - 1;
+    return `<div class="liveline ${last ? "" : "done"}">
+      <span class="spin"></span><span>${esc(s.message)}</span>
+      <span class="el">${s.elapsed_ms}ms</span>
+    </div>`;
+  }).join("");
+}
+
+export function onAgentStep(e) {
+  if (e.type !== "agent.step" || !activeRunId || e.data?.run_id !== activeRunId) return;
+  liveSteps.push({ message: e.message, elapsed_ms: e.data.elapsed_ms ?? 0 });
+  renderLive();
+}
+
 async function run() {
   const goal = $("goal").value.trim();
   if (!goal) return;
   $("go").disabled = true;
   $("runcard").style.display = "";
   $("bacard").style.display = "none";
-  $("run").innerHTML = stepRow("···", "Thinking…");
+
+  activeRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  liveSteps.length = 0;
+  liveSteps.push({ message: "Sending to the agent…", elapsed_ms: 0 });
+  renderLive();
 
   const settle = $("rail").checked ? "test_rail" : "checkout";
-  const { status, body } = await api("/agent/run", { method: "POST", body: JSON.stringify({ goal, settle }) });
 
-  if (status >= 500) { $("run").innerHTML = note("bad", esc(body.error ?? "the run failed")); $("go").disabled = false; return; }
+  let status, body;
+  try {
+    ({ status, body } = await api("/agent/run", {
+      method: "POST",
+      body: JSON.stringify({ goal, settle, run_id: activeRunId }),
+    }));
+  } catch (err) {
+    // Without this the page sat on "Thinking…" forever with the button dead —
+    // a dropped connection or a restarted server looked identical to a slow run.
+    $("run").innerHTML = note("bad",
+      `Couldn't reach the server — ${esc(err?.message ?? String(err))}.<br>Is <code>npm run serve</code> still running?`);
+    $("go").disabled = false;
+    activeRunId = null;
+    return;
+  }
+
+  activeRunId = null;
+
+  if (status >= 500) {
+    $("run").innerHTML = note("bad", esc(body.error ?? "the run failed")) +
+      (Array.isArray(body.trace) ? `<p class="hint" style="margin-top:8px">Got as far as: ${esc(body.trace.map((t) => t.stage).join(" → "))}</p>` : "");
+    $("go").disabled = false;
+    return;
+  }
+  if (status === 400) { $("run").innerHTML = note("warn", esc(body.error)); $("go").disabled = false; return; }
+  if (status === 402) {
+    $("run").innerHTML = note("bad", `Refused: ${esc((body.reasons ?? []).join("; "))}`);
+    $("go").disabled = false; return;
+  }
 
   const html = [];
   for (const t of body.trace) {
@@ -188,7 +246,9 @@ async function run() {
     $("pay").onclick = () => checkout(body);
   }
 
-  if (body.comparison?.selected) await showBeforeAfter(body.comparison.selected.merchant_id);
+  if (body.comparison?.selected) {
+    try { await showBeforeAfter(body.comparison.selected.merchant_id); } catch { /* panel is optional */ }
+  }
   $("go").disabled = false;
 }
 
@@ -243,7 +303,7 @@ $("go").onclick = run;
 $("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
 for (const b of document.querySelectorAll(".ex")) b.onclick = () => { $("goal").value = b.textContent; run(); };
 
-config = await boot({});
+config = await boot({ onEvent: onAgentStep });
 
 // The toggle only means anything when a real gateway is configured; without one
 // every run is already unattended.
