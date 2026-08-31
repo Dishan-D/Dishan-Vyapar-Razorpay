@@ -45,6 +45,10 @@ Categories are a fixed list. Pick the closest one; never invent a value, and use
 - mobile.screenguard — screen protectors, tempered glass
 - mobile.other — any other phone accessory
 - food.snack — anything edible: savoury snacks, sweets, chips, mixtures. One bucket, deliberately.
+- stationery.pen — pens, pencils, markers, anything you write with
+- stationery.paper — notebooks, paper, files
+- stationery.other — erasers, sharpeners, geometry sets, any other stationery
+- general.other — a real product that fits none of the above
 - other — genuinely none of the above
 
 The shop's own trade is the strongest hint you have. A phone accessories shop is not selling food; a snack shop is not selling sarees. If the item and the shop disagree, re-read the item.

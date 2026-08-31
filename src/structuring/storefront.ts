@@ -62,7 +62,7 @@ CONFIDENCE
 The shop's own trade is your strongest hint about category. A phone shop is not selling snacks.
 
 Categories are a fixed list; pick the closest and use *.other rather than inventing one:
-apparel.saree, apparel.kurta, apparel.dupatta, apparel.other, home.bedsheet, home.towel, home.other, mobile.case, mobile.charger, mobile.audio, mobile.screenguard, mobile.other, food.snack, other`;
+apparel.saree, apparel.kurta, apparel.dupatta, apparel.other, home.bedsheet, home.towel, home.other, mobile.case, mobile.charger, mobile.audio, mobile.screenguard, mobile.other, food.snack, stationery.pen, stationery.paper, stationery.other, general.other, other`;
 
 const MEDIA: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",

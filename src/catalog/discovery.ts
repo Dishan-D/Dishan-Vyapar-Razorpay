@@ -33,16 +33,45 @@ const STOPWORDS = new Set(["a", "an", "the", "under", "for", "with", "in", "of",
  * How much of the query an item must account for before it is offered.
  *
  * Without this, one incidental term is enough: "blue cotton saree" matched a
- * cotton *towel set* on the word "cotton" alone, and the buyer-agent was
- * cheerfully offered towels. A shopper who names three things means all three.
+ * cotton *towel set* on the word "cotton" alone.
  */
 const MIN_RELEVANCE = 0.5;
+
+/**
+ * Words that describe the errand rather than the goods.
+ *
+ * A model asked for "a pen" happily returns "school writing supplies pen", and
+ * a flat coverage threshold then rejects an item literally called Pen for
+ * matching only a quarter of the phrase. These carry no product meaning, so
+ * they do not get a vote.
+ */
+const FILLER = new Set([
+  "school", "office", "home", "supplies", "supply", "stuff", "items", "item",
+  "thing", "things", "product", "products", "good", "goods", "set", "pack",
+  "need", "want", "buy", "cheap", "best", "good", "nice", "new",
+]);
+
+/** Categories that mean "we could not tell", as opposed to naming a family. */
+export const isUncategorised = (category: string): boolean =>
+  category === "other" || category === "general.other" || category.trim() === "";
 
 function terms(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
+}
+
+/**
+ * The thing being asked for, as opposed to how it is described.
+ *
+ * In English the head noun of a shopping phrase falls at the end — "blue cotton
+ * SAREE", "silicone phone CASE", "school writing supplies PEN". Filler is
+ * stripped first so "supplies" cannot masquerade as the noun.
+ */
+function headTerm(all: readonly string[]): string | undefined {
+  const meaningful = all.filter((t) => !FILLER.has(t));
+  return meaningful[meaningful.length - 1] ?? all[all.length - 1];
 }
 
 function haystack(item: CatalogItem): string {
@@ -78,7 +107,12 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
   const withheld: DiscoveryResult["withheld"] = [];
 
   for (const item of catalog) {
-    if (query.category && !item.category.startsWith(query.category)) continue;
+    // A category constraint can rule out a known mismatch, never an unknown.
+    // "other" is what extraction writes when it could not tell, and excluding
+    // on it made a shop's pens invisible to someone asking for a pen: the
+    // request carried a stationery constraint the product had never been
+    // labelled with. What the item is called still has to match.
+    if (query.category && !isUncategorised(item.category) && !item.category.startsWith(query.category)) continue;
 
     // Applied here, not only at the payment gate. Refusing at the till is
     // correct but late: an agent should not spend three rounds haggling over a
@@ -96,7 +130,15 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
     const hay = haystack(item);
     const matched = queryTerms.filter((t) => hay.includes(t));
     const score = queryTerms.length === 0 ? 0 : matched.length / queryTerms.length;
-    if (score < MIN_RELEVANCE) continue;
+
+    // Either enough of the phrase matches, or the actual noun does. Coverage
+    // alone rejected a product called "Pen" for a request phrased "school
+    // writing supplies pen"; requiring the head noun alone would reject a
+    // "Phone Cover" asked for as a "phone case". Both rules together accept
+    // each of those and still keep towels out of a search for a saree.
+    const head = headTerm(queryTerms);
+    const headMatches = Boolean(head && hay.includes(head));
+    if (score < MIN_RELEVANCE && !headMatches) continue;
 
     const gate = gateReasons(item);
     if (item.needs_merchant_confirmation || gate.length > 0) {

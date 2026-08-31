@@ -33,6 +33,8 @@ export interface ComparisonResult {
   want: string;
   offers: MerchantOffer[];
   selected: MerchantOffer | null;
+  /** Shops that stock it but cannot sell it yet, and why. */
+  withheld: Array<{ merchant_id: string; merchant_name: string; item_name: string; reason: string }>;
   reasoning: string[];
 }
 
@@ -58,6 +60,7 @@ export function compareMerchants(
   requirements: { category?: string; attributes?: Record<string, string> } = {},
 ): ComparisonResult {
   const offers: MerchantOffer[] = [];
+  const withheld: ComparisonResult["withheld"] = [];
 
   for (const merchant of merchants) {
     const theirs = catalog.filter((i) => i.merchant_id === merchant.merchant_id);
@@ -67,6 +70,15 @@ export function compareMerchants(
       ...(requirements.category ? { category: requirements.category } : {}),
       ...(requirements.attributes ? { attributes: requirements.attributes } : {}),
     });
+    for (const w of found.withheld) {
+      withheld.push({
+        merchant_id: merchant.merchant_id,
+        merchant_name: merchant.name,
+        item_name: w.item.name,
+        reason: w.reason,
+      });
+    }
+
     const match = found.matches[0];
     if (!match) continue;
 
@@ -117,7 +129,13 @@ export function compareMerchants(
   const selected = eligible[0] ?? null;
 
   const reasoning: string[] = [];
-  if (offers.length === 0) {
+  if (offers.length === 0 && withheld.length > 0) {
+    // A shop that has the thing but has not priced it is a different answer
+    // from a shop that does not have it, and the shopper deserves the real one.
+    reasoning.push(
+      `${withheld.length} shop(s) stock something matching "${want}", but it is not on sale yet — the shopkeeper has not confirmed a price.`,
+    );
+  } else if (offers.length === 0) {
     reasoning.push(`Nobody stocks anything matching "${want}".`);
   } else {
     reasoning.push(`${offers.length} merchant(s) stock it; ${eligible.length} reached a price.`);
@@ -145,5 +163,5 @@ export function compareMerchants(
     }
   }
 
-  return { want, offers, selected, reasoning };
+  return { want, offers, selected, withheld, reasoning };
 }

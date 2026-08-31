@@ -2015,11 +2015,32 @@ export async function createApp(options: AppOptions = {}) {
     next.needs_merchant_confirmation = gate.held;
     catalogItems[index] = next;
 
-    // Keep the merchant's negotiation policy coherent with the new price.
+    // Keep the merchant's negotiation policy coherent with the new price — and
+    // create one if the item never had a price to build a policy from.
+    //
+    // Onboarding only writes a policy for items that arrived priced, so a
+    // product extracted from a photo alone had none. Giving it a price here
+    // then left it permanently unsellable: discovery found it, negotiation had
+    // no floor to work against, and it was reported as "stocks it, but has not
+    // set a price floor" forever.
     const policy = policies.get(itemId);
-    if (policy && changed.includes("price")) {
-      const floor = Math.min(policy.floor_price, next.price.value);
-      policies.set(itemId, { ...policy, list_price: next.price.value, floor_price: floor, set_at: new Date().toISOString() });
+    if (changed.includes("price") && next.price.value > 0) {
+      const updated: NegotiationPolicy = policy
+        ? {
+            ...policy,
+            list_price: next.price.value,
+            floor_price: Math.min(policy.floor_price > 0 ? policy.floor_price : next.price.value, next.price.value),
+            set_at: new Date().toISOString(),
+          }
+        : {
+            item_id: itemId,
+            list_price: next.price.value,
+            floor_price: Math.max(1, Math.round(next.price.value * 0.85)),
+            max_rounds: 3,
+            set_by: "merchant",
+            set_at: new Date().toISOString(),
+          };
+      policies.set(itemId, updated);
     }
 
     const row = onboarding.listItems().find((r) => r.item.item_id === itemId);

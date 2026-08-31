@@ -29,6 +29,10 @@ export const CATEGORIES = [
   "mobile.screenguard",
   "mobile.other",
   "food.snack",
+  "stationery.pen",
+  "stationery.paper",
+  "stationery.other",
+  "general.other",
   "other",
 ] as const;
 

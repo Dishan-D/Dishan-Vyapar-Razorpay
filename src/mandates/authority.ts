@@ -89,12 +89,17 @@ export function checkAuthority(
   });
 
   if (c.category) {
-    const ok = item.category.startsWith(c.category);
+    // An unlabelled product cannot contradict a category, and refusing it here
+    // would mean discovery offered something the gate then always rejected.
+    // What it is called is doing the work in that case, and the shopper sees
+    // exactly that written on the row.
+    const unknown = item.category === "other" || item.category === "general.other" || item.category.trim() === "";
+    const ok = unknown || item.category.startsWith(c.category);
     checks.push({
       label: "Right kind of thing",
       ok,
       required: c.category,
-      actual: item.category,
+      actual: unknown ? `uncategorised — matched on the name "${item.name}"` : item.category,
       ...(ok ? {} : { reason: `${item.name} is not a ${c.category.split(".").pop()}` }),
     });
   }

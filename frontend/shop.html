@@ -348,6 +348,15 @@ async function run() {
         (t.note ? `<div class="nt">${esc(t.note)}</div>` : "")));
     } else if (t.stage === "wait") {
       html.push(stepRow("06", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
+    } else if (t.stage === "stop") {
+      html.push(stepRow("—", esc(t.headline),
+        (t.withheld?.length
+          ? `<div class="offers" style="margin-top:10px">${t.withheld.map((w) => `
+              <div class="offer"><div class="top"><div class="mn">${esc(w.merchant_name)}</div>
+              <span class="chip warn">not on sale yet</span></div>
+              <div class="rd">${esc(w.item_name)} — ${esc(w.reason)}</div></div>`).join("")}</div>
+             <div class="nt" style="margin-top:9px">They have it. The shopkeeper has not confirmed a price, so an agent cannot buy it.</div>`
+          : `<div class="nt">${esc((t.reasoning ?? []).join(" "))}</div>`)));
     } else {
       html.push(stepRow("—", esc(t.headline), t.reasons ? `<div class="nt">${esc(t.reasons.join("; "))}</div>` : ""));
     }
@@ -358,18 +367,25 @@ async function run() {
 
   if (body.status === "awaiting_payment") {
     // The agent has done everything it may. A real payment id only exists once
-    // a person pays, so this is where it stops and hands over.
+    // a person pays, so this is where it hands over — and it hands over
+    // immediately rather than making the shopper find a second button for a
+    // decision they already made when they sent the agent.
     $("run").insertAdjacentHTML("beforeend", `
       <div class="rstep enter"><span class="icn">₹</span><div>
         <div class="hd">Pay with Razorpay<span class="badge">test mode</span></div>
         ${purchaseSummary(body)}
         <dl class="kv" style="margin-top:10px"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>
         ${config.razorpay_key_id
-          ? `<button class="btn go big" id="pay" style="margin-top:12px">Pay ${rupee(body.final_price)} securely</button>`
+          ? `<button class="btn go big" id="pay" style="margin-top:12px">Pay ${rupee(body.final_price)} securely</button>
+             <div class="nt" style="margin-top:8px" id="paynote">Opening Razorpay Checkout…</div>`
           : note("bad", "Razorpay keys are not configured on the server, so Checkout cannot open.")}
-        <div class="nt" style="margin-top:8px">The agent stops here rather than inventing a payment id.</div>
       </div></div>`);
-    if ($("pay")) $("pay").onclick = () => checkout(body);
+
+    if ($("pay")) {
+      $("pay").onclick = () => checkout(body);
+      // Straight into Checkout. The button stays for a retry if it is dismissed.
+      setTimeout(() => checkout(body), 350);
+    }
   } else if (body.status === "paid") {
     $("run").insertAdjacentHTML("beforeend", `
       <div class="rstep enter"><span class="icn">✓</span><div>
@@ -480,10 +496,18 @@ function checkout(run) {
     handler: async (response) => {
       const { status, body } = await api(`/transactions/${run.transaction_id}/settle-payment`, {
         method: "POST", body: JSON.stringify(response) });
-      if (status !== 201) { $("pay").outerHTML = note("bad", esc((body.reasons ?? [body.error]).join("; "))); return; }
+      if (status !== 201) {
+        const n = $("paynote");
+        if (n) n.innerHTML = `<span style="color:var(--red)">${esc((body.reasons ?? [body.error]).join("; "))}</span>`;
+        return;
+      }
       $("pay").outerHTML =
-        note("ok", `Paid. <span class="mono">${esc(body.payment_id)}</span>`) +
+        note("ok", `Paid — <span class="mono">${esc(body.payment_id)}</span>`) +
         note("warn", "Waiting for the shop to confirm handover. Nothing marks itself delivered.");
+      const n = $("paynote");
+      if (n) n.remove();
+      // The chain gained a payment mandate; show it without waiting for a socket.
+      if (watchedTxn) refreshAudit(watchedTxn);
     },
   }).open();
 }
