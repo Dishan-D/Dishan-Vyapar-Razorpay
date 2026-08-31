@@ -12,6 +12,7 @@ import {
   strictJsonSchema,
   type LlmProvider,
 } from "../llm/provider.js";
+import { estimateTokens, RateGovernor, sharedGroqGovernor } from "../llm/ratelimit.js";
 import {
   ExtractionSchema,
   ExtractionWireSchema,
@@ -132,9 +133,11 @@ export async function extractWithClaude(
 export async function extractWithGroq(
   raw: RawProduct,
   client?: OpenAI,
+  governor?: RateGovernor,
 ): Promise<ExtractionRecord> {
   const groq =
     client ?? new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
+  const gate = governor ?? sharedGroqGovernor;
 
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
 
@@ -148,21 +151,27 @@ export async function extractWithGroq(
 
   content.push({ type: "text", text: describeInput(raw) });
 
-  const response = await groq.chat.completions.create({
-    model: GROQ_MODEL,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "catalog_extraction",
-        strict: true,
-        schema: strictJsonSchema(z.toJSONSchema(ExtractionWireSchema) as Record<string, unknown>),
-      },
-    },
-  });
+  // Paced, not fired off: the vision model's free tier allows 8,000 tokens a
+  // minute and one photo costs about 2,200 of them.
+  const response = await gate.run(estimateTokens(Boolean(raw.photo_path)), () =>
+    groq.chat.completions
+      .create({
+        model: GROQ_MODEL,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "catalog_extraction",
+            strict: true,
+            schema: strictJsonSchema(z.toJSONSchema(ExtractionWireSchema) as Record<string, unknown>),
+          },
+        },
+      })
+      .withResponse(),
+  );
 
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error(`Groq returned no content for ${raw.sample_id}`);
@@ -184,9 +193,9 @@ export async function extractWithGroq(
 }
 
 /** Dispatch to whichever provider this run is configured for. */
-export async function extractLive(raw: RawProduct): Promise<ExtractionRecord> {
+export async function extractLive(raw: RawProduct, governor?: RateGovernor): Promise<ExtractionRecord> {
   const provider = activeProvider();
-  if (provider === "groq") return extractWithGroq(raw);
+  if (provider === "groq") return extractWithGroq(raw, undefined, governor);
   if (provider === "claude") return extractWithClaude(raw);
   throw new Error("No model provider configured — set GROQ_API_KEY or ANTHROPIC_API_KEY");
 }

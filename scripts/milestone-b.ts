@@ -44,7 +44,20 @@ async function main(): Promise<void> {
     );
   }
 
-  const result = await runStructuring(live);
+  // A live run is paced against the provider's token budget, so it takes
+  // minutes rather than seconds. Say what it is doing instead of looking hung.
+  const started = Date.now();
+  const result = await runStructuring(live, (p) => {
+    if (!live) return;
+    const secs = ((Date.now() - started) / 1000).toFixed(0);
+    if (p.state === "waiting") {
+      console.log(`  ${y("⏸")}  ${dim(p.detail ?? "waiting on the rate limit")}`);
+    } else if (p.state === "fallback") {
+      console.log(`  ${r("✕")}  ${p.sample_id} ${dim(`— fell back to fixture: ${(p.detail ?? "").slice(0, 70)}`)}`);
+    } else {
+      console.log(`  ${g("✓")}  ${String(p.done).padStart(2)}/${p.total}  ${p.sample_id} ${dim(`${secs}s`)}`);
+    }
+  });
 
   heading("Source");
   if (result.provider !== "fixture") {

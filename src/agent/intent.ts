@@ -9,6 +9,7 @@ import {
   GROQ_MODEL,
   strictJsonSchema,
 } from "../llm/provider.js";
+import { INTERACTIVE_MAX_WAIT_SECONDS, sharedGroqGovernor } from "../llm/ratelimit.js";
 
 export const IntentSchema = z.object({
   want: z.string().describe("The product, as search terms. No price words."),
@@ -48,21 +49,31 @@ export async function parseIntent(
   try {
     if (provider === "groq") {
       const groq = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
-      const res = await groq.chat.completions.create({
-        model: GROQ_MODEL,
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: text },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "shopping_intent",
-            strict: true,
-            schema: strictJsonSchema(z.toJSONSchema(IntentSchema) as Record<string, unknown>),
-          },
-        },
-      });
+      // Capped wait: this runs while someone is watching. If the minute's
+      // budget is gone, the rule-based parser answers now and says so, which is
+      // better than a demo that freezes for a minute.
+      const res = await sharedGroqGovernor.run(
+        900,
+        () =>
+          groq.chat.completions
+            .create({
+              model: GROQ_MODEL,
+              messages: [
+                { role: "system", content: SYSTEM },
+                { role: "user", content: text },
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "shopping_intent",
+                  strict: true,
+                  schema: strictJsonSchema(z.toJSONSchema(IntentSchema) as Record<string, unknown>),
+                },
+              },
+            })
+            .withResponse(),
+        { maxWaitSeconds: INTERACTIVE_MAX_WAIT_SECONDS },
+      );
       const raw = res.choices[0]?.message?.content;
       if (raw) return { intent: IntentSchema.parse(JSON.parse(raw)), parsedBy: "groq" };
     }

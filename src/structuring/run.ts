@@ -2,6 +2,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { CatalogItem, NegotiationPolicy } from "../mandates/schema.js";
 import { extractFromFixture, extractLive, hasCredentials } from "./extract.js";
+import { RateGovernor, sharedGroqGovernor } from "../llm/ratelimit.js";
 import {
   evaluateGate,
   toCatalogItem,
@@ -106,7 +107,11 @@ async function loadFixtures(): Promise<Record<string, Extraction>> {
  * merchant's other prices to compare against — a per-item pipeline could not do
  * it. That is the whole reason this stage is a pipeline and not a call.
  */
-export async function runStructuring(live: boolean): Promise<StructuringResult> {
+export interface StructuringProgress {
+  (event: { done: number; total: number; sample_id: string; state: "ok" | "fallback" | "waiting"; detail?: string }): void;
+}
+
+export async function runStructuring(live: boolean, onProgress?: StructuringProgress): Promise<StructuringResult> {
   const seed = await loadSeed();
   const raws = await loadRawProducts();
   const useLive = live && hasCredentials();
@@ -123,13 +128,22 @@ export async function runStructuring(live: boolean): Promise<StructuringResult> 
     // away the eleven extractions that had already succeeded and cost money.
     // A failed item falls back to its fixture and is reported, so a partial run
     // is still a usable catalog that says which parts are which.
+    // One governor across the whole catalog, so the budget is tracked run-wide
+    // rather than each call rediscovering the limit by hitting it.
+    const governor = sharedGroqGovernor;
+    governor.onWait = (seconds, reason) =>
+      onProgress?.({ done: 0, total: raws.length, sample_id: "", state: "waiting", detail: `${reason} — pausing ${seconds.toFixed(0)}s` });
+
     records = [];
     for (const raw of raws) {
       try {
-        records.push(await extractLive(raw));
+        records.push(await extractLive(raw, governor));
+        onProgress?.({ done: records.length, total: raws.length, sample_id: raw.sample_id, state: "ok" });
       } catch (err) {
-        failures.push({ sample_id: raw.sample_id, error: err instanceof Error ? err.message : String(err) });
+        const detail = err instanceof Error ? err.message : String(err);
+        failures.push({ sample_id: raw.sample_id, error: detail });
         records.push(await extractFromFixture(raw, fixtures));
+        onProgress?.({ done: records.length, total: raws.length, sample_id: raw.sample_id, state: "fallback", detail });
       }
     }
   } else {

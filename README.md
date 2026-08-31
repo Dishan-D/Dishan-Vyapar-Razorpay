@@ -58,7 +58,10 @@ loads it via `--env-file-if-exists`, so there is nothing to export and nothing
 breaks when the file is absent:
 
 - `GROQ_API_KEY` **or** `ANTHROPIC_API_KEY` — `milestone-b -- --live` runs the
-  real extraction and writes `data/catalog.json`, which the server then serves;
+  real extraction and writes `data/catalog.json`, which the server then serves.
+  On Groq's free tier this takes about three minutes and prints progress: the
+  token ceiling is 8,000/minute and a photo costs ~2,074, so the run is paced
+  rather than fired off. See [docs/MODEL_LIMITS.md](docs/MODEL_LIMITS.md);
   `milestone-c -- --live` lets the model phrase the haggle. Groq wins if both
   are set; `LLM_PROVIDER=claude` forces the other. Defaults are
   `qwen/qwen3.8-27b` on Groq (vision + strict JSON) and `claude-opus-5`.

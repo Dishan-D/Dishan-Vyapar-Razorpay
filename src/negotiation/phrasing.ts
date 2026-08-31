@@ -10,6 +10,7 @@ import {
   GROQ_MODEL,
   strictJsonSchema,
 } from "../llm/provider.js";
+import { INTERACTIVE_MAX_WAIT_SECONDS, sharedGroqGovernor } from "../llm/ratelimit.js";
 import type { NegotiationTurn } from "./engine.js";
 
 /**
@@ -96,21 +97,30 @@ async function phraseWithGroq(
   turns: readonly NegotiationTurn[],
 ): Promise<Array<{ index: number; text: string }> | null> {
   const groq = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
-  const response = await groq.chat.completions.create({
-    model: GROQ_MODEL,
-    messages: [
-      { role: "system", content: PHRASING_SYSTEM },
-      { role: "user", content: phrasingUser(item, turns) },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "negotiation_phrasing",
-        strict: true,
-        schema: strictJsonSchema(z.toJSONSchema(PhrasingSchema) as Record<string, unknown>),
-      },
-    },
-  });
+  // Phrasing is cosmetic; it never waits out a rate limit. The templates are
+  // instant and always correct about the numbers.
+  const response = await sharedGroqGovernor.run(
+    900,
+    () =>
+      groq.chat.completions
+        .create({
+          model: GROQ_MODEL,
+          messages: [
+            { role: "system", content: PHRASING_SYSTEM },
+            { role: "user", content: phrasingUser(item, turns) },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "negotiation_phrasing",
+              strict: true,
+              schema: strictJsonSchema(z.toJSONSchema(PhrasingSchema) as Record<string, unknown>),
+            },
+          },
+        })
+        .withResponse(),
+    { maxWaitSeconds: INTERACTIVE_MAX_WAIT_SECONDS },
+  );
   const text = response.choices[0]?.message?.content;
   if (!text) return null;
   return PhrasingSchema.parse(JSON.parse(text)).lines;

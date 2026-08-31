@@ -1,0 +1,152 @@
+/**
+ * A token-per-minute governor for Groq.
+ *
+ * The free (`on_demand`) tier allows 8,000 tokens per minute on the vision
+ * model, and a single product photo costs about 2,074 of them regardless of how
+ * large the image is — Groq bills images at a flat rate, so compressing them
+ * saves bandwidth and nothing else. That budget is exhausted after roughly four
+ * photos, and a fifteen-item catalog needs about 19,400 tokens.
+ *
+ * So the run has to be paced rather than fired off. Every response carries the
+ * remaining budget and when it resets; this reads those, waits when the next
+ * call would not fit, and honours `retry-after` when it misjudges.
+ */
+
+export interface RateState {
+  remainingTokens: number | null;
+  resetSeconds: number | null;
+  observedAt: number;
+}
+
+/** "59.827s", "2m52.8s", "134ms" — Groq's reset headers come in all three. */
+export function parseDuration(value: string | null): number | null {
+  if (!value) return null;
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+
+  let total = 0;
+  let matched = false;
+  for (const [, amount, unit] of value.matchAll(/([\d.]+)(ms|s|m|h)/g)) {
+    const n = Number(amount);
+    if (!Number.isFinite(n)) continue;
+    matched = true;
+    total += unit === "ms" ? n / 1000 : unit === "s" ? n : unit === "m" ? n * 60 : n * 3600;
+  }
+  return matched ? total : null;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+
+export interface GovernorOptions {
+  /** Called before a wait, so a long run can say why it is pausing. */
+  onWait?: (seconds: number, reason: string) => void;
+  maxRetries?: number;
+}
+
+export interface RunOptions {
+  /**
+   * Give up rather than wait longer than this.
+   *
+   * A batch catalog build is happy to sit out a minute. An interactive call —
+   * parsing what a shopper just typed, phrasing a haggle — is not: a demo that
+   * freezes for sixty seconds reads as broken, and both of those callers have a
+   * deterministic fallback that is instant and honest about being used.
+   */
+  maxWaitSeconds?: number;
+}
+
+/** Thrown when waiting for budget would take longer than the caller will accept. */
+export class RateBudgetExceeded extends Error {
+  constructor(readonly waitSeconds: number) {
+    super(`token budget exhausted; would need to wait ${waitSeconds.toFixed(0)}s`);
+    this.name = "RateBudgetExceeded";
+  }
+}
+
+export class RateGovernor {
+  private state: RateState = { remainingTokens: null, resetSeconds: null, observedAt: Date.now() };
+
+  /** Settable so a batch caller can attach progress reporting to the shared budget. */
+  onWait?: (seconds: number, reason: string) => void;
+
+  constructor(private readonly opts: GovernorOptions = {}) {
+    this.onWait = opts.onWait;
+  }
+
+  /** Fold a response's rate-limit headers into what we know. */
+  observe(headers: Headers | { get(name: string): string | null }): void {
+    const remaining = Number(headers.get("x-ratelimit-remaining-tokens"));
+    this.state = {
+      remainingTokens: Number.isFinite(remaining) ? remaining : null,
+      resetSeconds: parseDuration(headers.get("x-ratelimit-reset-tokens")),
+      observedAt: Date.now(),
+    };
+  }
+
+  /** Wait if the next call would not fit in what is left of this minute. */
+  private async waitIfShort(estimatedTokens: number, maxWaitSeconds?: number): Promise<void> {
+    const { remainingTokens, resetSeconds, observedAt } = this.state;
+    if (remainingTokens === null || resetSeconds === null) return;
+    if (remainingTokens >= estimatedTokens) return;
+
+    const elapsed = (Date.now() - observedAt) / 1000;
+    const wait = Math.max(0, resetSeconds - elapsed) + 0.5;
+    if (wait <= 0) return;
+    if (maxWaitSeconds !== undefined && wait > maxWaitSeconds) throw new RateBudgetExceeded(wait);
+
+    this.onWait?.(wait, `${remainingTokens} tokens left, need ~${estimatedTokens}`);
+    await sleep(wait * 1000);
+    this.state.remainingTokens = null; // budget is fresh; re-learn from the next response
+  }
+
+  /**
+   * Run one API call inside the budget.
+   *
+   * `call` must hand back the response headers alongside its result — pacing
+   * without reading the headers is guesswork, and guesswork is what produced
+   * the 429s in the first place.
+   */
+  async run<T>(
+    estimatedTokens: number,
+    call: () => Promise<{ data: T; response: { headers: Headers | { get(n: string): string | null }; status?: number } }>,
+    runOpts: RunOptions = {},
+  ): Promise<T> {
+    const maxRetries = this.opts.maxRetries ?? 4;
+
+    for (let attempt = 0; ; attempt++) {
+      await this.waitIfShort(estimatedTokens, runOpts.maxWaitSeconds);
+      try {
+        const { data, response } = await call();
+        this.observe(response.headers);
+        return data;
+      } catch (err) {
+        const status = (err as { status?: number }).status;
+        if (status !== 429 || attempt >= maxRetries) throw err;
+
+        const headers = (err as { headers?: { get(n: string): string | null } }).headers;
+        const retryAfter = parseDuration(headers?.get("retry-after") ?? null) ?? 20;
+        if (runOpts.maxWaitSeconds !== undefined && retryAfter > runOpts.maxWaitSeconds) {
+          throw new RateBudgetExceeded(retryAfter);
+        }
+        this.onWait?.(retryAfter, "rate limited, honouring retry-after");
+        await sleep((retryAfter + 0.5) * 1000);
+        this.state.remainingTokens = null;
+      }
+    }
+  }
+}
+
+/** Rough cost of one extraction call. Images dominate and are billed flat. */
+export const estimateTokens = (hasImage: boolean): number => (hasImage ? 2200 : 1000);
+
+/**
+ * One budget per process.
+ *
+ * Extraction, negotiation phrasing and the agent's intent parsing all draw on
+ * the same tokens-per-minute allowance. Separate governors would each have to
+ * rediscover the limit by hitting it, which is how the 429s happened.
+ */
+export const sharedGroqGovernor = new RateGovernor();
+
+/** How long an interactive call will wait before falling back. */
+export const INTERACTIVE_MAX_WAIT_SECONDS = 3;
