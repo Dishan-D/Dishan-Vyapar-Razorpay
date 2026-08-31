@@ -115,12 +115,18 @@
     </div>
 
     <div class="pane" id="pane-voice">
-      <textarea id="voice" placeholder="Type out what you'd say, or paste a transcription…"></textarea>
+      <div class="row" style="margin-bottom:12px">
+        <button class="btn primary" id="rec">● Record</button>
+        <span class="hint" id="recstate">Speak in Hindi, Tamil, English — whatever you'd say to a customer.</span>
+      </div>
+      <textarea id="voice" placeholder="Record above, or type what you'd say…"></textarea>
       <div class="samples">
         <button data-voice="blue cotton saree hai 1200 ka, ek hi piece bacha hai. white kurta 650, size L, chaar piece hain">Sample: sarees &amp; kurtas</button>
         <button data-voice="murukku packet 90 rupees, kaara mixture 110, laddu box 120 — ellame fresh">Sample: snacks</button>
       </div>
-      <p class="hint" style="margin-top:11px">Recording a real voice note is out of scope here — this stands in for the transcription, and the README says so.</p>
+      <p class="hint" style="margin-top:11px" id="voicenote">
+        Recordings are transcribed and shown here first — check the numbers before continuing, because a misheard price would go into your catalog as though you had said it.
+      </p>
     </div>
 
     <div class="pane" id="pane-text">
@@ -180,6 +186,52 @@ for (const b of document.querySelectorAll(".tabs2 button")) {
 for (const b of document.querySelectorAll("[data-voice]")) {
   b.onclick = () => { $("voice").value = b.dataset.voice; summarise(); };
 }
+
+// ── voice ──────────────────────────────────────────────────────────────────
+let recorder = null;
+let chunks = [];
+
+$("rec").onclick = async () => {
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      for (const t of stream.getTracks()) t.stop();
+      $("rec").textContent = "● Record";
+      $("rec").className = "btn primary";
+      $("recstate").textContent = "Transcribing…";
+
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      const form = new FormData();
+      form.append("audio", blob, "note.webm");
+      const res = await fetch("/onboarding/transcribe", { method: "POST", body: form });
+      const body = await res.json();
+
+      if (!res.ok) {
+        $("recstate").textContent = "";
+        $("voicenote").innerHTML = `<span style="color:var(--red)">Could not transcribe — ${esc(body.error ?? "unknown")}. Type it instead.</span>`;
+        return;
+      }
+      // Appended, not replaced: a shopkeeper may record several passes.
+      $("voice").value = [$("voice").value.trim(), body.text].filter(Boolean).join(" ");
+      $("recstate").textContent = `Heard${body.language ? ` (${body.language})` : ""} — check it below.`;
+      summarise();
+    };
+    recorder.start();
+    $("rec").textContent = "■ Stop";
+    $("rec").className = "btn go";
+    $("recstate").textContent = "Recording…";
+  } catch (err) {
+    $("recstate").textContent = "";
+    $("voicenote").innerHTML = `<span style="color:var(--red)">No microphone access — type what you'd say instead.</span>`;
+  }
+};
 
 const drop = $("drop"), files = $("files");
 drop.onclick = () => files.click();

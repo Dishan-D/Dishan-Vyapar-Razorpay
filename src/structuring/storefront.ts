@@ -46,12 +46,20 @@ const SYSTEM = `A small Indian shopkeeper is putting their shop online for the f
 
 Read all of it together and list what they sell.
 
-- One entry per PRODUCT, not per photo. A shelf photo may hold six products; a product may appear in two photos.
-- Only list what you can actually see or what they actually said. Do not pad the shop out with things a shop like this usually stocks.
-- Prices: use what they stated. If a price was never given, return null — the merchant will be asked. A confident wrong price is far more expensive here than an admitted gap.
-- Stock: same rule. "Kuch hai" is not a number.
-- Confidence per field, honestly. These scores decide what gets held back for the merchant to confirm, so a guess scored as a certainty puts an unchecked price in front of a buyer.
-- The shop's own trade is your strongest hint about category. A phone shop is not selling snacks.
+WHAT TO LIST
+- Every distinct product you can SEE in the photos, plus every product mentioned in words. A photo is a complete input on its own: if there are three photos of goods, there are at least three products, and returning an empty list is wrong.
+- One entry per PRODUCT, not per photo. A shelf photo may hold six products; the same product photographed twice is one product.
+- Describe what is actually in the image — colour, material, style, what it plainly is. "Blue cotton saree with a gold border" is a good name; "Product 1" is not.
+
+PRICES AND STOCK
+- An unpriced product is still a product. If no price was stated, return null for it and score price_confidence near zero — it will be shown to the shopkeeper as a question, which is exactly what should happen. Do NOT drop the product for want of a price, and do NOT invent one from what such an item usually costs.
+- Same for stock: null and a low score, never a guess dressed as a count.
+
+CONFIDENCE
+- Score each field on how well the input supports it. A price said out loud is high; a price you inferred from the look of the thing is not a price at all.
+- These scores decide what gets held back for the shopkeeper to confirm, so a guess scored as a certainty puts an unchecked price in front of a buyer.
+
+The shop's own trade is your strongest hint about category. A phone shop is not selling snacks.
 
 Categories are a fixed list; pick the closest and use *.other rather than inventing one:
 apparel.saree, apparel.kurta, apparel.dupatta, apparel.other, home.bedsheet, home.towel, home.other, mobile.case, mobile.charger, mobile.audio, mobile.screenguard, mobile.other, food.snack, other`;
@@ -69,7 +77,9 @@ function describe(input: StorefrontInput): string {
     `Shop: ${input.merchant_name}`,
     input.description ? `What they said about the shop: "${input.description}"` : null,
     ...input.voice_notes.map((v, i) => `Voice note ${i + 1} (transcribed): "${v}"`),
-    input.photos.length > 0 ? `${input.photos.length} photo(s) attached.` : "No photos — go on the words alone.",
+    input.photos.length > 0
+      ? `${input.photos.length} photo(s) attached — list every product visible in them, priced or not.`
+      : "No photos — go on the words alone.",
   ]
     .filter(Boolean)
     .join("\n");

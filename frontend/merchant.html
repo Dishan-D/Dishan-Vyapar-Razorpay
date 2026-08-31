@@ -61,6 +61,47 @@
   .opp .delta { display:flex; align-items:baseline; gap:9px; margin:11px 0 0; font-variant-numeric:tabular-nums; }
   .opp .delta .from { color:var(--ink-3); text-decoration:line-through; font-size:14px; }
   .opp .delta .to { font-size:20px; font-weight:600; color:var(--green); }
+  .edit { display:grid; grid-template-columns:1fr 92px 92px auto auto; gap:8px; align-items:center; padding:10px 0; }
+  .edit + .edit { border-top:1px solid var(--border); }
+  .edit input { font-size:13px; padding:6px 9px; }
+  .edit .st2 { min-width:82px; }
+  .edit button { padding:6px 11px; font-size:12px; }
+  @media (max-width:720px){ .edit { grid-template-columns:1fr 1fr; } }
+
+  .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
+  .order + .order { border-top:1px solid var(--border); }
+  .order .on2 { font-size:14px; font-weight:550; }
+  .order .om { font-size:11.5px; color:var(--ink-3); margin-top:2px; }
+  .order .oa { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+
+  .rectotals { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--border);
+               border:1px solid var(--border); border-radius:var(--r-sm); overflow:hidden; }
+  .rectotals div { background:var(--surface); padding:13px 14px; }
+  .rectotals .k { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4); font-weight:650; }
+  .rectotals .v { font-size:20px; font-weight:600; letter-spacing:-.02em; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .rectotals .v.good { color:var(--green); } .rectotals .v.risk { color:var(--amber); } .rectotals .v.gone { color:var(--ink-4); }
+
+  .case { border:1px solid var(--border); border-radius:var(--r-sm); padding:14px; }
+  .case + .case { margin-top:10px; }
+  .case.recovered { border-color:var(--green-3); background:var(--green-2); }
+  .case.expired { opacity:.6; }
+  .case .ch { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:9px; }
+  .case .amt { font-size:16px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .case dl { display:grid; grid-template-columns:78px 1fr; gap:5px 12px; margin:0; font-size:12.5px; }
+  .case dt { color:var(--ink-4); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; font-weight:650; padding-top:2px; }
+  .case dd { margin:0; color:var(--ink-2); }
+  .case .rules { font-size:11.5px; color:var(--ink-4); margin-top:10px; padding-top:9px; border-top:1px solid var(--border); }
+
+  .twin { display:flex; gap:9px; }
+  .twin input { flex:1; }
+  .prop { margin-top:12px; border:1px solid var(--border-2); border-radius:var(--r-sm); padding:13px; background:var(--surface-2); }
+
+  .perf { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+  .perf .pc { border:1px solid var(--border); border-radius:var(--r-sm); padding:13px; }
+  .perf .pc h4 { margin:0 0 8px; font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4); font-weight:650; }
+  .perf .pc .big2 { font-size:22px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .perf .pc .l { font-size:12px; color:var(--ink-3); margin-top:3px; }
+
   .trust li { list-style:none; display:grid; grid-template-columns:16px 1fr; gap:10px; padding:7px 0; font-size:13px; }
   .trust li + li { border-top:1px solid var(--border); }
   .trust ul { margin:0; padding:0; }
@@ -89,13 +130,17 @@
       <div id="asks" style="margin-top:16px"><p class="empty">Nothing to confirm.</p></div>
     </section>
 
+    <section id="ordercard">
+      <h2>Orders</h2>
+      <p class="hint">A payment is not a delivery. Nothing here marks itself handed over.</p>
+      <div id="orders" style="margin-top:14px"><p class="empty">No orders yet.</p></div>
+    </section>
+
     <section>
       <h2>Your catalog</h2>
       <p class="hint">What an AI buyer can see right now.</p>
-      <table class="tbl" style="margin-top:14px">
-        <thead><tr><th>Product</th><th class="r">Price</th><th>Status</th><th class="r">Confidence</th></tr></thead>
-        <tbody id="items"><tr><td colspan="4"><p class="empty">Loading…</p></td></tr></tbody>
-      </table>
+      <p class="hint">Change anything — what you set here is yours, and stops being second-guessed.</p>
+      <div id="items" style="margin-top:12px"><p class="empty">Loading…</p></div>
     </section>
   </div>
 
@@ -109,6 +154,29 @@
       <h2>Grow revenue</h2>
       <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
       <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+    </section>
+
+    <section>
+      <h2>Revenue recovery</h2>
+      <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
+      <div id="rectotals" style="margin-top:14px"></div>
+      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
+    </section>
+
+    <section>
+      <h2>Your AI Commerce Twin</h2>
+      <p class="hint">Tell it what to change in your own words. It shows you what that means before anything happens.</p>
+      <div class="twin" style="margin-top:14px">
+        <input id="twinsay" placeholder="Don't go below ₹1,000 for the blue saree" />
+        <button class="btn secondary" id="twinread">Read it</button>
+      </div>
+      <div id="twinprop"></div>
+    </section>
+
+    <section>
+      <h2>System performance</h2>
+      <p class="hint">Counted from stored state. Nothing here is projected or sampled.</p>
+      <div class="perf" id="perf" style="margin-top:14px"></div>
     </section>
 
     <section>
@@ -223,12 +291,48 @@ async function loadAsks() {
 async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
-  $("items").innerHTML = mine.map((i) => `<tr>
-    <td class="nm">${esc(i.name)}</td>
-    <td class="r money">${i.price.confidence === 0 ? "—" : rupee(i.price.value)}</td>
-    <td><span class="state ${i.transactable ? "ok" : "held"}"><span class="dot ${i.transactable ? "ok" : "held"}"></span>${i.transactable ? "Available" : "Held"}</span></td>
-    <td class="r">${Math.round(i.price.confidence * 100)}%</td>
-  </tr>`).join("") || `<tr><td colspan="4"><p class="empty">No items.</p></td></tr>`;
+  if (mine.length === 0) { $("items").innerHTML = `<p class="empty">No items.</p>`; return; }
+
+  $("items").innerHTML = mine.map((i) => `
+    <div class="edit" data-row="${i.item_id}">
+      <input value="${esc(i.name)}" data-f="name" />
+      <input type="number" value="${i.price.value || ""}" placeholder="price" data-f="price" />
+      <input type="number" value="${i.stock.confidence > 0 ? i.stock.quantity : ""}" placeholder="stock" data-f="stock" />
+      <span class="st2"><span class="state ${i.transactable ? "ok" : "held"}"><span class="dot ${i.transactable ? "ok" : "held"}"></span>${i.transactable ? "Live" : "Held"}</span></span>
+      <span class="row">
+        <button class="btn go" data-save="${i.item_id}">Save</button>
+        <button class="btn secondary" data-del="${i.item_id}">Delete</button>
+      </span>
+    </div>`).join("");
+
+  for (const b of document.querySelectorAll("[data-save]")) {
+    b.onclick = async () => {
+      const row = document.querySelector(`[data-row="${b.dataset.save}"]`);
+      const val = (f) => row.querySelector(`[data-f="${f}"]`).value.trim();
+      b.disabled = true;
+      const { status, body: r } = await api(`/merchants/${merchantId}/items/${b.dataset.save}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: val("name"),
+          ...(val("price") ? { price: Number(val("price")) } : {}),
+          ...(val("stock") ? { stock: Number(val("stock")) } : {}),
+        }),
+      });
+      b.disabled = false;
+      if (status !== 200) { row.insertAdjacentHTML("afterend", note("bad", esc(r.error))); return; }
+      refresh();
+    };
+  }
+  for (const b of document.querySelectorAll("[data-del]")) {
+    b.onclick = async () => {
+      const row = document.querySelector(`[data-row="${b.dataset.del}"]`);
+      if (!confirm("Remove this product from your catalog?")) return;
+      b.disabled = true;
+      const { status, body: r } = await api(`/merchants/${merchantId}/items/${b.dataset.del}`, { method: "DELETE" });
+      if (status !== 200) { b.disabled = false; row.insertAdjacentHTML("afterend", note("bad", esc(r.error))); return; }
+      refresh();
+    };
+  }
 }
 
 // ── readiness ───────────────────────────────────────────────────────────────
@@ -319,6 +423,163 @@ async function loadOpportunities() {
   }
 }
 
+// ── orders ──────────────────────────────────────────────────────────────────
+async function loadOrders() {
+  const { body } = await api(`/merchants/${merchantId}/orders`);
+  if (body.orders.length === 0) {
+    $("orders").innerHTML = `<p class="empty">No orders yet.</p>`;
+    return;
+  }
+
+  $("orders").innerHTML = body.orders.slice(0, 12).map((o) => {
+    const state = o.status === "delivered"
+      ? `<span class="state ok"><span class="dot ok"></span>Delivered</span>`
+      : o.status === "awaiting_handover"
+        ? `<span class="state pending"><span class="dot pending"></span>Awaiting handover</span>`
+        : `<span class="state"><span class="dot"></span>Not paid</span>`;
+    return `<div class="order">
+      <div><div class="on2">${esc(o.item_name)}</div>
+        <div class="om">${o.paid_at ? `paid ${clock(o.paid_at)}` : "agreed, not paid"}${o.payment_id ? ` · ${esc(o.payment_id)}` : ""}</div></div>
+      <div class="oa">${rupee(o.amount)}</div>
+      <div>${o.status === "awaiting_handover"
+        ? `<button class="btn go" data-hand="${o.transaction_id}">Confirm handover</button>`
+        : state}</div>
+    </div>`;
+  }).join("");
+
+  for (const b of document.querySelectorAll("[data-hand]")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = "Signing…";
+      const { status, body: r } = await api(`/transactions/${b.dataset.hand}/confirm-fulfillment`, {
+        method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
+      });
+      if (status !== 201) {
+        b.outerHTML = `<span class="state held">${esc((r.reasons ?? [r.error]).join("; "))}</span>`;
+        return;
+      }
+      refresh();
+    };
+  }
+
+  $("ordercard").querySelector(".hint").textContent = body.awaiting_handover > 0
+    ? `${body.awaiting_handover} order${body.awaiting_handover > 1 ? "s" : ""} waiting on you to confirm handover.`
+    : "A payment is not a delivery. Nothing here marks itself handed over.";
+}
+
+// ── recovery ────────────────────────────────────────────────────────────────
+const KIND_LABEL = {
+  negotiation_no_deal: "Negotiation ended without a deal",
+  abandoned_checkout: "Agreed, then never paid",
+  unfulfilled: "Paid, not yet handed over",
+  held_inventory: "Stock buyers cannot see",
+};
+
+async function loadRecovery() {
+  const { body } = await api(`/merchants/${merchantId}/recovery`);
+  const t = body.totals;
+  $("rectotals").innerHTML = `
+    <div><div class="k">Recovered</div><div class="v good">${rupee(t.recovered)}</div></div>
+    <div><div class="k">At risk</div><div class="v risk">${rupee(t.at_risk)}</div></div>
+    <div><div class="k">Expired</div><div class="v gone">${rupee(t.expired)}</div></div>`;
+
+  if (body.cases.length === 0) {
+    $("cases").innerHTML = `<p class="empty">Nothing at risk right now.</p>`;
+    return;
+  }
+
+  $("cases").innerHTML = body.cases.map((c) => `
+    <div class="case ${c.status}">
+      <div class="ch">
+        <div>
+          <span class="state ${c.status === "recovered" ? "ok" : c.status === "expired" ? "" : "pending"}">
+            <span class="dot ${c.status === "recovered" ? "ok" : "pending"}"></span>${c.status.replace("_", " ")}
+          </span>
+          <div style="font-size:13.5px;font-weight:550;margin-top:4px">${esc(KIND_LABEL[c.kind] ?? c.kind)}</div>
+        </div>
+        <div class="amt">${c.amount > 0 ? rupee(c.amount) : "—"}</div>
+      </div>
+      <dl>
+        <dt>Problem</dt><dd>${esc(c.problem)}</dd>
+        <dt>Diagnosis</dt><dd>${esc(c.diagnosis)}</dd>
+        <dt>Action</dt><dd>${esc(c.action)}</dd>
+      </dl>
+      ${c.recovered_by ? `<div class="note ok" style="margin-top:11px">Recovered ${rupee(c.recovered_by.amount)} on ${esc(c.recovered_by.transaction_id)}.</div>` : ""}
+      ${c.change && c.status !== "recovered" && c.status !== "expired"
+        ? `<div class="row" style="margin-top:12px">
+             <button class="btn go" data-act="${c.id}">Recover this sale</button>
+             <span class="hint">Floor ${rupee(c.change.from)} → ${rupee(c.change.to)}</span>
+           </div>` : ""}
+      <div class="rules">Attempt ${c.attempts} of ${body.policy.max_attempts} · window ${body.policy.window_hours}h · never chases more than was at stake</div>
+    </div>`).join("");
+
+  for (const b of document.querySelectorAll("[data-act]")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      const { status, body: r } = await api(`/merchants/${merchantId}/recovery/${b.dataset.act}/act`, { method: "POST" });
+      b.closest(".case").insertAdjacentHTML("beforeend",
+        status === 200 ? note("ok", esc(r.note)) : note("bad", esc(r.error)));
+      if (status === 200) refresh();
+    };
+  }
+}
+
+// ── commerce twin ───────────────────────────────────────────────────────────
+$("twinread").onclick = async () => {
+  const text = $("twinsay").value.trim();
+  if (!text) return;
+  $("twinread").disabled = true;
+  const { body } = await api(`/merchants/${merchantId}/policy-request`, { method: "POST", body: JSON.stringify({ text }) });
+  $("twinread").disabled = false;
+  const p = body.proposal;
+
+  $("twinprop").innerHTML = `<div class="prop">
+    <div style="font-size:13.5px;font-weight:550">${esc(p.understood)}</div>
+    ${p.blocked
+      ? `<div class="note warn" style="margin-top:10px">${esc(p.blocked)}</div>`
+      : `<div class="hint" style="margin-top:6px">${esc(p.field.replace("_", " "))}: ${rupee(p.from)} → <b>${rupee(p.to)}</b></div>
+         <div class="row" style="margin-top:12px">
+           <button class="btn go" id="twinapply">Apply</button>
+           <button class="btn secondary" id="twincancel">Cancel</button>
+         </div>`}
+    <div class="hint" style="margin-top:10px">Read by ${esc(body.read_by)}. Nothing changes until you press apply.</div>
+  </div>`;
+
+  const apply = $("twinapply");
+  if (apply) {
+    apply.onclick = async () => {
+      apply.disabled = true;
+      const { status, body: r } = await api(`/merchants/${merchantId}/policy-apply`, {
+        method: "POST", body: JSON.stringify({ item_id: p.item_id, field: p.field, to: p.to }),
+      });
+      $("twinprop").innerHTML = status === 200
+        ? note("ok", `${esc(p.item_name)}: ${esc(p.field.replace("_", " "))} is now ${rupee(r.to)}.`)
+        : note("bad", esc(r.error));
+      if (status === 200) { $("twinsay").value = ""; refresh(); }
+    };
+  }
+  const cancel = $("twincancel");
+  if (cancel) cancel.onclick = () => { $("twinprop").innerHTML = ""; };
+};
+
+// ── performance ─────────────────────────────────────────────────────────────
+async function loadPerf() {
+  const { body: p } = await api("/performance");
+  $("perf").innerHTML = `
+    <div class="pc"><h4>Structuring</h4>
+      <div class="big2">${p.structuring.auto_rate}%</div>
+      <div class="l">${p.structuring.auto_approved} of ${p.structuring.products} needed no question</div>
+      <div class="l">${p.structuring.sanity_failures} caught by the price check</div></div>
+    <div class="pc"><h4>Negotiation</h4>
+      <div class="big2">${p.negotiation.deal_rate}%</div>
+      <div class="l">${p.negotiation.deals} deals of ${p.negotiation.attempts} attempts</div>
+      <div class="l">${p.negotiation.no_deals} ended without one</div></div>
+    <div class="pc"><h4>Reconciliation</h4>
+      <div class="big2">${p.reconciliation.match_rate}%</div>
+      <div class="l">${p.reconciliation.matched} of ${p.reconciliation.transactions} agree at every stage</div>
+      <div class="l">${p.reconciliation.exceptions} exception(s)</div></div>`;
+}
+
 async function loadTrust() {
   const { body } = await api(`/merchants/${merchantId}/trust`);
   $("trust").innerHTML = `<ul>${body.claims.map((c) => `
@@ -327,7 +588,8 @@ async function loadTrust() {
     <p class="hint" style="margin-top:12px">On UPI as <span class="mono">${esc(body.upi_vpa)}</span> since ${esc(body.on_upi_since)}.</p>`;
 }
 
-const refresh = () => Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust()]);
+const refresh = () =>
+  Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders()]);
 
 await loadMerchants();
 await refresh();
@@ -340,8 +602,8 @@ await boot({
     seen.push(e); renderStream();
     // The dashboard reflects server state; it never keeps its own copy.
     if (e.type.startsWith("clarification")) refresh();
-    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); }
-    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") loadOpportunities();
+    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); }
+    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); }
   },
 });
 </script>

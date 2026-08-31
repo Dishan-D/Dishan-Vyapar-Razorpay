@@ -9,13 +9,17 @@ import { mkdir } from "node:fs/promises";
 import { OnboardingStore, type OnboardedMerchant } from "./onboarding/store.js";
 import { DemandLog } from "./revenue/demand.js";
 import { findOpportunities } from "./revenue/opportunities.js";
+import { buildRecoveryCases, RecoveryLog, RECOVERY_POLICY } from "./revenue/recovery.js";
+import { reconcile } from "./finance/reconcile.js";
 import { extractStorefront } from "./structuring/storefront.js";
+import { transcribe, AUDIO_EXTENSIONS, TRANSCRIBE_MODEL } from "./structuring/transcribe.js";
 import { toCatalogItem, evaluateGate } from "./structuring/extraction.js";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { buildCommerceHistory } from "./audit/history.js";
 import { readinessScore } from "./marketplace/readiness.js";
 import { compareMerchants } from "./marketplace/compare.js";
 import { parseIntent } from "./agent/intent.js";
+import { readPolicyRequest, proposeChange } from "./agent/policy.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
@@ -38,6 +42,7 @@ import {
 } from "./structuring/whatsapp.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
+import { activeProvider } from "./llm/provider.js";
 import { loadServingCatalog } from "./structuring/run.js";
 
 export interface AppOptions {
@@ -90,8 +95,20 @@ export async function createApp(options: AppOptions = {}) {
   // ── Onboarding: shops created at runtime join the seeded three ─────────────
   const onboarding = new OnboardingStore(store.handle);
   const demand = new DemandLog(store.handle);
+  const recoveryLog = new RecoveryLog(store.handle);
   const UPLOAD_DIR = path.resolve("data", "uploads");
   await mkdir(UPLOAD_DIR, { recursive: true });
+
+  /** Audio goes to the same folder; only the accepted types differ. */
+  const uploadAudio = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+      filename: (_req, file, cb) =>
+        cb(null, `${randomUUID().slice(0, 8)}${AUDIO_EXTENSIONS[file.mimetype] ?? path.extname(file.originalname) ?? ".webm"}`),
+    }),
+    limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+    fileFilter: (_req, file, cb) => cb(null, /^audio\/|^video\/webm/.test(file.mimetype)),
+  });
 
   const upload = multer({
     storage: multer.diskStorage({
@@ -298,6 +315,7 @@ export async function createApp(options: AppOptions = {}) {
       catalog_size: catalogItems.length,
       catalog_provider: structuring.provider,
       catalog_sources: structuring.sourceCounts,
+      transcription: activeProvider() === "groq" ? TRANSCRIBE_MODEL : null,
       clarification_channel: notifier.channel,
     });
   });
@@ -805,6 +823,7 @@ export async function createApp(options: AppOptions = {}) {
       headline: string,
       detail: Record<string, unknown> = {},
       decidedBy: "model" | "rules" = "rules",
+      merchantId?: string,
     ) => {
       const elapsed_ms = Date.now() - startedAt;
       const entry = { stage, headline, decided_by: decidedBy, at: new Date().toISOString(), elapsed_ms, ...detail };
@@ -819,6 +838,10 @@ export async function createApp(options: AppOptions = {}) {
       bus.emit({
         type: "agent.step",
         message: headline,
+        // Named where one applies, so a view of the market can light the shop
+        // this step is about. Without it every step looked market-wide and the
+        // network view sat still through an entire purchase.
+        ...(merchantId ? { merchant_id: merchantId } : {}),
         data: { run_id: runId, stage, decided_by: decidedBy, elapsed_ms },
       });
     };
@@ -865,6 +888,14 @@ export async function createApp(options: AppOptions = {}) {
         readiness: readinessFor(m.merchant_id),
       }));
       step("shopping", `Checking ${views.length} shops…`);
+      for (const view of views) {
+        bus.emit({
+          type: "discovery.queried",
+          merchant_id: view.merchant_id,
+          message: `Asking ${view.name}`,
+          data: { run_id: runId, want: intent.want },
+        });
+      }
       const attributes: Record<string, string> = {};
       for (const { key, value } of intent.attributes ?? []) attributes[key] = value;
 
@@ -1027,11 +1058,13 @@ export async function createApp(options: AppOptions = {}) {
           opening_offer: intent.opening_offer,
           detail: (result?.failures ?? []).join("; "),
         });
-        step("blocked", `${candidate.merchant_name} ruled out — ${result?.failures[0] ?? "does not match"}`, {
-          merchant_id: candidate.merchant_id,
-          item_name: candidate.item_name,
-          checks: result?.checks ?? [],
-        });
+        step(
+          "blocked",
+          `${candidate.merchant_name} ruled out — ${result?.failures[0] ?? "does not match"}`,
+          { merchant_id: candidate.merchant_id, item_name: candidate.item_name, checks: result?.checks ?? [] },
+          "rules",
+          candidate.merchant_id,
+        );
       }
 
       if (!chosen || !item || !mandateIntent || !cart) {
@@ -1049,12 +1082,18 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
-      step("choose", `Chose ${chosen.merchant_name} at ₹${chosen.final_price}`, {
-        reasoning: comparison.reasoning,
-        merchant_id: chosen.merchant_id,
-        effective_price: chosen.effective_price,
-        ...(rejected.length > 0 ? { after_ruling_out: rejected.length } : {}),
-      });
+      step(
+        "choose",
+        `Chose ${chosen.merchant_name} at ₹${chosen.final_price}`,
+        {
+          reasoning: comparison.reasoning,
+          merchant_id: chosen.merchant_id,
+          effective_price: chosen.effective_price,
+          ...(rejected.length > 0 ? { after_ruling_out: rejected.length } : {}),
+        },
+        "rules",
+        chosen.merchant_id,
+      );
 
       transaction_id = `txn_${Date.now().toString(36)}`;
       store.createTransaction({
@@ -1066,17 +1105,20 @@ export async function createApp(options: AppOptions = {}) {
       store.appendMandate(transaction_id, mandateIntent);
       store.appendMandate(transaction_id, cart);
 
-      step("sign", "Intent and cart mandates signed", {
-        transaction_id,
-        prompt_playback: goal,
-        constraints: mandateIntent.constraints,
-        note: "the shopper's own words are inside the signed intent, so the mandate says what it was for",
-      });
+      step(
+        "sign",
+        "Intent and cart mandates signed",
+        {
+          transaction_id,
+          prompt_playback: goal,
+          constraints: mandateIntent.constraints,
+          note: "the shopper's own words are inside the signed intent, so the mandate says what it was for",
+        },
+        "rules",
+        item.merchant_id,
+      );
 
-      step("authorize", "Purchase authorized", {
-        checks: authority?.checks ?? [],
-        authorized: true,
-      });
+      step("authorize", "Purchase authorized", { checks: authority?.checks ?? [], authorized: true }, "rules", item.merchant_id);
 
       const chain: MandateChain = { transaction_id, intent: mandateIntent, cart };
 
@@ -1122,20 +1164,27 @@ export async function createApp(options: AppOptions = {}) {
       });
       void confirmSale(item.merchant_id, item.name, chosen.final_price!);
       step("pay", `Paid ₹${chosen.final_price}`, {
+        merchant_id: item.merchant_id,
         order_id: paid.order_id,
         payment_id: paid.payment_id,
         rail: useTestRail ? "test rail" : "razorpay",
         ...(useTestRail
           ? { note: "settled on the simulated rail so the agent could finish unattended — ids are sim_ prefixed and are not Razorpay's" }
           : {}),
-      });
+      }, "rules", item.merchant_id);
 
       // 4 — and here the agent stops, unconditionally. It can spend money; it
       // cannot hand goods across a counter, and nothing here will pretend it did.
-      step("wait", "Paid, not delivered", {
-        note: "the agent has no way to confirm a handover — only the shopkeeper's signature closes this",
-        status: "payment_confirmed_awaiting_fulfillment",
-      });
+      step(
+        "wait",
+        "Paid, not delivered",
+        {
+          note: "the agent has no way to confirm a handover — only the shopkeeper's signature closes this",
+          status: "payment_confirmed_awaiting_fulfillment",
+        },
+        "rules",
+        item.merchant_id,
+      );
 
       console.log(`[agent ${runId}] done in ${Date.now() - startedAt}ms`);
       res.status(201).json({
@@ -1257,6 +1306,33 @@ export async function createApp(options: AppOptions = {}) {
           text: all.filter((i) => i.kind === "text").length,
         },
       });
+    },
+  );
+
+  /**
+   * A recording, turned into words the merchant can correct.
+   *
+   * Returned rather than stored straight away: Whisper on a noisy shop floor
+   * gets things wrong, and a price it mishears would flow into the catalog as
+   * though the shopkeeper had said it. They see the text first.
+   */
+  app.post(
+    "/onboarding/transcribe",
+    uploadAudio.single("audio"),
+    async (req: Request, res: Response) => {
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file) {
+        res.status(400).json({ error: "no audio received" });
+        return;
+      }
+      try {
+        const result = await transcribe(path.join(UPLOAD_DIR, file.filename));
+        res.json({ ...result, file: file.filename });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[transcribe] failed:", message);
+        res.status(502).json({ error: message, model: TRANSCRIBE_MODEL });
+      }
     },
   );
 
@@ -1572,6 +1648,433 @@ export async function createApp(options: AppOptions = {}) {
       readiness,
       totals: { paid, delivered, chains_verified: intact, chains_broken: broken },
     });
+  });
+
+  /** Every chain this merchant is party to, loaded once for the money views. */
+  function chainsFor(merchantId: string) {
+    return store
+      .listTransactionIdsForMerchant(merchantId)
+      .map((id) => store.loadChain(id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+  }
+
+  /** §9 — money that did not arrive, and what can still be done about it. */
+  app.get("/merchants/:id/recovery", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const { cases, totals } = buildRecoveryCases(
+      id,
+      demand.forMerchant(id),
+      chainsFor(id),
+      catalogItems,
+      policies,
+      recoveryLog.forMerchant(id),
+    );
+    res.json({ merchant_id: id, policy: RECOVERY_POLICY, totals, cases });
+  });
+
+  /**
+   * Approving a recovery is an attempt, never an outcome. It applies the change
+   * and records that it was tried; the case only reads "recovered" once a real
+   * sale closes afterwards.
+   */
+  app.post("/merchants/:id/recovery/:caseId/act", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const caseId = String(req.params.caseId);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const { cases } = buildRecoveryCases(
+      id, demand.forMerchant(id), chainsFor(id), catalogItems, policies, recoveryLog.forMerchant(id),
+    );
+    const found = cases.find((c) => c.id === caseId);
+    if (!found) {
+      res.status(404).json({ error: `no such case: ${caseId}` });
+      return;
+    }
+    if (found.attempts >= RECOVERY_POLICY.max_attempts) {
+      res.status(409).json({ error: `already tried ${found.attempts} times — the rule stops at ${RECOVERY_POLICY.max_attempts}` });
+      return;
+    }
+    if (!found.change) {
+      res.status(409).json({ error: "this one needs you, not a setting — there is nothing to apply" });
+      return;
+    }
+
+    const policy = policies.get(found.change.item_id);
+    if (!policy) {
+      res.status(409).json({ error: `no negotiation policy for ${found.change.item_id}` });
+      return;
+    }
+
+    const updated: NegotiationPolicy = { ...policy, floor_price: found.change.to, set_at: new Date().toISOString() };
+    policies.set(policy.item_id, updated);
+    const row = onboarding.listItems().find((r) => r.item.item_id === policy.item_id);
+    if (row) onboarding.saveItem({ ...row, policy: updated });
+
+    recoveryLog.record({
+      id: caseId,
+      merchant_id: id,
+      item_id: found.item_id,
+      kind: found.kind,
+      amount: found.amount,
+      taken_at: new Date().toISOString(),
+      change_from: found.change.from,
+      change_to: found.change.to,
+    });
+
+    const item = catalogItems.find((i) => i.item_id === policy.item_id);
+    bus.emit({
+      type: "clarification.resolved",
+      merchant_id: id,
+      item_id: policy.item_id,
+      message: `Recovery action: floor on ${item?.name ?? policy.item_id} set to ₹${updated.floor_price}`,
+      data: { recovery: caseId },
+    });
+
+    res.json({
+      case_id: caseId,
+      applied: { item_id: policy.item_id, floor_price: { from: found.change.from, to: updated.floor_price } },
+      window_hours: RECOVERY_POLICY.window_hours,
+      note: "Attempt recorded. This counts as recovered only when a sale actually closes.",
+    });
+  });
+
+  /** §21 — do the stages agree about the money? */
+  app.get("/reconciliation", async (req: Request, res: Response) => {
+    const merchantId = typeof req.query.merchant_id === "string" ? req.query.merchant_id : undefined;
+    const chains = merchantId
+      ? chainsFor(merchantId)
+      : store
+          .listTransactions()
+          .map((t) => store.loadChain(t.transaction_id))
+          .filter((c): c is NonNullable<typeof c> => Boolean(c));
+    res.json(await reconcile(chains, keyring));
+  });
+
+  /** §22 — only what this system actually measures. */
+  app.get("/performance", async (_req, res) => {
+    const audits = Object.values(structuring.audits);
+    const heldByGate = catalogItems.filter((i) => i.needs_merchant_confirmation).length;
+    const clarifications = store.listClarifications();
+    const events = demand.all();
+
+    const chains = store
+      .listTransactions()
+      .map((t) => store.loadChain(t.transaction_id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+    const recon = await reconcile(chains, keyring);
+
+    const negotiations = events.filter((e) => e.item_id !== null);
+    const deals = negotiations.filter((e) => e.outcome === "sold").length;
+
+    res.json({
+      structuring: {
+        products: catalogItems.length,
+        auto_approved: catalogItems.length - heldByGate,
+        clarifications_raised: clarifications.length,
+        clarifications_resolved: clarifications.filter((c) => c.status === "resolved").length,
+        auto_rate: catalogItems.length === 0 ? 0 : Math.round(((catalogItems.length - heldByGate) / catalogItems.length) * 1000) / 10,
+        sanity_failures: Object.values(structuring.sanity).filter((s) => s.check === "fail").length,
+        source: structuring.provider,
+      },
+      negotiation: {
+        attempts: negotiations.length,
+        deals,
+        no_deals: negotiations.length - deals,
+        deal_rate: negotiations.length === 0 ? 0 : Math.round((deals / negotiations.length) * 1000) / 10,
+      },
+      reconciliation: {
+        transactions: recon.transactions,
+        matched: recon.matched,
+        exceptions: recon.exceptions,
+        match_rate: recon.match_rate,
+      },
+      note: "Counted from stored state. Nothing here is projected, sampled or estimated.",
+    });
+  });
+
+  /**
+   * §7 — the merchant talks to their own shop settings.
+   *
+   * Two endpoints on purpose. The first reads the sentence and says what it
+   * would do; the second does it. A model that could go straight from "don't go
+   * below 1000" to a live price floor would be deciding what the shop sells for,
+   * and that is not language work.
+   */
+  app.post("/merchants/:id/policy-request", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const text = String(req.body?.text ?? "").trim();
+    if (!text) {
+      res.status(400).json({ error: "say what you want to change" });
+      return;
+    }
+
+    const { request, by } = await readPolicyRequest(text);
+    const proposal = proposeChange(request, id, catalogItems, policies);
+    res.json({ merchant_id: id, said: text, read_by: by, request, proposal });
+  });
+
+  app.post("/merchants/:id/policy-apply", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const { item_id, field, to } = req.body ?? {};
+    if (!item_id || !["floor_price", "list_price", "max_rounds"].includes(field) || typeof to !== "number") {
+      res.status(400).json({ error: "item_id, field and a numeric `to` are required" });
+      return;
+    }
+
+    const policy = policies.get(String(item_id));
+    const item = catalogItems.find((i) => i.item_id === item_id && i.merchant_id === id);
+    if (!policy || !item) {
+      res.status(404).json({ error: `no policy for ${item_id} at this shop` });
+      return;
+    }
+
+    // The proposal was checked when it was made; check again, because this
+    // endpoint can be called directly and its caller's word is not evidence.
+    const proposed = proposeChange(
+      { item_hint: item.name, field, value: to, confidence: 1 },
+      id, catalogItems, policies,
+    );
+    if (proposed.blocked) {
+      res.status(409).json({ error: proposed.blocked });
+      return;
+    }
+
+    const updated: NegotiationPolicy = { ...policy, [field]: to, set_at: new Date().toISOString() };
+    policies.set(policy.item_id, updated);
+    const row = onboarding.listItems().find((r) => r.item.item_id === policy.item_id);
+    if (row) onboarding.saveItem({ ...row, policy: updated });
+
+    bus.emit({
+      type: "clarification.resolved",
+      merchant_id: id,
+      item_id: policy.item_id,
+      message: `${item.name}: ${field.replace("_", " ")} set to ${to}`,
+      data: { field, from: policy[field as "floor_price"], to },
+    });
+
+    res.json({ item_id: policy.item_id, field, from: policy[field as "floor_price"], to, policy: updated });
+  });
+
+  /** The whole commerce twin in one read: what it sells and on what terms. */
+  app.get("/merchants/:id/twin", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = merchants.get(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const mine = catalogItems.filter((i) => i.merchant_id === id);
+    res.json({
+      merchant_id: id,
+      products: mine.map((i) => {
+        const p = policies.get(i.item_id);
+        return {
+          item_id: i.item_id,
+          name: i.name,
+          category: i.category,
+          attributes: i.attributes,
+          asking: i.price.value,
+          lowest: p?.floor_price ?? null,
+          rounds: p?.max_rounds ?? null,
+          in_stock: i.stock.quantity,
+          sellable: !i.needs_merchant_confirmation,
+        };
+      }),
+      availability: { delivers_within_days: merchant.delivers_within_days },
+      payment: { upi_vpa: merchant.upi_vpa },
+    });
+  });
+
+  /**
+   * What this shop owes someone. Paid orders waiting on a handover, and recent
+   * completed ones for context.
+   *
+   * This exists because the agent deliberately stops at "paid, not delivered" —
+   * and until now there was nowhere for a shopkeeper to say the goods went
+   * across the counter, so every purchase in the demo sat there forever.
+   */
+  app.get("/merchants/:id/orders", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const rows = store
+      .listTransactionIdsForMerchant(id)
+      .map((tid) => store.loadChain(tid))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c) && Boolean(c!.cart))
+      .map((chain) => {
+        const item = catalogItems.find((i) => i.item_id === chain.cart!.item_id);
+        return {
+          transaction_id: chain.transaction_id,
+          item_id: chain.cart!.item_id,
+          item_name: item?.name ?? chain.cart!.item_id,
+          amount: chain.cart!.final_price.value,
+          agreed_at: chain.cart!.issued_at,
+          paid: Boolean(chain.payment),
+          paid_at: chain.payment?.issued_at ?? null,
+          payment_id: chain.payment?.razorpay_payment_id ?? null,
+          delivered: Boolean(chain.fulfillment),
+          delivered_at: chain.fulfillment?.confirmed_at ?? null,
+          status: chain.fulfillment ? "delivered" : chain.payment ? "awaiting_handover" : "awaiting_payment",
+        };
+      })
+      .sort((a, b) => (a.paid_at ?? a.agreed_at) < (b.paid_at ?? b.agreed_at) ? 1 : -1);
+
+    res.json({
+      merchant_id: id,
+      awaiting_handover: rows.filter((r) => r.status === "awaiting_handover").length,
+      orders: rows,
+    });
+  });
+
+  /**
+   * Edit a product.
+   *
+   * A catalog read out of a photograph is a first draft, and the shopkeeper is
+   * the authority on their own stock. Anything they set here is theirs: the
+   * confidence goes to certain and the price stops being re-litigated by the
+   * sanity check, because they have now said it directly rather than been heard
+   * saying it.
+   */
+  app.patch("/merchants/:id/items/:itemId", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const itemId = String(req.params.itemId);
+    const index = catalogItems.findIndex((i) => i.item_id === itemId && i.merchant_id === id);
+    if (index < 0) {
+      res.status(404).json({ error: `no such product at this shop: ${itemId}` });
+      return;
+    }
+
+    const current = catalogItems[index]!;
+    const body = req.body ?? {};
+    const next: CatalogItem = { ...current, attributes: { ...current.attributes } };
+    const changed: string[] = [];
+
+    if (typeof body.name === "string" && body.name.trim()) {
+      next.name = body.name.trim();
+      changed.push("name");
+    }
+    if (typeof body.category === "string" && body.category.trim()) {
+      next.category = body.category.trim();
+      changed.push("category");
+    }
+    if (typeof body.price === "number" && body.price > 0) {
+      next.price = { ...current.price, value: body.price, confidence: 1 };
+      merchantConfirmed.add(itemId);
+      changed.push("price");
+    }
+    if (typeof body.stock === "number" && body.stock >= 0) {
+      next.stock = { quantity: body.stock, confidence: 1 };
+      changed.push("stock");
+    }
+    if (body.attributes && typeof body.attributes === "object") {
+      next.attributes = Object.fromEntries(
+        Object.entries(body.attributes as Record<string, unknown>)
+          .filter(([, v]) => typeof v === "string" && String(v).trim())
+          .map(([k, v]) => [k, String(v).trim()]),
+      );
+      changed.push("attributes");
+    }
+
+    if (changed.length === 0) {
+      res.status(400).json({ error: "nothing to change" });
+      return;
+    }
+
+    // Re-run the gate on the edited item, exactly as at extraction time.
+    const sanity = priceSanity(next, catalogItems.map((i) => (i.item_id === itemId ? next : i)), {
+      merchantConfirmed: merchantConfirmed.has(itemId),
+    });
+    const gate = evaluateGate(next, sanity);
+    next.needs_merchant_confirmation = gate.held;
+    catalogItems[index] = next;
+
+    // Keep the merchant's negotiation policy coherent with the new price.
+    const policy = policies.get(itemId);
+    if (policy && changed.includes("price")) {
+      const floor = Math.min(policy.floor_price, next.price.value);
+      policies.set(itemId, { ...policy, list_price: next.price.value, floor_price: floor, set_at: new Date().toISOString() });
+    }
+
+    const row = onboarding.listItems().find((r) => r.item.item_id === itemId);
+    if (row) onboarding.saveItem({ ...row, item: next, ...(policies.get(itemId) ? { policy: policies.get(itemId)! } : {}) });
+
+    bus.emit({
+      type: "clarification.resolved",
+      merchant_id: id,
+      item_id: itemId,
+      message: `${next.name} updated by the shopkeeper (${changed.join(", ")})`,
+      data: { changed },
+    });
+
+    res.json({
+      item: next,
+      changed,
+      transactable: !next.needs_merchant_confirmation,
+      still_held_because: gate.reasons,
+      policy: policies.get(itemId) ?? null,
+    });
+  });
+
+  /**
+   * Remove a product.
+   *
+   * Refused while a live transaction names it: an item that has been sold and
+   * not yet handed over is part of a signed chain, and deleting it out from
+   * under that would leave a mandate pointing at nothing.
+   */
+  app.delete("/merchants/:id/items/:itemId", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const itemId = String(req.params.itemId);
+    const index = catalogItems.findIndex((i) => i.item_id === itemId && i.merchant_id === id);
+    if (index < 0) {
+      res.status(404).json({ error: `no such product at this shop: ${itemId}` });
+      return;
+    }
+
+    const openOrder = store
+      .listTransactionIdsForMerchant(id)
+      .map((tid) => store.loadChain(tid))
+      .find((c) => c?.cart?.item_id === itemId && c.payment && !c.fulfillment);
+
+    if (openOrder) {
+      res.status(409).json({
+        error: `${itemId} is on an order that is paid but not handed over (${openOrder.transaction_id}). Confirm the handover first.`,
+      });
+      return;
+    }
+
+    const [removed] = catalogItems.splice(index, 1);
+    policies.delete(itemId);
+    merchantConfirmed.delete(itemId);
+    onboarding.deleteItem(itemId);
+    photoUrlFor.delete(itemId);
+
+    bus.emit({
+      type: "extraction.held",
+      merchant_id: id,
+      item_id: itemId,
+      message: `${removed?.name ?? itemId} removed from the catalog`,
+    });
+
+    res.json({ removed: itemId, remaining: catalogItems.filter((i) => i.merchant_id === id).length });
   });
 
   app.get("/merchants", (_req, res) => {

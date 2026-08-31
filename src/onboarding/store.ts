@@ -111,6 +111,10 @@ export class OnboardingStore {
     }));
   }
 
+  deleteItem(itemId: string): void {
+    this.db.prepare(`DELETE FROM onboarded_items WHERE item_id = ?`).run(itemId);
+  }
+
   /** One item's stored state, for a targeted update. */
   saveItem(row: { item: CatalogItem; policy?: NegotiationPolicy; photo_url?: string }): void {
     this.db

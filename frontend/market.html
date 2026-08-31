@@ -116,7 +116,26 @@ function flash(merchantId, type, message) {
   setTimeout(() => group.classList.remove("hot"), 1100);
 }
 
-await boot({ onEvent: (e) => flash(e.merchant_id, e.type, e.message) });
+/**
+ * Events arrive in bursts — a whole purchase can finish inside a second — so
+ * they are played out at a readable spacing. This paces the display of real
+ * events; it never invents one, and the queue drains to empty.
+ */
+const queue = [];
+let playing = false;
+
+async function play() {
+  if (playing) return;
+  playing = true;
+  while (queue.length > 0) {
+    const e = queue.shift();
+    flash(e.merchant_id, e.type, e.message);
+    await new Promise((r) => setTimeout(r, queue.length > 8 ? 90 : 260));
+  }
+  playing = false;
+}
+
+await boot({ onEvent: (e) => { queue.push(e); play(); } });
 </script>
 </body>
 </html>
