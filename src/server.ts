@@ -294,6 +294,7 @@ export async function createApp(options: AppOptions = {}) {
     try {
       const {
         want = "blue cotton saree",
+        item_id,
         max_price = 1500,
         opening_offer = 800,
         buyer_agent_id = "agent_xyz",
@@ -305,9 +306,23 @@ export async function createApp(options: AppOptions = {}) {
 
       // The intent's category constraint is applied at discovery, not just at payment.
       const found = discover(catalogItems, { want, max_price, category });
-      const item = found.matches[0]?.item;
+
+      // Two merchants can stock the same product under the same name. When the
+      // caller has already chosen one — clicking a specific shop's listing —
+      // honour that instead of re-running a search that would silently pick
+      // whichever is cheaper.
+      const item = item_id
+        ? catalogItems.find((i) => i.item_id === item_id)
+        : found.matches[0]?.item;
       if (!item) {
         res.status(404).json({ error: "no offerable match", withheld: found.withheld });
+        return;
+      }
+      if (item.needs_merchant_confirmation) {
+        res.status(409).json({
+          error: `${item.name} is still awaiting merchant confirmation`,
+          held_because: gateReasons(item, sanityFor(item)),
+        });
         return;
       }
 

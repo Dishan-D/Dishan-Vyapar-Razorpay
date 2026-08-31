@@ -4,176 +4,51 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Vyapar-to-Agent</title>
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
 <style>
-  :root {
-    --bg:#0e1014; --card:#171a21; --card2:#1d212a; --line:#282e3a; --line2:#333a48;
-    --ink:#eceef4; --mid:#a2abbd; --dim:#6f7889;
-    --ok:#41d67f; --bad:#ff6b6b; --warn:#f6c453;
-    --buyer:#7aa7ff; --merchant:#f6c453;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-    --r:12px;
-  }
-  * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--ink);
-    font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  button { font:inherit; cursor:pointer; }
-  button:disabled { cursor:not-allowed; }
+  .wrap { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); gap:18px;
+          padding:22px 26px 70px; max-width:1500px; margin:0 auto; align-items:start; }
+  @media (max-width:1040px){ .wrap { grid-template-columns:1fr; } }
+  .col { display:grid; gap:18px; min-width:0; }
 
-  /* ── header ── */
-  header {
-    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
-    padding:16px 28px; border-bottom:1px solid var(--line);
-    position:sticky; top:0; background:rgba(14,16,20,.92);
-    backdrop-filter:blur(8px); z-index:20;
-  }
-  .brand { font-size:16px; font-weight:650; letter-spacing:-.2px; }
-  .tag { color:var(--dim); font-size:13.5px; }
-  .spacer { flex:1; }
-  .pill {
-    font-size:12px; padding:4px 11px; border-radius:999px;
-    border:1px solid var(--line2); color:var(--mid); white-space:nowrap;
-  }
-  .pill.live { color:var(--ok); border-color:#255c3c; background:#10251a; }
+  .shop + .shop { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+  .shophead { display:flex; align-items:baseline; gap:9px; margin-bottom:11px; }
+  .shophead .nm { font-weight:700; font-size:14.5px; }
 
-  /* ── layout ── */
-  .wrap {
-    display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);
-    gap:24px; padding:24px 28px 64px; max-width:1420px; margin:0 auto;
-    align-items:start;
-  }
-  @media (max-width:1000px){ .wrap { grid-template-columns:1fr; } }
-
-  .col { min-width:0; }
-  .colhead { display:flex; align-items:baseline; gap:10px; margin:0 0 4px; }
-  .colhead h2 { font-size:15px; margin:0; font-weight:640; letter-spacing:-.1px; }
-  .colhead .step {
-    font-size:11px; font-weight:700; letter-spacing:.5px; color:var(--dim);
-    border:1px solid var(--line2); border-radius:6px; padding:1px 6px;
-  }
-  .colsub { color:var(--dim); font-size:13px; margin:0 0 14px; }
-
-  /* ── product cards ── */
-  .products { display:grid; gap:12px; }
   .product {
-    display:grid; grid-template-columns:96px 1fr auto; gap:14px; align-items:center;
-    width:100%; text-align:left; padding:12px; border-radius:var(--r);
+    display:grid; grid-template-columns:78px 1fr auto; gap:14px; align-items:center;
+    width:100%; text-align:left; padding:11px; border-radius:12px;
     background:var(--card); border:1px solid var(--line); color:inherit;
-    transition:border-color .12s, background .12s, transform .08s;
+    transition:border-color .14s, box-shadow .14s, transform .07s;
   }
-  .product:hover:not(:disabled) { border-color:#3d4a63; background:var(--card2); }
+  .product + .product { margin-top:9px; }
+  .product:hover:not(:disabled) { border-color:var(--s1); box-shadow:var(--shadow); }
   .product:active:not(:disabled) { transform:translateY(1px); }
-  .product.sel { border-color:var(--ok); background:#122019; }
-  .product:disabled { opacity:.72; }
-  .thumb {
-    width:96px; height:96px; border-radius:9px; object-fit:cover;
-    background:#0b0d11; border:1px solid var(--line);
-  }
-  .thumb.ph {
-    display:grid; place-items:center; color:var(--dim); font-size:11px;
-    text-align:center; padding:6px; line-height:1.3;
-  }
-  .pname { font-weight:600; font-size:15px; margin-bottom:3px; }
-  .pmeta { color:var(--dim); font-size:12.5px; }
-  .pprice { font-family:var(--mono); font-size:15px; text-align:right; white-space:nowrap; }
-  .pprice small { display:block; font-family:inherit; font-size:11px; color:var(--dim); font-weight:500; }
+  .product.sel { border-color:var(--good); background:var(--good-bg); }
+  .product:disabled { background:var(--card-2); }
+  .thumb { width:78px; height:78px; border-radius:10px; object-fit:cover; background:var(--plane-2); border:1px solid var(--line); }
+  .thumb.ph { display:grid; place-items:center; color:var(--ink-3); font-size:10px; text-align:center; line-height:1.35; padding:5px; }
+  .pname { font-weight:640; font-size:14.5px; margin-bottom:2px; }
+  .pmeta { color:var(--ink-3); font-size:12.5px; }
+  .pprice { font-family:var(--mono); font-size:14px; text-align:right; white-space:nowrap; }
+  .pprice small { display:block; font-family:inherit; font-size:11px; color:var(--ink-3); font-weight:500; margin-top:2px; }
+  .conf { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+  .heldmsg { margin-top:8px; font-size:12.5px; color:#a02724; background:var(--crit-bg); border:1px solid #f2c3c1; border-radius:9px; padding:7px 10px; }
 
-  .conf { display:flex; gap:6px; margin-top:7px; flex-wrap:wrap; }
-  .chip {
-    font-size:11px; padding:2px 8px; border-radius:999px;
-    border:1px solid var(--line2); color:var(--mid); white-space:nowrap;
-  }
-  .chip.good { color:var(--ok); border-color:#255c3c; }
-  .chip.low  { color:var(--bad); border-color:#6b2b2b; }
-  .heldmsg {
-    margin-top:8px; font-size:12.5px; color:#ffa8a8;
-    background:#241315; border:1px solid #5d2626; border-radius:8px; padding:7px 10px;
-  }
-
-  /* ── buyer mandate bar ── */
-  .mandate {
-    margin-top:18px; background:var(--card); border:1px solid var(--line);
-    border-radius:var(--r); padding:14px 16px;
-  }
-  .mandate h3 { font-size:12px; text-transform:uppercase; letter-spacing:.8px;
-    color:var(--dim); margin:0 0 10px; font-weight:650; }
+  .mandate { display:grid; gap:12px; }
   .fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  label { display:block; font-size:12px; color:var(--dim); margin-bottom:5px; }
-  input {
-    width:100%; background:#0b0d11; border:1px solid var(--line2); color:var(--ink);
-    border-radius:8px; padding:9px 11px; font:inherit;
-  }
-  input:focus { outline:none; border-color:#4a5a7a; }
-  .hint { color:var(--dim); font-size:12px; margin-top:10px; }
-  .presets { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  .preset {
-    background:transparent; color:var(--mid); border:1px solid var(--line2);
-    border-radius:8px; padding:7px 12px; font-size:12.5px;
-  }
-  .preset:hover { color:var(--ink); border-color:#4a5a7a; }
+  .presets { display:flex; gap:8px; flex-wrap:wrap; }
 
-  /* ── timeline ── */
-  .flow { display:grid; gap:12px; }
-  .stagecard {
-    background:var(--card); border:1px solid var(--line); border-radius:var(--r);
-    padding:14px 16px;
-  }
-  .stagecard.idle { opacity:.5; }
-  .sh { display:flex; align-items:center; gap:10px; }
-  .num {
-    width:22px; height:22px; border-radius:50%; display:grid; place-items:center;
-    font-size:11px; font-weight:700; border:1px solid var(--line2); color:var(--dim);
-    flex:none;
-  }
-  .num.on { background:var(--ok); border-color:var(--ok); color:#062815; }
-  .num.no { background:var(--bad); border-color:var(--bad); color:#2b0b0b; }
-  .st { font-weight:600; font-size:14px; }
-  .sbody { margin-top:11px; }
-  .empty { color:var(--dim); font-size:13.5px; }
-
-  .turn { display:grid; grid-template-columns:26px 66px 1fr; gap:10px; padding:7px 0; align-items:baseline; }
-  .turn + .turn { border-top:1px solid #21262f; }
-  .turn .r { font-family:var(--mono); font-size:11px; color:var(--dim); }
-  .turn .who { font-size:11px; text-transform:uppercase; letter-spacing:.6px; font-weight:650; }
-  .turn.buyer .who { color:var(--buyer); }
-  .turn.merchant .who { color:var(--merchant); }
-  .turn .msg { font-size:14px; }
-  .turn .why { color:var(--dim); font-size:12px; margin-top:2px; }
-
-  .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 12px; font-size:13px; }
-  .kv dt { color:var(--dim); }
-  .kv dd { margin:0; font-family:var(--mono); font-size:12px; word-break:break-all; }
-
-  .note {
-    border-radius:9px; padding:10px 12px; font-size:13.5px; border:1px solid var(--line2);
-    color:var(--mid); margin-bottom:11px;
-  }
-  .note.ok   { border-color:#255c3c; background:#10251a; color:#9fe9be; }
-  .note.bad  { border-color:#6b2b2b; background:#241315; color:#ffa8a8; }
-  .note.warn { border-color:#6b5622; background:#241f10; color:#f0d493; }
-
-  .cta {
-    background:var(--ok); color:#052a15; border:0; border-radius:9px;
-    padding:10px 16px; font-weight:650; font-size:13.5px;
-  }
-  .cta:disabled { background:#2a3340; color:var(--dim); }
-  .cta.wide { width:100%; margin-top:4px; }
-
-  .chain { display:grid; gap:0; }
-  .link { display:grid; grid-template-columns:24px 1fr; gap:11px; padding:11px 0; }
-  .link + .link { border-top:1px solid #21262f; }
-  .link.idle { opacity:.45; }
-  .mk { font-size:15px; line-height:1.25; text-align:center; }
-  .lname { font-size:11px; text-transform:uppercase; letter-spacing:.7px; color:var(--dim); font-weight:650; }
-  .ltxt { font-size:13.5px; margin-top:1px; }
-  .ldet { color:var(--dim); font-size:12px; }
-  .lhash { font-family:var(--mono); font-size:10.5px; color:#5c6473; word-break:break-all; margin-top:3px; }
-  .sigs { font-family:var(--mono); font-size:11px; margin-top:3px; }
-  .sigs .y { color:var(--ok); } .sigs .n { color:var(--bad); }
-  .fp { font-family:var(--mono); font-size:10.5px; color:var(--dim); margin-top:10px; word-break:break-all; }
+  .stagecard { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px; box-shadow:var(--shadow); }
+  .stagecard.idle { opacity:.55; box-shadow:none; }
+  .sh { display:flex; align-items:center; gap:11px; }
+  .num { width:23px; height:23px; border-radius:50%; display:grid; place-items:center; flex:none;
+         font-size:11px; font-weight:700; border:1.5px solid var(--line-2); color:var(--ink-3); background:var(--card); }
+  .num.on { background:var(--good); border-color:var(--good); color:#fff; }
+  .num.no { background:var(--critical); border-color:var(--critical); color:#fff; }
+  .st { font-weight:650; font-size:14.5px; }
+  .sbody { margin-top:13px; }
 </style>
 </head>
 <body>
@@ -186,81 +61,68 @@
     <a href="/shopper.html">Shopper</a>
     <a href="/market.html">Market</a>
   </nav>
-  <span class="tag">a UPI-only shop, made transactable by an AI buyer-agent</span>
   <span class="spacer"></span>
+  <span class="tag">a UPI-only shop, made transactable by an AI buyer-agent</span>
   <span class="pill" id="src">catalog: —</span>
   <span class="pill" id="gw">gateway: —</span>
 </header>
 
 <div class="wrap">
-
-  <!-- ── LEFT: the shop ─────────────────────────────────────────────────── -->
   <div class="col">
-    <div class="colhead">
-      <span class="step">STAGE 1</span>
-      <h2>The shop</h2>
-    </div>
-    <p class="colsub">
-      Built from photos and Hinglish voice notes. Pick something to buy — greyed items
-      can't be sold yet, and will tell you why.
-    </p>
-    <div class="products" id="products"><p class="empty">loading…</p></div>
-
-    <div class="mandate">
-      <h3>What the buyer-agent may do</h3>
-      <div class="fields">
-        <div>
-          <label for="max">Spending ceiling</label>
-          <input id="max" type="number" value="1500" />
-        </div>
-        <div>
-          <label for="open">Opening offer</label>
-          <input id="open" type="number" value="1100" />
-        </div>
-      </div>
-      <div class="presets">
-        <button class="preset" data-max="1500" data-open="1100">Fair buyer</button>
-        <button class="preset" data-max="900" data-open="800">Can't afford it</button>
-        <button class="preset" data-max="5000" data-open="1300">Generous buyer</button>
-      </div>
-      <p class="hint">
-        These are the limits signed into the Intent Mandate. The agent cannot exceed
-        the ceiling, and the shop will not go below its own floor.
+    <section>
+      <h2><span class="n">1</span>The shops</h2>
+      <p class="sub" style="margin:-6px 0 14px">
+        Built from photos and Hinglish voice notes. Pick something to buy —
+        greyed items can't be sold yet, and say why.
       </p>
-    </div>
+      <div id="products"><p class="empty">loading…</p></div>
+    </section>
+
+    <section>
+      <h2>What the buyer-agent may do</h2>
+      <div class="mandate">
+        <div class="fields">
+          <div><label for="max">Spending ceiling</label><input id="max" type="number" value="1500" /></div>
+          <div><label for="open">Opening offer</label><input id="open" type="number" value="1100" /></div>
+        </div>
+        <div class="presets">
+          <button class="ghost" data-max="1500" data-open="1100">Fair buyer</button>
+          <button class="ghost" data-max="900" data-open="800">Can't afford it</button>
+          <button class="ghost" data-max="5000" data-open="1300">Generous buyer</button>
+        </div>
+        <p class="sub" style="margin:0">
+          These limits are signed into the Intent Mandate. The agent cannot exceed the
+          ceiling, and no shop will go below its own floor.
+        </p>
+      </div>
+    </section>
   </div>
 
-  <!-- ── RIGHT: the transaction ─────────────────────────────────────────── -->
   <div class="col">
-    <div class="colhead">
-      <span class="step">STAGES 2–7</span>
-      <h2>The transaction</h2>
-    </div>
-    <p class="colsub" id="flowsub">Pick a product on the left to begin.</p>
+    <section style="box-shadow:none; background:transparent; border:none; padding:0">
+      <h2 style="margin-bottom:6px">The transaction</h2>
+      <p class="sub" id="flowsub" style="margin:0 0 14px">Pick a product to begin.</p>
 
-    <div class="flow">
-      <section class="stagecard idle" id="c-neg">
-        <div class="sh"><span class="num" id="n-neg">1</span><span class="st">Discover &amp; negotiate</span></div>
-        <div class="sbody" id="b-neg"><p class="empty">Nothing yet.</p></div>
-      </section>
-
-      <section class="stagecard idle" id="c-pay">
-        <div class="sh"><span class="num" id="n-pay">2</span><span class="st">Pay</span></div>
-        <div class="sbody" id="b-pay"><p class="empty">Nothing yet.</p></div>
-      </section>
-
-      <section class="stagecard idle" id="c-ful">
-        <div class="sh"><span class="num" id="n-ful">3</span><span class="st">Merchant confirms handover</span></div>
-        <div class="sbody" id="b-ful"><p class="empty">Nothing yet.</p></div>
-      </section>
-
-      <section class="stagecard idle" id="c-aud">
-        <div class="sh"><span class="num" id="n-aud">4</span><span class="st">Signed audit chain</span></div>
-        <div class="sbody" id="b-aud"><p class="empty">Nothing yet.</p></div>
-      </section>
-    </div>
+      <div style="display:grid; gap:12px">
+        <div class="stagecard idle" id="c-neg">
+          <div class="sh"><span class="num" id="n-neg">1</span><span class="st">Discover &amp; negotiate</span></div>
+          <div class="sbody" id="b-neg"><p class="empty">Nothing yet.</p></div>
+        </div>
+        <div class="stagecard idle" id="c-pay">
+          <div class="sh"><span class="num" id="n-pay">2</span><span class="st">Pay</span></div>
+          <div class="sbody" id="b-pay"><p class="empty">Nothing yet.</p></div>
+        </div>
+        <div class="stagecard idle" id="c-ful">
+          <div class="sh"><span class="num" id="n-ful">3</span><span class="st">Shopkeeper confirms handover</span></div>
+          <div class="sbody" id="b-ful"><p class="empty">Nothing yet.</p></div>
+        </div>
+        <div class="stagecard idle" id="c-aud">
+          <div class="sh"><span class="num" id="n-aud">4</span><span class="st">Signed audit chain</span></div>
+          <div class="sbody" id="b-aud"><p class="empty">Nothing yet.</p></div>
+        </div>
+      </div>
+    </section>
   </div>
-
 </div>
 
 <script type="module">
@@ -270,59 +132,50 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;"
 
 let config = { gateway: "simulated", requires_checkout: false, razorpay_key_id: null };
 let items = [];
+let merchants = [];
 let txnId = null;
 
-async function api(path, options) {
-  const res = await fetch(path, {
-    ...options,
-    headers: { "content-type": "application/json", ...(options?.headers ?? {}) },
-  });
+const api = async (p, o) => {
+  const res = await fetch(p, { ...o, headers: { "content-type": "application/json", ...(o?.headers ?? {}) } });
   return { status: res.status, body: await res.json() };
-}
-
+};
 const note = (kind, text) => `<div class="note ${kind}">${text}</div>`;
 
-/** Set a stage card's state: idle | active | done | failed. */
-function setStage(key, state, sub) {
-  const card = $(`c-${key}`);
-  const num = $(`n-${key}`);
+["neg","pay","ful","aud"].forEach((k,i) => { $(`n-${k}`).dataset.n = String(i+1); });
+
+function setStage(key, state, html) {
+  const card = $(`c-${key}`), num = $(`n-${key}`);
   card.classList.toggle("idle", state === "idle");
   num.classList.toggle("on", state === "done");
   num.classList.toggle("no", state === "failed");
   num.textContent = state === "done" ? "✓" : state === "failed" ? "✕" : num.dataset.n;
-  if (sub !== undefined) $(`b-${key}`).innerHTML = sub;
+  if (html !== undefined) $(`b-${key}`).innerHTML = html;
 }
-
-["neg", "pay", "ful", "aud"].forEach((k, i) => { $(`n-${k}`).dataset.n = String(i + 1); });
-
 function resetFlow() {
   txnId = null;
-  for (const k of ["neg", "pay", "ful", "aud"]) setStage(k, "idle", `<p class="empty">Nothing yet.</p>`);
+  for (const k of ["neg","pay","ful","aud"]) setStage(k, "idle", `<p class="empty">Nothing yet.</p>`);
 }
 
-// ── the shop ────────────────────────────────────────────────────────────────
-function confChip(label, v) {
-  const cls = v < 0.6 ? "low" : v >= 0.85 ? "good" : "";
-  return `<span class="chip ${cls}">${label} ${v.toFixed(2)}</span>`;
+// ── the shops ───────────────────────────────────────────────────────────────
+function chip(label, v) {
+  const cls = v < 0.6 ? "bad" : v >= 0.85 ? "good" : "warn";
+  const icon = v < 0.6 ? "✕" : v >= 0.85 ? "✓" : "!";
+  return `<span class="chip ${cls}">${icon} ${label} ${v.toFixed(2)}</span>`;
 }
 
 function productCard(item) {
   const held = !item.transactable;
-  const attrs = Object.entries(item.attributes).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const attrs = Object.entries(item.attributes).map(([k,v]) => `${k}: ${v}`).join(" · ");
   const thumb = item.photo_url
     ? `<img class="thumb" src="${item.photo_url}" alt="${esc(item.name)}"
-            onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'no photo'}))" />`
-    : `<div class="thumb ph">drop<br>${esc(item.photo_filename ?? "a photo")}<br>here</div>`;
-
-  return `<button class="product${held ? "" : ""}" data-id="${item.item_id}" ${held ? "disabled" : ""}>
+           onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'voice note only'}))" />`
+    : `<div class="thumb ph">voice note<br>only</div>`;
+  return `<button class="product" data-id="${item.item_id}" ${held ? "disabled" : ""}>
     ${thumb}
     <div>
       <div class="pname">${esc(item.name)}</div>
       <div class="pmeta">${esc(attrs)}</div>
-      <div class="conf">
-        ${confChip("price", item.price.confidence)}
-        ${confChip("stock", item.stock.confidence)}
-      </div>
+      <div class="conf">${chip("price", item.price.confidence)}${chip("stock", item.stock.confidence)}</div>
       ${held ? `<div class="heldmsg">Can't be sold yet — ${esc(item.held_because.join("; "))}</div>` : ""}
     </div>
     <div class="pprice">
@@ -333,83 +186,85 @@ function productCard(item) {
 }
 
 async function loadCatalog() {
-  const { body } = await api("/catalog");
-  items = body.items;
-  $("src").textContent = `catalog: ${body.provider === "claude" ? "extracted live" : "fixtures"}`;
-  $("products").innerHTML = items.map(productCard).join("");
-  for (const el of document.querySelectorAll(".product[data-id]")) {
-    el.onclick = () => start(el.dataset.id);
-  }
+  const [{ body: cat }, { body: ms }] = await Promise.all([api("/catalog"), api("/merchants")]);
+  items = cat.items;
+  merchants = ms.merchants;
+  $("src").textContent = `catalog: ${cat.provider === "fixture" ? "fixtures" : "extracted live"}`;
+  if (cat.provider !== "fixture") $("src").className = "pill live";
+
+  $("products").innerHTML = merchants.map((m) => {
+    const mine = items.filter((i) => i.merchant_id === m.merchant_id);
+    return `<div class="shop">
+      <div class="shophead">
+        <span class="nm">${esc(m.name)}</span>
+        <span class="sub">${esc(m.city)}</span>
+        <span class="spacer"></span>
+        <span class="chip">readiness ${m.readiness.score}</span>
+      </div>
+      ${mine.map(productCard).join("")}
+    </div>`;
+  }).join("");
+
+  for (const el of document.querySelectorAll(".product[data-id]")) el.onclick = () => start(el.dataset.id);
 }
 
 // ── the transaction ─────────────────────────────────────────────────────────
-function renderTurns(log) {
-  return log.map((t) => `<div class="turn ${t.actor}">
-    <span class="r">r${t.round}</span>
-    <span class="who">${t.actor}</span>
-    <span><span class="msg">${esc(t.message)}</span><div class="why">${esc(t.rationale)}</div></span>
-  </div>`).join("");
-}
+const renderTurns = (log) => log.map((t) => `<div class="turn ${t.actor}">
+  <span class="r">r${t.round}</span><span class="who">${t.actor}</span>
+  <span><span class="msg">${esc(t.message)}</span><div class="why">${esc(t.rationale)}</div></span>
+</div>`).join("");
 
 async function start(itemId) {
   const item = items.find((i) => i.item_id === itemId);
   if (!item) return;
+  const merchant = merchants.find((m) => m.merchant_id === item.merchant_id);
 
   resetFlow();
   for (const el of document.querySelectorAll(".product")) el.classList.remove("sel");
   document.querySelector(`.product[data-id="${itemId}"]`)?.classList.add("sel");
 
-  $("flowsub").textContent = `Buying: ${item.name}`;
+  $("flowsub").textContent = `Buying ${item.name} from ${merchant?.name ?? item.merchant_id}`;
   setStage("neg", "active", `<p class="empty">Negotiating…</p>`);
 
+  // item_id pins the shop: two merchants stock the same case, and a name search
+  // would quietly pick whichever is cheaper rather than the one clicked.
   const { status, body } = await api("/transactions", {
     method: "POST",
     body: JSON.stringify({
-      want: item.name,
-      max_price: Number($("max").value),
-      opening_offer: Number($("open").value),
+      want: item.name, item_id: item.item_id,
+      max_price: Number($("max").value), opening_offer: Number($("open").value),
     }),
   });
 
-  if (status === 404) {
-    setStage("neg", "failed", note("warn", "Nothing offerable matched that.") +
-      (body.withheld ?? []).map((w) => `<div class="ldet">${esc(w.item.name)} — ${esc(w.reason)}</div>`).join(""));
-    return;
-  }
+  if (status === 409) { setStage("neg","failed", note("warn", esc(body.error))); return; }
+  if (status === 404) { setStage("neg","failed", note("warn","Nothing offerable matched that.")); return; }
 
   if (body.status === "no_deal") {
-    setStage("neg", "failed", renderTurns(body.log) + note("bad", esc(body.reason)));
-    setStage("pay", "idle", note("warn", "No payment attempted. The shop's floor held."));
+    setStage("neg","failed", renderTurns(body.log) + note("bad", esc(body.reason)));
+    setStage("pay","idle", note("warn","No payment attempted. The shop's floor held."));
     return;
   }
-
-  if (status !== 201) {
-    setStage("neg", "failed", note("bad", esc(body.error ?? "unexpected error")));
-    return;
-  }
+  if (status !== 201) { setStage("neg","failed", note("bad", esc(body.error ?? "unexpected error"))); return; }
 
   txnId = body.transaction_id;
-  setStage("neg", "done",
-    renderTurns(body.log) +
+  setStage("neg","done", renderTurns(body.log) +
     note("ok", `Agreed at <strong>${rupee(body.final_price)}</strong> — above the shop's floor, within the agent's ceiling.`));
 
   const orderRow = `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>`;
 
   if (body.status === "awaiting_payment") {
-    setStage("pay", "active",
+    setStage("pay","active",
       note("warn", `Order opened for ${rupee(body.final_price)}. Complete it in Razorpay Checkout.`) +
-      orderRow +
-      `<button class="cta wide" id="reopen">Open Razorpay Checkout</button>`);
+      orderRow + `<button class="cta" id="reopen" style="margin-top:10px">Open Razorpay Checkout</button>`);
     $("reopen").onclick = () => openCheckout(body);
     await loadAudit();
     openCheckout(body);
     return;
   }
 
-  setStage("pay", "done",
-    note("ok", `Paid ${rupee(body.final_price)}`) +
+  setStage("pay","done", note("ok", `Paid ${rupee(body.final_price)}`) +
     `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>` +
-    (body.gateway === "simulated" ? note("warn", "Simulated gateway — add Razorpay test keys for real IDs.") : ""));
+    (body.gateway === "simulated" ? note("warn","Simulated gateway — add Razorpay test keys for real IDs.") : ""));
   awaitFulfillment();
   await loadAudit();
 }
@@ -420,51 +275,39 @@ function openCheckout(deal) {
     return;
   }
   new window.Razorpay({
-    key: config.razorpay_key_id,
-    order_id: deal.order_id,
-    amount: deal.amount_paise,
-    currency: "INR",
-    name: "Vyapar-to-Agent",
+    key: config.razorpay_key_id, order_id: deal.order_id, amount: deal.amount_paise,
+    currency: "INR", name: "Vyapar-to-Agent",
     description: `${deal.item_id} · agreed ${rupee(deal.final_price)}`,
     handler: async (response) => {
       // Not trusted here — the server verifies the signature against the order
       // it authorized before it will sign a Payment Mandate.
       const { status, body } = await api(`/transactions/${deal.transaction_id}/settle-payment`, {
-        method: "POST",
-        body: JSON.stringify(response),
+        method: "POST", body: JSON.stringify(response),
       });
-      if (status !== 201) {
-        $("b-pay").innerHTML += note("bad", esc((body.reasons ?? [body.error]).join("; ")));
-        return;
-      }
-      setStage("pay", "done",
-        note("ok", `Paid ${rupee(deal.final_price)}`) +
+      if (status !== 201) { $("b-pay").innerHTML += note("bad", esc((body.reasons ?? [body.error]).join("; "))); return; }
+      setStage("pay","done", note("ok", `Paid ${rupee(deal.final_price)}`) +
         `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>`);
       awaitFulfillment();
       await loadAudit();
     },
-    modal: {
-      ondismiss: () => {
-        $("b-pay").innerHTML += note("warn", "Checkout dismissed — the order stands unpaid, and no payment mandate was issued.");
-      },
-    },
+    modal: { ondismiss: () => {
+      $("b-pay").innerHTML += note("warn","Checkout dismissed — the order stands unpaid, and no payment mandate was issued.");
+    }},
   }).open();
 }
 
 function awaitFulfillment() {
-  setStage("ful", "active",
-    note("warn", "Paid, but not delivered. Nothing here infers a handover — only the shopkeeper's signature can.") +
-    `<button class="cta wide" id="confirm">Shopkeeper: I handed it over</button>`);
+  setStage("ful","active",
+    note("warn","Paid, but not delivered. Nothing here infers a handover — only the shopkeeper's signature can.") +
+    `<button class="cta warm" id="confirm">Shopkeeper: I handed it over</button>`);
   $("confirm").onclick = async () => {
     $("confirm").disabled = true;
     const { status, body } = await api(`/transactions/${txnId}/confirm-fulfillment`, {
-      method: "POST",
-      body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
+      method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
     });
     setStage("ful", status === 201 ? "done" : "failed",
-      status === 201
-        ? note("ok", "Handover signed by the shopkeeper.")
-        : note("bad", esc((body.reasons ?? [body.error]).join("; "))));
+      status === 201 ? note("ok","Handover signed by the shopkeeper.")
+                     : note("bad", esc((body.reasons ?? [body.error]).join("; "))));
     await loadAudit();
   };
 }
@@ -472,33 +315,25 @@ function awaitFulfillment() {
 async function loadAudit() {
   if (!txnId) return;
   const { body } = await api(`/transactions/${txnId}/audit`);
-
   const chain = body.timeline.map((s) => {
-    if (!s.present) {
-      return `<div class="link idle"><span class="mk">○</span>
-        <div><div class="lname">${s.stage}</div><div class="ldet">${esc(s.headline)}</div></div></div>`;
-    }
-    const sigs = s.signatures.map((x) => `<span class="${x.verified ? "y" : "n"}">${x.verified ? "✔" : "✘"} ${x.role}</span>`).join("  ");
-    return `<div class="link"><span class="mk">${s.verified ? "✅" : "❌"}</span>
-      <div>
-        <div class="lname">${s.stage}</div>
-        <div class="ltxt">${esc(s.headline)}</div>
-        ${s.detail.map((d) => `<div class="ldet">${esc(d)}</div>`).join("")}
-        <div class="lhash">${esc(s.hash)}</div>
-        <div class="sigs">${sigs}</div>
-      </div></div>`;
+    if (!s.present) return `<div class="link idle"><span class="mk">○</span>
+      <div><div class="lname">${s.stage}</div><div class="ldet">${esc(s.headline)}</div></div></div>`;
+    const sigs = s.signatures.map((x) => `<span class="${x.verified ? "y":"n"}">${x.verified ? "✔":"✘"} ${x.role}</span>`).join("  ");
+    return `<div class="link"><span class="mk">${s.verified ? "✅":"❌"}</span>
+      <div><div class="lname">${s.stage}</div><div class="ltxt">${esc(s.headline)}</div>
+      ${s.detail.map((d) => `<div class="ldet">${esc(d)}</div>`).join("")}
+      <div class="lhash">${esc(s.hash)}</div><div class="sigs">${sigs}</div></div></div>`;
   }).join("");
 
   setStage("aud", body.verified ? "done" : "failed",
     (body.verified
-      ? note("ok", "CHAIN VERIFIED — every signature and hash link re-checked just now, not read from a stored flag.")
+      ? note("ok","CHAIN VERIFIED — every signature and hash link re-checked just now, not read from a stored flag.")
       : note("bad", esc(body.failures.join("; ")))) +
-    `<div class="chain">${chain}</div>` +
-    `<div class="fp">status: ${body.status}<br>fingerprint: ${esc(body.fingerprint)}</div>`);
+    `<div>${chain}</div><div class="mono" style="margin-top:11px">status ${body.status} · ${esc(body.fingerprint)}</div>`);
 }
 
 // ── wiring ──────────────────────────────────────────────────────────────────
-for (const p of document.querySelectorAll(".preset")) {
+for (const p of document.querySelectorAll(".presets .ghost")) {
   p.onclick = () => { $("max").value = p.dataset.max; $("open").value = p.dataset.open; };
 }
 
@@ -506,10 +341,16 @@ api("/config").then(({ body }) => {
   config = body;
   const gw = $("gw");
   gw.textContent = `gateway: ${body.gateway}${body.requires_checkout ? " · Checkout" : ""}`;
-  gw.classList.toggle("live", body.gateway === "razorpay");
+  if (body.gateway === "razorpay") gw.className = "pill live";
 });
+
+// A resolved clarification changes what is sellable — reflect it without a refresh.
+const socket = io();
+socket.on("event", (e) => { if (e.type.startsWith("clarification")) loadCatalog(); });
+
 resetFlow();
 loadCatalog();
 </script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </body>
 </html>
