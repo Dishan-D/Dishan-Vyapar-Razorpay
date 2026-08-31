@@ -115,10 +115,10 @@
       <button class="ex">phone cover, max ₹250</button>
     </div>
     <label class="railtoggle" for="rail">
-      <input type="checkbox" id="rail" checked />
+      <input type="checkbox" id="rail" />
       <span>
-        <b>Let the agent complete the purchase</b>
-        <span class="hint" id="railnote">Settles on the simulated rail so the run finishes unattended. Uncheck to hand off to Razorpay Checkout instead.</span>
+        <b>Let the agent pay by itself</b>
+        <span class="hint" id="railnote">Off: the agent stops at the order and hands you Razorpay Checkout — a real payment needs a person. On: it settles on a simulated rail so the run finishes unattended.</span>
       </span>
     </label>
   </section>
@@ -181,21 +181,52 @@ function offerCard(o, won) {
 let activeRunId = null;
 const liveSteps = [];
 
-/** Steps arrive over the socket while the request is still open. */
-function renderLive() {
-  $("run").innerHTML = liveSteps.map((s, i) => {
-    const last = i === liveSteps.length - 1;
-    return `<div class="liveline ${last ? "" : "done"}">
-      <span class="spin"></span><span>${esc(s.message)}</span>
-      <span class="el">${s.elapsed_ms}ms</span>
-    </div>`;
-  }).join("");
+/**
+ * Steps are shown as they arrive and then kept.
+ *
+ * A whole purchase finishes in about 700ms, so the previous version rendered
+ * the live list and replaced it with the finished trace before anyone could
+ * read either. These are real events off the socket, held at a legible pace and
+ * then expanded in place — nothing is invented and the queue drains to empty.
+ */
+const stepQueue = [];
+let draining = false;
+
+function liveRow(s) {
+  return `<div class="rstep enter"><span class="icn">${s.done ? "✓" : '<span class="spin"></span>'}</span>
+    <div><div class="hd">${esc(s.message)}</div>
+    <div class="nt">${s.elapsed_ms}ms${s.decided_by ? ` · ${esc(s.decided_by)}` : ""}</div></div></div>`;
 }
 
-export function onAgentStep(e) {
-  if (e.type !== "agent.step" || !activeRunId || e.data?.run_id !== activeRunId) return;
-  liveSteps.push({ message: e.message, elapsed_ms: e.data.elapsed_ms ?? 0 });
+function renderLive() {
+  $("run").innerHTML = liveSteps.map(liveRow).join("");
+  $("run").lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function drain() {
+  if (draining) return;
+  draining = true;
+  while (stepQueue.length > 0) {
+    const e = stepQueue.shift();
+    for (const s of liveSteps) s.done = true;
+    liveSteps.push({ message: e.message, elapsed_ms: e.data?.elapsed_ms ?? 0, decided_by: e.data?.decided_by, done: false });
+    renderLive();
+    await new Promise((r) => setTimeout(r, stepQueue.length > 6 ? 140 : 380));
+  }
+  for (const s of liveSteps) s.done = true;
   renderLive();
+  draining = false;
+}
+
+function onAgentStep(e) {
+  if (e.type !== "agent.step" || !activeRunId || e.data?.run_id !== activeRunId) return;
+  stepQueue.push(e);
+  drain();
+}
+
+/** Wait for the paced list to finish before swapping in the detail. */
+async function settled() {
+  while (draining || stepQueue.length > 0) await new Promise((r) => setTimeout(r, 80));
 }
 
 async function run() {
@@ -207,7 +238,8 @@ async function run() {
 
   activeRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   liveSteps.length = 0;
-  liveSteps.push({ message: "Sending to the agent…", elapsed_ms: 0 });
+  stepQueue.length = 0;
+  liveSteps.push({ message: "Sending to the agent…", elapsed_ms: 0, done: false });
   renderLive();
 
   const settle = $("rail").checked ? "test_rail" : "checkout";
@@ -279,20 +311,40 @@ async function run() {
       html.push(stepRow("—", esc(t.headline), t.reasons ? `<div class="nt">${esc(t.reasons.join("; "))}</div>` : ""));
     }
   }
+  // Let the watcher finish reading the live list before it is replaced.
+  await settled();
   $("run").innerHTML = html.join("");
 
-  if (body.status === "awaiting_payment" && config.razorpay_key_id) {
-    $("run").insertAdjacentHTML("beforeend",
-      `<div class="rstep"><span class="icn">₹</span><div>
-        <div class="hd">Waiting for a human</div>
-        <div class="nt">A payment id only exists once someone actually pays. The agent stops here rather than inventing one.</div>
-        <button class="btn go" id="pay" style="margin-top:11px">Pay ${rupee(body.final_price)} via Razorpay</button>
+  if (body.status === "awaiting_payment") {
+    // The agent has done everything it may. A real payment id only exists once
+    // a person pays, so this is where it stops and hands over.
+    $("run").insertAdjacentHTML("beforeend", `
+      <div class="rstep enter"><span class="icn">₹</span><div>
+        <div class="hd">Pay with Razorpay<span class="badge">test mode</span></div>
+        ${purchaseSummary(body)}
+        <dl class="kv" style="margin-top:10px"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>
+        ${config.razorpay_key_id
+          ? `<button class="btn go big" id="pay" style="margin-top:12px">Pay ${rupee(body.final_price)} securely</button>`
+          : note("bad", "Razorpay keys are not configured on the server, so Checkout cannot open.")}
+        <div class="nt" style="margin-top:8px">The agent stops here rather than inventing a payment id.</div>
       </div></div>`);
-    $("pay").onclick = () => checkout(body);
+    if ($("pay")) $("pay").onclick = () => checkout(body);
+  } else if (body.status === "paid") {
+    $("run").insertAdjacentHTML("beforeend", `
+      <div class="rstep enter"><span class="icn">✓</span><div>
+        <div class="hd">Paid${body.rail === "test_rail" ? '<span class="badge">simulated rail</span>' : '<span class="badge">Razorpay</span>'}</div>
+        ${purchaseSummary(body)}
+        <dl class="kv" style="margin-top:10px"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>
+        ${note("warn", "Waiting for the shop to confirm handover — nothing marks itself delivered.")}
+      </div></div>`);
+  }
+
+  if (body.transaction_id) {
+    try { await showTrust(body.transaction_id); } catch { /* the drawer is optional */ }
   }
 
   if (body.comparison?.selected) {
-    try { await showBeforeAfter(body.comparison.selected.merchant_id); } catch { /* panel is optional */ }
+    try { await showBeforeAfter(body.comparison.selected.merchant_id); } catch { /* optional */ }
   }
   $("go").disabled = false;
 }
@@ -393,7 +445,7 @@ config = await boot({ onEvent: onAgentStep });
 if (config.gateway !== "razorpay") {
   $("rail").checked = true;
   $("rail").disabled = true;
-  $("railnote").textContent = "No Razorpay keys configured, so every run already settles on the simulated rail.";
+  $("railnote").textContent = "No Razorpay keys configured, so every run settles on the simulated rail.";
 }
 </script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>

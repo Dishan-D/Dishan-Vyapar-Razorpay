@@ -52,14 +52,21 @@ the endpoint is correct and only the plumbing remains.
 ngrok http 3000
 ```
 
-Copy the `https://` forwarding URL it prints (e.g. `https://a1b2c3.ngrok-free.app`).
+Copy the `https://` forwarding URL it prints — it looks like
+`https://96dd-106-51-211-0.ngrok-free.app`. **Use that whole hostname**; a
+placeholder like `<ngrok>` pasted literally gives Razorpay
+`validation error: url: no such host`.
+
+ngrok also runs a local inspector at `http://127.0.0.1:4040` that shows every
+webhook it forwards, body and headers included. It is the quickest way to see
+whether an event actually arrived.
 
 **In the Razorpay Dashboard** — make sure you are in **Test Mode** —
 go to **Account & Settings → Webhooks → Add New Webhook**:
 
 | Field | Value |
 |---|---|
-| Webhook URL | `https://<your-ngrok-url>/webhooks/razorpay` |
+| Webhook URL | `https://YOUR-SUBDOMAIN.ngrok-free.app/webhooks/razorpay` |
 | Secret | Invent one, e.g. `vyapar_whsec_2026`. Copy it exactly. |
 | Active Events | tick **`payment.captured`** only |
 
@@ -124,7 +131,7 @@ TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 In the same sandbox settings, set **"When a message comes in"** to:
 
 ```
-https://<your-ngrok-url>/webhooks/whatsapp      (HTTP POST)
+https://YOUR-SUBDOMAIN.ngrok-free.app/webhooks/whatsapp      (HTTP POST)
 ```
 
 Same tunnel as the Razorpay webhook — one `ngrok http 3000` covers both.

@@ -301,7 +301,16 @@ export async function createApp(options: AppOptions = {}) {
   );
 
   app.use(express.json());
-  app.use(express.static(path.resolve("frontend")));
+  // No caching on the front end. A demo machine reloading a page it edited two
+  // minutes ago and getting yesterday's JavaScript is a whole afternoon lost to
+  // a bug that was already fixed.
+  app.use(
+    express.static(path.resolve("frontend"), {
+      etag: false,
+      lastModified: false,
+      setHeaders: (res) => res.setHeader("Cache-Control", "no-store, must-revalidate"),
+    }),
+  );
   // The merchant's own photos, served as-is. They are the input to Stage 1, so
   // showing them next to what was extracted is the point, not decoration.
   app.use("/media", express.static(path.resolve("data", "sample_products")));
