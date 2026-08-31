@@ -83,6 +83,29 @@
   .chainline + .chainline { border-top:1px solid var(--border); }
   .chainline .cm { color:var(--green); }
 
+  .auditpanel { border:1px solid var(--border); border-radius:var(--r); overflow:hidden; margin-top:16px; }
+  .auditpanel .ah { display:flex; align-items:center; gap:10px; padding:13px 16px; border-bottom:1px solid var(--border); background:var(--surface-2); }
+  .auditpanel .ah h3 { margin:0; font-size:13.5px; font-weight:600; }
+  .auditpanel .ab { padding:6px 16px 16px; }
+  .beacon { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:650;
+            text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); margin-left:auto; }
+  .beacon i { width:7px; height:7px; border-radius:50%; background:var(--ink-4); }
+  .beacon.on { color:var(--green); }
+  .beacon.on i { background:var(--green); animation:blip 1.4s ease-in-out infinite; }
+  @keyframes blip { 0%,100% { box-shadow:0 0 0 0 rgba(18,122,77,.5); } 50% { box-shadow:0 0 0 6px rgba(18,122,77,0); } }
+
+  .mstep { display:grid; grid-template-columns:22px 1fr; gap:12px; padding:11px 0; }
+  .mstep + .mstep { border-top:1px solid var(--border); }
+  .mstep.pending { opacity:.45; }
+  .mstep .mk2 { width:20px; height:20px; border-radius:50%; display:grid; place-items:center;
+                font-size:10px; font-weight:700; border:1px solid var(--border-2); color:var(--ink-4); background:var(--surface); }
+  .mstep.done .mk2 { background:var(--green); border-color:var(--green); color:#fff; }
+  .mstep .mt { font-size:13.5px; font-weight:550; }
+  .mstep .md { font-size:12px; color:var(--ink-3); margin-top:1px; }
+  .mstep .mh { font-family:var(--mono); font-size:10px; color:#a89f95; word-break:break-all; margin-top:3px; }
+  .mstep .sg { font-family:var(--mono); font-size:10.5px; color:var(--green); margin-top:2px; }
+  .verified { display:flex; align-items:center; gap:9px; padding:11px 16px; border-top:1px solid var(--border); background:var(--green-2); color:#0d5c3a; font-size:12.5px; font-weight:550; }
+
   .ba { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   @media (max-width:700px){ .ba { grid-template-columns:1fr; } }
   .bacard { border:1px solid var(--border); border-radius:var(--r-sm); padding:14px; }
@@ -127,6 +150,18 @@
     <h2>Agent run</h2>
     <p class="hint">Every step, and who decided it.</p>
     <div class="run" id="run" style="margin-top:8px"></div>
+  </section>
+
+  <section id="auditcard" style="display:none; padding:0; overflow:hidden">
+    <div class="auditpanel" style="border:0; margin:0">
+      <div class="ah">
+        <h3>Audit trail</h3>
+        <span class="hint">every money action, signed as it happens</span>
+        <span class="beacon" id="abeacon"><i></i><span id="abeacontext">watching</span></span>
+      </div>
+      <div class="ab" id="auditbody"></div>
+      <div class="verified" id="averdict" style="display:none"></div>
+    </div>
   </section>
 
   <section id="bacard" style="display:none">
@@ -179,6 +214,7 @@ function offerCard(o, won) {
 }
 
 let activeRunId = null;
+let watchedTxn = null;
 const liveSteps = [];
 
 /**
@@ -219,6 +255,9 @@ async function drain() {
 }
 
 function onAgentStep(e) {
+  // Anything about the transaction being watched refreshes the audit panel, so
+  // the chain fills in while you look at it rather than after everything ends.
+  if (watchedTxn && e.transaction_id === watchedTxn) refreshAudit(watchedTxn);
   if (e.type !== "agent.step" || !activeRunId || e.data?.run_id !== activeRunId) return;
   stepQueue.push(e);
   drain();
@@ -236,6 +275,8 @@ async function run() {
   $("runcard").style.display = "";
   $("bacard").style.display = "none";
 
+  watchedTxn = null;
+  $("auditcard").style.display = "none";
   activeRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   liveSteps.length = 0;
   stepQueue.length = 0;
@@ -340,6 +381,8 @@ async function run() {
   }
 
   if (body.transaction_id) {
+    watchedTxn = body.transaction_id;
+    try { await refreshAudit(body.transaction_id); } catch { /* panel is optional */ }
     try { await showTrust(body.transaction_id); } catch { /* the drawer is optional */ }
   }
 
@@ -347,6 +390,50 @@ async function run() {
     try { await showBeforeAfter(body.comparison.selected.merchant_id); } catch { /* optional */ }
   }
   $("go").disabled = false;
+}
+
+/**
+ * The four mandates, always shown, with the ones not yet signed greyed out.
+ *
+ * The panel is deliberately visible from the first step rather than appearing
+ * at the end: the point is that each money action is signed *as it happens*,
+ * and a chain that only shows up once everything is over looks like a receipt
+ * printed afterwards.
+ */
+const MANDATE_STEPS = [
+  ["intent", "Intent", "what you authorised, in your own words"],
+  ["cart", "Agreement", "the price both sides signed"],
+  ["payment", "Payment", "captured, and bound to that agreement"],
+  ["fulfillment", "Handover", "only the shop can sign this one"],
+];
+
+async function refreshAudit(txnId) {
+  if (!txnId) return;
+  const { status, body } = await api(`/transactions/${txnId}/audit`);
+  if (status !== 200) return;
+
+  $("auditcard").style.display = "";
+  const byStage = new Map(body.timeline.map((t) => [t.stage, t]));
+
+  $("auditbody").innerHTML = MANDATE_STEPS.map(([stage, label, blurb], i) => {
+    const t = byStage.get(stage);
+    const done = t?.present;
+    return `<div class="mstep ${done ? "done" : "pending"}">
+      <span class="mk2">${done ? "✓" : i + 1}</span>
+      <div>
+        <div class="mt">${label}</div>
+        <div class="md">${done ? esc(t.headline) : blurb}</div>
+        ${done ? `<div class="mh">${esc(t.hash)}</div>
+          <div class="sg">signed by ${t.signatures.map((x) => esc(x.role)).join(", ")}</div>` : ""}
+      </div></div>`;
+  }).join("");
+
+  const signed = body.timeline.filter((t) => t.present).length;
+  const v = $("averdict");
+  v.style.display = "";
+  v.innerHTML = body.verified
+    ? `<span>✓</span><span>${signed} of 4 mandates signed — every signature and hash link re-checked just now, not read from a stored flag.</span>`
+    : `<span>✕</span><span>${esc(body.failures.join("; "))}</span>`;
 }
 
 function purchaseSummary(body) {

@@ -48,6 +48,31 @@
   .qr img { width:96px; height:96px; border-radius:var(--r-sm); border:1px solid var(--border); background:#fff; padding:6px; }
   .signed { display:flex; align-items:center; gap:8px; padding:11px 13px; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface-2); margin-top:12px; }
 
+  /* Before/after: paired bars, one row per measure. Two series only, both
+     direct-labelled, so identity never rests on colour alone. */
+  .growth { display:grid; gap:15px; }
+  .grow { display:grid; grid-template-columns:150px 1fr; gap:14px; align-items:center; }
+  @media (max-width:640px){ .grow { grid-template-columns:1fr; } }
+  .grow .gl { font-size:12.5px; color:var(--ink-2); }
+  .gbars { display:grid; gap:5px; }
+  .gbar { display:grid; grid-template-columns:52px 1fr auto; gap:9px; align-items:center; font-size:11.5px; }
+  .gbar .gk { color:var(--ink-4); font-size:10px; text-transform:uppercase; letter-spacing:.06em; font-weight:650; }
+  .gtrack { height:16px; border-radius:4px; background:var(--surface-3); overflow:hidden; }
+  .gfill { height:100%; border-radius:4px; transition:width .7s cubic-bezier(.22,1,.36,1); }
+  .gfill.before { background:#c9c4ba; }
+  .gfill.after { background:#2a78d6; }
+  .gbar .gv { font-variant-numeric:tabular-nums; font-weight:600; font-size:12.5px; min-width:56px; text-align:right; }
+
+  .funnel { display:grid; gap:2px; }
+  .fstep { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center;
+           padding:11px 13px; border-radius:var(--r-sm); background:var(--surface-2); position:relative; overflow:hidden; }
+  .fstep .fbg { position:absolute; inset:0; background:var(--blue-2); transition:width .7s cubic-bezier(.22,1,.36,1); }
+  .fstep .ft, .fstep .fc { position:relative; }
+  .fstep .ft { font-size:13px; font-weight:550; }
+  .fstep .fn { font-size:11.5px; color:var(--ink-3); margin-top:1px; }
+  .fstep .fc { font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .fdrop { font-size:11px; color:var(--red); padding:3px 13px 0; }
+
   .opp { border:1px solid var(--border); border-radius:var(--r); padding:16px; }
   .opp + .opp { margin-top:11px; }
   .opp.act { border-color:var(--amber-3); background:var(--amber-2); }
@@ -148,6 +173,16 @@
     <section>
       <h2>Agent Readiness</h2>
       <div id="score" style="margin-top:12px"><p class="empty">Loading…</p></div>
+    </section>
+
+    <section>
+      <h2>What changed for this shop</h2>
+      <p class="hint">Before is one UPI ID. Everything after is counted from stored state — nothing here is projected.</p>
+      <div class="growth" id="growth" style="margin-top:16px"><p class="empty">Loading…</p></div>
+
+      <h2 style="margin-top:26px">Where buyers stopped</h2>
+      <p class="hint">Every AI buyer whose request reached this shop, and how far they got.</p>
+      <div class="funnel" id="funnel" style="margin-top:14px"></div>
     </section>
 
     <section>
@@ -423,6 +458,52 @@ async function loadOpportunities() {
   }
 }
 
+// ── growth ──────────────────────────────────────────────────────────────────
+const GROWTH_ROWS = [
+  ["machine_readable_fields", "Machine-readable facts", (n) => n],
+  ["products_an_agent_can_see", "Products an agent can see", (n) => n],
+  ["products_an_agent_can_buy", "Ready to buy", (n) => n],
+  ["negotiable_products", "Open to negotiation", (n) => n],
+  ["buyers_reached", "AI buyers reached", (n) => n],
+  ["verified_value", "Verified value", (n) => rupee(n)],
+];
+
+async function loadGrowth() {
+  const { body: g } = await api(`/merchants/${merchantId}/growth`);
+
+  $("growth").innerHTML = GROWTH_ROWS.map(([key, label, fmt]) => {
+    const b = g.before[key] ?? 0;
+    const a = g.after[key] ?? 0;
+    const max = Math.max(b, a, 1);
+    return `<div class="grow">
+      <div class="gl">${label}</div>
+      <div class="gbars">
+        <div class="gbar"><span class="gk">before</span>
+          <div class="gtrack"><div class="gfill before" style="width:${(b / max) * 100}%"></div></div>
+          <span class="gv">${fmt(b)}</span></div>
+        <div class="gbar"><span class="gk">now</span>
+          <div class="gtrack"><div class="gfill after" style="width:${(a / max) * 100}%"></div></div>
+          <span class="gv">${fmt(a)}</span></div>
+      </div>
+    </div>`;
+  }).join("") + `<p class="hint" style="margin-top:4px">${esc(g.before.detail)} → ${esc(g.after.detail)}</p>`;
+
+  const top = Math.max(...g.funnel.map((f) => f.count), 1);
+  $("funnel").innerHTML = g.funnel.map((f, i) => {
+    const prev = i > 0 ? g.funnel[i - 1].count : null;
+    const dropped = prev !== null && prev > f.count ? prev - f.count : 0;
+    return `<div class="fstep">
+        <div class="fbg" style="width:${(f.count / top) * 100}%"></div>
+        <div class="ft">${esc(f.stage)}<div class="fn">${esc(f.note)}</div></div>
+        <div class="fc">${f.count}</div>
+      </div>
+      ${dropped > 0 ? `<div class="fdrop">↓ ${dropped} stopped here</div>` : ""}`;
+  }).join("") +
+  (g.lost.on_price + g.lost.held_stock > 0
+    ? `<p class="hint" style="margin-top:11px">${g.lost.on_price} could not reach your floor · ${g.lost.held_stock} passed over stock you have not confirmed.</p>`
+    : "");
+}
+
 // ── orders ──────────────────────────────────────────────────────────────────
 async function loadOrders() {
   const { body } = await api(`/merchants/${merchantId}/orders`);
@@ -589,7 +670,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders()]);
+  Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth()]);
 
 await loadMerchants();
 await refresh();
@@ -603,7 +684,7 @@ await boot({
     // The dashboard reflects server state; it never keeps its own copy.
     if (e.type.startsWith("clarification")) refresh();
     if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); }
-    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); }
+    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); loadGrowth(); }
   },
 });
 </script>

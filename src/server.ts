@@ -2086,6 +2086,88 @@ export async function createApp(options: AppOptions = {}) {
     res.json({ removed: itemId, remaining: catalogItems.filter((i) => i.merchant_id === id).length });
   });
 
+  /**
+   * What changed for this shop, in numbers it can check.
+   *
+   * "Before" is not a strawman and not a guess: a UPI VPA really is the whole of
+   * these merchants' machine-readable presence, and every "after" figure is
+   * counted from stored state. A growth panel that estimated anything would be
+   * the one screen here nobody could argue with, which is the opposite of the
+   * point.
+   */
+  app.get("/merchants/:id/growth", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = merchants.get(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const mine = catalogItems.filter((i) => i.merchant_id === id);
+    const sellable = mine.filter((i) => !i.needs_merchant_confirmation);
+    const withPolicy = sellable.filter((i) => policies.has(i.item_id));
+    const events = demand.forMerchant(id);
+
+    const chains = store
+      .listTransactionIdsForMerchant(id)
+      .map((t) => store.loadChain(t))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    const paid = chains.filter((c) => c.payment);
+    const delivered = paid.filter((c) => c.fulfillment);
+    const verifiedValue = delivered.reduce((sum, c) => sum + (c.cart?.final_price.value ?? 0), 0);
+
+    // A structured record carries roughly eight machine-readable facts: name,
+    // category, two attributes, price, stock, availability, and a floor.
+    const FIELDS_PER_PRODUCT = 8;
+
+    // Distinct searches that reached this shop, by timestamp.
+    const searches = new Set(events.map((e) => e.at)).size;
+    const withMatch = new Set(events.filter((e) => e.item_id).map((e) => e.at)).size;
+    const reachedPrice = new Set(events.filter((e) => e.outcome === "sold").map((e) => e.at)).size;
+
+    res.json({
+      merchant_id: id,
+      name: merchant.name,
+      before: {
+        label: "UPI only",
+        machine_readable_fields: 1,
+        products_an_agent_can_see: 0,
+        products_an_agent_can_buy: 0,
+        negotiable_products: 0,
+        buyers_reached: 0,
+        sales: 0,
+        verified_value: 0,
+        detail: `One UPI ID (${merchant.upi_vpa}) and nothing else a machine can read.`,
+      },
+      after: {
+        label: "Agent-readable",
+        machine_readable_fields: mine.length * FIELDS_PER_PRODUCT,
+        products_an_agent_can_see: mine.length,
+        products_an_agent_can_buy: sellable.length,
+        negotiable_products: withPolicy.length,
+        buyers_reached: searches,
+        sales: paid.length,
+        verified_value: verifiedValue,
+        detail: `${mine.length} structured products, ${withPolicy.length} of them open to negotiation, on the same UPI ID.`,
+      },
+      // Every buyer who reached this shop, and where they stopped.
+      funnel: [
+        { stage: "Buyers who searched", count: searches, note: "AI buyers whose request reached this shop" },
+        { stage: "Found a match here", count: withMatch, note: "the shop stocked something that fit" },
+        { stage: "Agreed a price", count: reachedPrice, note: "negotiation closed inside both bounds" },
+        { stage: "Paid", count: paid.length, note: "captured through Razorpay" },
+        { stage: "Confirmed delivered", count: delivered.length, note: "the shopkeeper signed the handover" },
+      ],
+      lost: {
+        on_price: events.filter((e) => e.outcome === "lost_on_price").length,
+        held_stock: events.filter((e) => e.outcome === "held").length,
+        no_match: events.filter((e) => e.outcome === "no_match").length,
+      },
+      note: "Counted from stored state. Nothing here is projected, sampled or estimated.",
+    });
+  });
+
   app.get("/merchants", (_req, res) => {
     res.json({
       merchants: structuring.merchants.map((m) => ({

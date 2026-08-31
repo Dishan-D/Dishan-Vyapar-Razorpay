@@ -3,47 +3,87 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Market · Vyapar-to-Agent</title>
+<title>Live market · Vyapar</title>
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .stage { position:relative; height:calc(100vh - 132px); min-height:480px; }
+  .wrap { display:grid; grid-template-columns:1fr 340px; gap:0; height:calc(100vh - 57px); }
+  @media (max-width:900px){ .wrap { grid-template-columns:1fr; height:auto; } }
+  .stage { position:relative; min-height:520px; }
   svg { width:100%; height:100%; display:block; }
-  .node circle { fill:var(--surface); stroke:var(--border-2); stroke-width:1.25; }
-  .node.hot circle { stroke:var(--green); stroke-width:2; }
-  .node text { fill:var(--ink); font-size:12.5px; text-anchor:middle; font-weight:550; letter-spacing:-.01em; }
-  .node .sub { fill:var(--ink-4); font-size:10px; font-weight:450; }
-  .hub circle { fill:var(--surface); stroke:var(--ink); stroke-width:1.75; }
+
+  .node circle { fill:var(--surface); stroke:var(--border-2); stroke-width:1.25; transition:stroke .2s, stroke-width .2s; }
+  .node.hot circle { stroke:var(--green); stroke-width:2.5; }
+  .node text { fill:var(--ink); font-size:12.5px; text-anchor:middle; font-weight:600; letter-spacing:-.01em; }
+  .node .sub { fill:var(--ink-4); font-size:9.5px; font-weight:500; }
+  .hub circle { fill:var(--ink); stroke:var(--ink); }
+  .hub text { fill:#fff; }
+  .hub .sub { fill:rgba(255,255,255,.6); }
   .wire { stroke:var(--border); stroke-width:1.25; fill:none; }
   .pulse { stroke-width:2.5; fill:none; stroke-dasharray:6 10; opacity:0; stroke-linecap:round; }
-  .caption {
-    position:absolute; left:50%; transform:translateX(-50%); bottom:22px;
-    background:var(--surface); border:1px solid var(--border); border-radius:999px;
-    padding:9px 18px; color:var(--ink-2); font-size:13px; box-shadow:var(--shadow-md); max-width:88%;
-  }
-  .caption strong { color:var(--ink); font-weight:550; }
-  .caption .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; margin-right:8px; }
+
+  .side { border-left:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; min-height:0; }
+  .side .hd2 { padding:15px 18px; border-bottom:1px solid var(--border); }
+  .side h2 { margin:0 0 3px; }
+  .feed2 { flex:1; overflow-y:auto; padding:6px 18px 18px; min-height:220px; }
+  .fev { display:grid; grid-template-columns:7px 1fr; gap:10px; padding:9px 0; align-items:baseline; }
+  .fev + .fev { border-top:1px solid var(--border); }
+  .fev .d2 { width:7px; height:7px; border-radius:50%; margin-top:6px; background:var(--ink-4); }
+  .fev .m2 { font-size:12.5px; line-height:1.45; }
+  .fev .k2 { font-size:10px; color:var(--ink-4); margin-top:2px; font-family:var(--mono); }
+  .fev.negotiation .d2 { background:var(--s2); }
+  .fev.payment .d2, .fev.fulfillment .d2 { background:var(--green); }
+  .fev.clarification .d2 { background:var(--amber); }
+  .fev.discovery .d2, .fev.audit .d2, .fev.agent .d2 { background:var(--blue); }
+
+  .trigger { padding:14px 18px; border-top:1px solid var(--border); background:var(--surface-2); }
+
+  .beacon { display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:650;
+            text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); }
+  .beacon i { width:7px; height:7px; border-radius:50%; background:var(--ink-4); }
+  .beacon.on { color:var(--green); }
+  .beacon.on i { background:var(--green); animation:blip 1.4s ease-in-out infinite; }
+  @keyframes blip { 0%,100% { box-shadow:0 0 0 0 rgba(18,122,77,.5); } 50% { box-shadow:0 0 0 6px rgba(18,122,77,0); } }
+
+  .caption { position:absolute; left:50%; transform:translateX(-50%); bottom:20px;
+             background:var(--surface); border:1px solid var(--border); border-radius:999px;
+             padding:9px 18px; color:var(--ink-2); font-size:13px; box-shadow:var(--shadow-md); max-width:86%; }
+  .caption .lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; margin-right:9px; }
+  .caption strong { color:var(--ink); font-weight:600; }
 </style>
 </head>
 <body>
 <div id="nav"></div>
 
-<div class="stage">
-  <svg id="svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
-  <div class="caption" id="cap"><span class="lbl">idle</span>Waiting for activity…</div>
+<div class="wrap">
+  <div class="stage">
+    <svg id="svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="caption" id="cap"><span class="lbl">idle</span>Nothing happening yet.</div>
+  </div>
+
+  <aside class="side">
+    <div class="hd2">
+      <h2>Live activity</h2>
+      <span class="beacon" id="beacon"><i></i><span id="beacontext">connecting</span></span>
+    </div>
+    <div class="feed2" id="feed"><p class="empty">Waiting for something to happen…</p></div>
+    <div class="trigger">
+      <button class="btn primary wide" id="send">Send a buyer agent</button>
+      <p class="hint" style="margin-top:9px">Runs a real purchase. Every light below is an actual event, not a loop.</p>
+    </div>
+  </aside>
 </div>
 
 <script type="module">
-import { boot, esc as escape } from "/ui.js";
+import { boot, api, esc, clock } from "/ui.js";
 const svg = document.getElementById("svg");
 const NS = "http://www.w3.org/2000/svg";
-const esc = escape;
 
-/* Event families share the ticker's colours, so the two views read as one system. */
 /* Same families, same colours as the merchant activity stream. */
 const COLOR = {
   discovery: "#2a78d6", negotiation: "#eb6834", payment: "#127a4d",
-  fulfillment: "#127a4d", clarification: "#a86a09", extraction: "#8b909e", audit: "#2a78d6",
+  fulfillment: "#127a4d", clarification: "#a86a09", extraction: "#8b909e",
+  audit: "#2a78d6", agent: "#2a78d6",
 };
 
 const el = (name, attrs, parent) => {
@@ -53,89 +93,127 @@ const el = (name, attrs, parent) => {
   return n;
 };
 
-const HUB = { x: 450, y: 280 };
-const nodes = new Map();
-
+const HUB = { x: 450, y: 285 };
 const { merchants } = await (await fetch("/merchants")).json();
 
-// Merchants around the buyer-agent, evenly spaced.
+const nodes = new Map();
 merchants.forEach((m, i) => {
   const angle = (i / merchants.length) * Math.PI * 2 - Math.PI / 2;
-  const x = HUB.x + Math.cos(angle) * 300;
-  const y = HUB.y + Math.sin(angle) * 190;
-  nodes.set(m.merchant_id, { x, y, name: m.name, city: m.city });
+  nodes.set(m.merchant_id, {
+    x: HUB.x + Math.cos(angle) * 300,
+    y: HUB.y + Math.sin(angle) * 185,
+    name: m.name,
+    city: m.city,
+  });
 });
 
-for (const [, n] of nodes) el("path", { class: "wire", d: `M${HUB.x} ${HUB.y} Q ${(HUB.x + n.x) / 2} ${(HUB.y + n.y) / 2 - 40} ${n.x} ${n.y}` });
+const curve = (n) => `M${HUB.x} ${HUB.y} Q ${(HUB.x + n.x) / 2} ${(HUB.y + n.y) / 2 - 40} ${n.x} ${n.y}`;
+for (const [, n] of nodes) el("path", { class: "wire", d: curve(n) });
 
 const pulses = new Map();
-for (const [id, n] of nodes) {
-  pulses.set(id, el("path", { class: "pulse", d: `M${HUB.x} ${HUB.y} Q ${(HUB.x + n.x) / 2} ${(HUB.y + n.y) / 2 - 40} ${n.x} ${n.y}` }));
-}
+for (const [id, n] of nodes) pulses.set(id, el("path", { class: "pulse", d: curve(n) }));
 
 const hub = el("g", { class: "node hub" });
 el("circle", { cx: HUB.x, cy: HUB.y, r: 46 }, hub);
-el("text", { x: HUB.x, y: HUB.y - 2 }, hub).textContent = "buyer-agent";
-const hubSub = el("text", { x: HUB.x, y: HUB.y + 14, class: "sub" }, hub);
+el("text", { x: HUB.x, y: HUB.y - 2 }, hub).textContent = "buyer agent";
+const hubSub = el("text", { x: HUB.x, y: HUB.y + 15, class: "sub" }, hub);
 hubSub.textContent = "idle";
 
 const groups = new Map();
 for (const [id, n] of nodes) {
-  const gEl = el("g", { class: "node" });
-  el("circle", { cx: n.x, cy: n.y, r: 42 }, gEl);
-  el("text", { x: n.x, y: n.y - 2 }, gEl).textContent = n.name.split(" ")[0];
-  el("text", { x: n.x, y: n.y + 14, class: "sub" }, gEl).textContent = n.city;
-  groups.set(id, gEl);
+  const g = el("g", { class: "node" });
+  el("circle", { cx: n.x, cy: n.y, r: 44 }, g);
+  el("text", { x: n.x, y: n.y - 1 }, g).textContent = n.name.split(" ")[0];
+  el("text", { x: n.x, y: n.y + 15, class: "sub" }, g).textContent = n.city;
+  groups.set(id, g);
 }
 
-/** One event, one line lighting up. Nothing here is simulated — it is the bus. */
-function flash(merchantId, type, message) {
-  const family = type.split(".")[0];
+/** One event, one line lighting up. Nothing here is on a timer — it is the bus. */
+function flash(e) {
+  const family = e.type.split(".")[0];
   const colour = COLOR[family] ?? "#2a78d6";
   document.getElementById("cap").innerHTML =
-    `<span class="lbl">${esc(family)}</span><strong>${esc(message)}</strong>`;
+    `<span class="lbl">${esc(family)}</span><strong>${esc(e.message)}</strong>`;
+  hubSub.textContent = family;
 
-  const pulse = merchantId ? pulses.get(merchantId) : null;
-  const group = merchantId ? groups.get(merchantId) : null;
-  if (!pulse || !group) {
-    hubSub.textContent = family;
-    return;
-  }
+  const pulse = e.merchant_id ? pulses.get(e.merchant_id) : null;
+  const group = e.merchant_id ? groups.get(e.merchant_id) : null;
+  if (!pulse || !group) return;
 
   group.classList.add("hot");
-  hubSub.textContent = family;
   pulse.setAttribute("stroke", colour);
   pulse.animate(
-    [
-      { opacity: 0, strokeDashoffset: 120 },
-      { opacity: 1, strokeDashoffset: 60, offset: 0.3 },
-      { opacity: 0, strokeDashoffset: 0 },
-    ],
-    { duration: 1100, easing: "ease-out" },
+    [{ opacity: 0, strokeDashoffset: 120 }, { opacity: 1, strokeDashoffset: 60, offset: 0.3 }, { opacity: 0, strokeDashoffset: 0 }],
+    { duration: 1000, easing: "ease-out" },
   );
-  setTimeout(() => group.classList.remove("hot"), 1100);
+  setTimeout(() => group.classList.remove("hot"), 1000);
+}
+
+// ── the feed, so there is always evidence of life ───────────────────────────
+const feed = [];
+function renderFeed() {
+  if (feed.length === 0) return;
+  document.getElementById("feed").innerHTML = feed.slice(-40).reverse().map((e) => `
+    <div class="fev ${e.type.split(".")[0]}">
+      <span class="d2"></span>
+      <span><span class="m2">${esc(e.message)}</span><div class="k2">${clock(e.at)} · ${e.type}</div></span>
+    </div>`).join("");
 }
 
 /**
- * Events arrive in bursts — a whole purchase can finish inside a second — so
- * they are played out at a readable spacing. This paces the display of real
- * events; it never invents one, and the queue drains to empty.
+ * Events arrive in bursts — a whole purchase finishes inside a second — so they
+ * are played out at a readable pace. This paces the display of real events; it
+ * never invents one, and the queue drains to empty.
  */
 const queue = [];
 let playing = false;
-
 async function play() {
   if (playing) return;
   playing = true;
+  const beacon = document.getElementById("beacon");
+  const btext = document.getElementById("beacontext");
   while (queue.length > 0) {
     const e = queue.shift();
-    flash(e.merchant_id, e.type, e.message);
-    await new Promise((r) => setTimeout(r, queue.length > 8 ? 90 : 260));
+    flash(e);
+    feed.push(e);
+    renderFeed();
+    btext.textContent = "live";
+    await new Promise((r) => setTimeout(r, queue.length > 8 ? 110 : 300));
   }
   playing = false;
+  btext.textContent = "connected";
+  document.getElementById("cap").innerHTML = `<span class="lbl">idle</span>Waiting for the next buyer.`;
+  hubSub.textContent = "idle";
 }
 
-await boot({ onEvent: (e) => { queue.push(e); play(); } });
+// ── send a real buyer, from here ────────────────────────────────────────────
+const GOALS = [
+  "a blue cotton saree under ₹1400",
+  "a silicone phone case, nothing over ₹300",
+  "murukku, up to ₹120",
+];
+let next = 0;
+
+document.getElementById("send").onclick = async () => {
+  const btn = document.getElementById("send");
+  btn.disabled = true;
+  const goal = GOALS[next++ % GOALS.length];
+  document.getElementById("cap").innerHTML = `<span class="lbl">sending</span><strong>${esc(goal)}</strong>`;
+  await api("/agent/run", { method: "POST", body: JSON.stringify({ goal, settle: "test_rail" }) });
+  btn.disabled = false;
+};
+
+const config = await boot({ onEvent: (e) => { queue.push(e); play(); } });
+
+// The header's own indicator drives this one, so "live" means genuinely connected.
+const beacon = document.getElementById("beacon");
+const conn = document.getElementById("conn");
+new MutationObserver(() => {
+  const on = conn?.classList.contains("on");
+  beacon.classList.toggle("on", Boolean(on));
+  if (!playing) document.getElementById("beacontext").textContent = on ? "connected" : "offline";
+}).observe(conn ?? document.body, { attributes: true, attributeFilter: ["class"] });
+beacon.classList.toggle("on", Boolean(conn?.classList.contains("on")));
 </script>
 </body>
 </html>

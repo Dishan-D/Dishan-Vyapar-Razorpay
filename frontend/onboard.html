@@ -9,8 +9,12 @@
 <style>
   .wrap { max-width:860px; margin:0 auto; padding:26px 26px 90px; }
   .steps { display:flex; gap:8px; margin-bottom:26px; }
-  .sdot { flex:1; height:3px; border-radius:2px; background:var(--border); }
+  .sdot { flex:1; height:3px; border-radius:2px; background:var(--border); border:0; padding:0; cursor:default; }
   .sdot.on { background:var(--ink); }
+  .sdot.can { cursor:pointer; }
+  .sdot.can:hover { background:var(--ink-3); }
+  .navrow { display:flex; gap:9px; align-items:center; margin-top:20px; }
+  .navrow .sp { flex:1; }
   .stepno { font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
   h1 { font-size:27px; font-weight:600; letter-spacing:-.03em; margin:6px 0 7px; }
   .lede { color:var(--ink-2); font-size:14.5px; margin:0 0 26px; max-width:56ch; line-height:1.6; }
@@ -75,7 +79,11 @@
 <div id="nav"></div>
 
 <div class="wrap">
-  <div class="steps"><div class="sdot on" id="d1"></div><div class="sdot" id="d2"></div><div class="sdot" id="d3"></div></div>
+  <div class="steps">
+    <button class="sdot on" id="d1" data-goto="1" title="Your shop"></button>
+    <button class="sdot" id="d2" data-goto="2" title="What you sell"></button>
+    <button class="sdot" id="d3" data-goto="3" title="Your storefront"></button>
+  </div>
 
   <!-- STEP 1 -->
   <section id="step1">
@@ -90,7 +98,11 @@
       <div><label for="del">How soon can you hand over?</label>
         <select id="del"><option value="0">Same day</option><option value="1" selected>Next day</option><option value="3">Two to three days</option></select></div>
     </div>
-    <div class="row" style="margin-top:20px"><button class="btn primary big" id="go1">Continue</button></div>
+    <div class="navrow">
+      <a class="btn secondary" href="/">Cancel</a>
+      <span class="sp"></span>
+      <button class="btn primary big" id="go1">Continue</button>
+    </div>
   </section>
 
   <!-- STEP 2 -->
@@ -134,9 +146,10 @@
     </div>
 
     <div class="added" id="added"><span>Nothing added yet.</span></div>
-    <div class="row" style="margin-top:20px">
+    <div class="navrow">
+      <button class="btn secondary" id="back1">← Back</button>
+      <span class="sp"></span>
       <button class="btn primary big" id="go2">Build my storefront</button>
-      <button class="btn secondary" id="back1">Back</button>
     </div>
   </section>
 
@@ -147,6 +160,9 @@
     <p class="lede" id="l3">This is a real extraction, so it takes a few seconds.</p>
     <div class="card"><div class="proc" id="proc"></div></div>
     <div id="result" style="margin-top:20px"></div>
+    <div class="navrow" id="nav3" style="display:none">
+      <button class="btn secondary" id="back2">← Add more</button>
+    </div>
   </section>
 </div>
 
@@ -171,9 +187,8 @@ $("go1").onclick = async () => {
   if (status !== 201) { alert(body.error ?? "could not create the shop"); return; }
 
   merchantId = body.merchant_id;
-  $("step1").style.display = "none";
-  $("step2").style.display = "";
-  $("d2").classList.add("on");
+  furthest = 2;
+  showStep(2);
 };
 
 // ── step 2 ─────────────────────────────────────────────────────────────────
@@ -254,7 +269,34 @@ function summarise() {
 }
 $("voice").oninput = summarise;
 $("desc").oninput = summarise;
-$("back1").onclick = () => { $("step2").style.display = "none"; $("step1").style.display = ""; };
+/**
+ * A merchant who mistypes their shop name should not have to start over. The
+ * step they are on is the only state here; going back never discards what they
+ * have already added, because the inputs live on the server the moment they
+ * are sent.
+ */
+let furthest = 1;
+
+function showStep(n) {
+  for (const i of [1, 2, 3]) $(`step${i}`).style.display = i === n ? "" : "none";
+  for (const i of [1, 2, 3]) {
+    const dot = $(`d${i}`);
+    dot.classList.toggle("on", i <= Math.max(n, furthest === 3 ? 3 : n));
+    dot.classList.toggle("can", i < furthest || i <= n);
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+for (const d of document.querySelectorAll("[data-goto]")) {
+  d.onclick = () => {
+    const target = Number(d.dataset.goto);
+    // Only backwards, and never into a step that has not been reached.
+    if (target <= furthest && target < 3) showStep(target);
+    if (target === 3 && furthest === 3) showStep(3);
+  };
+}
+
+$("back1").onclick = () => showStep(1);
 
 // ── step 3 ─────────────────────────────────────────────────────────────────
 // Named for what the pipeline actually does at each point, so the list is a
@@ -283,9 +325,8 @@ $("go2").onclick = async () => {
     alert("Add a photo, a voice note, or a line of text first.");
     return;
   }
-  $("step2").style.display = "none";
-  $("step3").style.display = "";
-  $("d3").classList.add("on");
+  furthest = 3;
+  showStep(3);
 
   const started = Date.now();
   const elapsed = [];
@@ -313,11 +354,15 @@ $("go2").onclick = async () => {
     $("h3").textContent = "Your AI storefront is ready.";
     $("l3").textContent = body.store_summary ?? "";
     renderResult(body);
+    $("nav3").style.display = "";
+    $("back2").onclick = () => showStep(2);
   } catch (err) {
     $("h3").textContent = "That didn't work";
     $("l3").textContent = "";
-    $("result").innerHTML = `<div class="note bad">${esc(err.message)}</div>
-      <div class="row" style="margin-top:12px"><button class="btn secondary" onclick="location.reload()">Start again</button></div>`;
+    $("result").innerHTML = `<div class="note bad">${esc(err.message)}</div>`;
+    $("nav3").style.display = "";
+    $("back2").textContent = "← Try different inputs";
+    $("back2").onclick = () => showStep(2);
   }
 };
 
