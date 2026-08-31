@@ -32,6 +32,8 @@ export interface Merchant {
   since: string;
   /** Where the QR physically lives in the shop. */
   qr_note: string;
+  /** Soonest the shop can get goods to a buyer, in days. 0 = same day. */
+  delivers_within_days: number;
 }
 
 interface MerchantSeed extends Merchant {
@@ -193,8 +195,9 @@ export async function runStructuring(live: boolean, onProgress?: StructuringProg
   );
 
   return {
-    merchants: seed.map(({ merchant_id, name, city, whatsapp, upi_vpa, since, qr_note }) => ({
+    merchants: seed.map(({ merchant_id, name, city, whatsapp, upi_vpa, since, qr_note, delivers_within_days }) => ({
       merchant_id, name, city, whatsapp, upi_vpa, since, qr_note,
+      delivers_within_days: delivers_within_days ?? 1,
     })),
     items,
     records,
@@ -289,7 +292,10 @@ export async function loadServingCatalog(): Promise<StructuringResult> {
     // A cache written before a schema change is worse than no cache: it looks
     // fine and quietly serves fields that no longer exist. Any merchant missing
     // one of the current fields invalidates the whole file.
-    const currentShape = doc.merchants?.every((m) => m.upi_vpa && m.whatsapp && m.city) ?? false;
+    const currentShape =
+      doc.merchants?.every(
+        (m) => m.upi_vpa && m.whatsapp && m.city && typeof m.delivers_within_days === "number",
+      ) ?? false;
 
     if (doc.items?.length && doc.merchants?.length && currentShape) {
       return {

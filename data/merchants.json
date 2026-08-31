@@ -44,24 +44,25 @@
           "item_id": "itm_meena_001",
           "list_price": 1200,
           "floor_price": 1050,
-          "max_rounds": 2
+          "max_rounds": 3
         },
         {
           "item_id": "itm_meena_002",
           "list_price": 650,
           "floor_price": 570,
-          "max_rounds": 2
+          "max_rounds": 3
         },
         {
           "item_id": "itm_meena_005",
           "list_price": 450,
           "floor_price": 410,
-          "max_rounds": 2
+          "max_rounds": 3
         }
       ],
       "upi_vpa": "meenasarees@okhdfcbank",
       "since": "2019",
-      "qr_note": "Printed QR taped to the counter"
+      "qr_note": "Printed QR taped to the counter",
+      "delivers_within_days": 1
     },
     {
       "merchant_id": "mer_rafiq",
@@ -118,7 +119,8 @@
       ],
       "upi_vpa": "rafiqmobile@ybl",
       "since": "2021",
-      "qr_note": "Soundbox on the shelf"
+      "qr_note": "Soundbox on the shelf",
+      "delivers_within_days": 0
     },
     {
       "merchant_id": "mer_amma",
@@ -191,7 +193,8 @@
       ],
       "upi_vpa": "ammasnacks@paytm",
       "since": "2022",
-      "qr_note": "QR sticker on the sweet jar"
+      "qr_note": "QR sticker on the sweet jar",
+      "delivers_within_days": 0
     }
   ]
 }

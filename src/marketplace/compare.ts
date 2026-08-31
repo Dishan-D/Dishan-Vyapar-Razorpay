@@ -55,12 +55,18 @@ export function compareMerchants(
   merchants: readonly MerchantView[],
   catalog: readonly CatalogItem[],
   policies: ReadonlyMap<string, NegotiationPolicy>,
+  requirements: { category?: string; attributes?: Record<string, string> } = {},
 ): ComparisonResult {
   const offers: MerchantOffer[] = [];
 
   for (const merchant of merchants) {
     const theirs = catalog.filter((i) => i.merchant_id === merchant.merchant_id);
-    const found = discover(theirs, { want, max_price: buyer.max_price });
+    const found = discover(theirs, {
+      want,
+      max_price: buyer.max_price,
+      ...(requirements.category ? { category: requirements.category } : {}),
+      ...(requirements.attributes ? { attributes: requirements.attributes } : {}),
+    });
     const match = found.matches[0];
     if (!match) continue;
 

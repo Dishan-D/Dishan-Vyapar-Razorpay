@@ -18,7 +18,7 @@ import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { indexPolicies } from "./negotiation/policies.js";
 import { gatewayFromEnv, publishableKeyId, SimulatedGateway, type PaymentGateway } from "./payments/gateway.js";
-import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
+import { authorizeCart, settlePayment, PaymentRefused, authorizationFor } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
 import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
 import { clarificationMessage, DashboardNotifier, type Notifier } from "./structuring/notify.js";
@@ -215,7 +215,7 @@ export async function createApp(options: AppOptions = {}) {
           gateway,
           order,
           { razorpay_payment_id: paymentId },
-          { verifiedByGateway: true },
+          { verifiedByGateway: true, merchant: merchants.get(item.merchant_id) },
         );
         store.appendMandate(transactionId, paid.payment);
         bus.emit({
@@ -435,7 +435,9 @@ export async function createApp(options: AppOptions = {}) {
       const chain: MandateChain = { transaction_id, intent, cart };
 
       // Authorize only. The order is a request to be paid, not a payment.
-      const order = await authorizeCart(chain, item, keyring, gateway);
+      const order = await authorizeCart(chain, item, keyring, gateway, {
+        merchant: merchants.get(item.merchant_id),
+      });
       store.saveOrder(transaction_id, order);
       bus.emit({
         type: "payment.order_created",
@@ -463,7 +465,9 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
-      const paid = await settlePayment(chain, item, keyring, gateway, order, undefined);
+      const paid = await settlePayment(chain, item, keyring, gateway, order, undefined, {
+        merchant: merchants.get(item.merchant_id),
+      });
       store.appendMandate(transaction_id, paid.payment);
       bus.emit({
         type: "payment.captured",
@@ -513,10 +517,18 @@ export async function createApp(options: AppOptions = {}) {
     }
 
     try {
-      const paid = await settlePayment(chain, item, keyring, gateway, order, {
-        razorpay_payment_id: String(req.body?.razorpay_payment_id ?? ""),
-        razorpay_signature: req.body?.razorpay_signature,
-      });
+      const paid = await settlePayment(
+        chain,
+        item,
+        keyring,
+        gateway,
+        order,
+        {
+          razorpay_payment_id: String(req.body?.razorpay_payment_id ?? ""),
+          razorpay_signature: req.body?.razorpay_signature,
+        },
+        { merchant: merchants.get(item.merchant_id) },
+      );
       store.appendMandate(id, paid.payment);
       bus.emit({
         type: "payment.captured",
@@ -768,9 +780,12 @@ export async function createApp(options: AppOptions = {}) {
       step("start", "Reading what you asked for…");
 
       // 1 — language → mandate
-      const { intent, parsedBy, fallbackReason } = await parseIntent(goal);
+      const { intent, parsedBy, fallbackReason, droppedAttributes } = await parseIntent(goal);
       if (fallbackReason) {
         console.warn(`[agent] intent parsing fell back to rules — ${fallbackReason}`);
+      }
+      if (droppedAttributes?.length) {
+        console.warn(`[agent ${runId}] discarded invented requirements: ${droppedAttributes.join(", ")}`);
       }
       step(
         "understand",
@@ -780,6 +795,7 @@ export async function createApp(options: AppOptions = {}) {
           parsed_by: parsedBy,
           note: intent.reasoning,
           ...(fallbackReason ? { fallback_reason: fallbackReason } : {}),
+          ...(droppedAttributes?.length ? { dropped_attributes: droppedAttributes } : {}),
         },
         parsedBy === "rules" ? "rules" : "model",
       );
@@ -792,12 +808,19 @@ export async function createApp(options: AppOptions = {}) {
         readiness: readinessFor(m.merchant_id),
       }));
       step("shopping", `Checking ${views.length} shops…`);
+      const attributes: Record<string, string> = {};
+      for (const { key, value } of intent.attributes ?? []) attributes[key] = value;
+
       const comparison = compareMerchants(
         intent.want,
         { buyer_agent_id: "agent_xyz", max_price: intent.max_price, opening_offer: intent.opening_offer },
         views,
         catalogItems,
         policies,
+        {
+          ...(intent.category ? { category: intent.category } : {}),
+          ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+        },
       );
       step("shop", `Checked ${views.length} shops; ${comparison.offers.length} stock it`, {
         offers: comparison.offers.map((o) => ({
@@ -816,58 +839,144 @@ export async function createApp(options: AppOptions = {}) {
       });
 
       if (!comparison.selected) {
-        step("stop", "No shop reached a price inside the mandate", { reasoning: comparison.reasoning });
-        console.log(`[agent ${runId}] no deal in ${Date.now() - startedAt}ms`);
-        res.json({ run_id: runId, goal, intent, status: "no_deal", trace, comparison });
+        // Two different answers used to wear one label: nobody stocking the
+        // thing is not the same as nobody agreeing a price for it, and a
+        // shopper needs to know which of those happened.
+        const nobodyStocks = comparison.offers.length === 0;
+        step(
+          "stop",
+          nobodyStocks ? `No shop stocks ${intent.want}` : "Nobody would sell it inside your budget",
+          { reasoning: comparison.reasoning },
+        );
+        res.json({
+          run_id: runId,
+          goal,
+          intent,
+          status: nobodyStocks ? "no_match" : "no_deal",
+          reason: nobodyStocks
+            ? `Nothing matching "${intent.want}" is on offer from the shops I can reach.`
+            : comparison.reasoning[comparison.reasoning.length - 1] ?? "no agreement reached",
+          trace,
+          comparison,
+        });
         return;
       }
 
-      const chosen = comparison.selected;
+      // Work down the eligible offers rather than stopping at the first one that
+      // fails the gate. A blocked candidate is information, not a dead end —
+      // the shopper asked for a thing, and another shop may still have it.
+      const candidates = comparison.offers.filter((o) => o.eligible);
+      const rejected: Array<{ merchant: string; reasons: string[] }> = [];
+
+      let chosen: (typeof candidates)[number] | null = null;
+      let item: CatalogItem | null = null;
+      let mandateIntent: Awaited<ReturnType<typeof buildIntentMandate>> | null = null;
+      let cart: Awaited<ReturnType<typeof buildCartMandate>> | null = null;
+      let transaction_id = "";
+      let authority: ReturnType<typeof authorizationFor> = null;
+
+      for (const candidate of candidates) {
+        const candidateItem = catalogItems.find((i) => i.item_id === candidate.item_id);
+        if (!candidateItem) continue;
+
+        const draftIntent = await buildIntentMandate(
+          {
+            issuer: keyring.get("buyer_agent").kid,
+            buyer_agent_id: "agent_xyz",
+            constraints: {
+              max_price: intent.max_price,
+              category: intent.category ?? "",
+              ttl_seconds: 600,
+              ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+              ...(intent.deliver_within_days >= 0 ? { deliver_within_days: intent.deliver_within_days } : {}),
+            },
+            prompt_playback: goal,
+          },
+          keyring,
+        );
+
+        const draftCart = await buildCartMandate(
+          draftIntent,
+          {
+            item_id: candidateItem.item_id,
+            final_price: { value: candidate.final_price!, currency: "INR" },
+            merchant_id: candidateItem.merchant_id,
+          },
+          keyring,
+        );
+
+        const result = authorizationFor(
+          { transaction_id: "draft", intent: draftIntent, cart: draftCart },
+          candidateItem,
+          merchants.get(candidateItem.merchant_id),
+        );
+
+        if (result?.authorized) {
+          chosen = candidate;
+          item = candidateItem;
+          mandateIntent = draftIntent;
+          cart = draftCart;
+          authority = result;
+          break;
+        }
+
+        rejected.push({ merchant: candidate.merchant_name, reasons: result?.failures ?? ["authorization failed"] });
+        step("blocked", `${candidate.merchant_name} ruled out — ${result?.failures[0] ?? "does not match"}`, {
+          merchant_id: candidate.merchant_id,
+          item_name: candidate.item_name,
+          checks: result?.checks ?? [],
+        });
+      }
+
+      if (!chosen || !item || !mandateIntent || !cart) {
+        step("stop", "Nothing on offer satisfied what you asked for", {
+          considered: comparison.offers.length,
+          rejected,
+        });
+        res.json({
+          run_id: runId, goal, intent, status: "no_match",
+          reason: rejected.length > 0
+            ? `${rejected.length} shop(s) had something close, but none matched every requirement`
+            : "no shop stocks a match",
+          rejected, trace, comparison,
+        });
+        return;
+      }
+
       step("choose", `Chose ${chosen.merchant_name} at ₹${chosen.final_price}`, {
         reasoning: comparison.reasoning,
         merchant_id: chosen.merchant_id,
         effective_price: chosen.effective_price,
+        ...(rejected.length > 0 ? { after_ruling_out: rejected.length } : {}),
       });
 
-      // 3 — mandates + order, through exactly the path a human click takes
-      const item = catalogItems.find((i) => i.item_id === chosen.item_id)!;
-      const transaction_id = `txn_${Date.now().toString(36)}`;
+      transaction_id = `txn_${Date.now().toString(36)}`;
       store.createTransaction({
         transaction_id,
         item_id: item.item_id,
         merchant_id: item.merchant_id,
         buyer_agent_id: "agent_xyz",
       });
-
-      const mandateIntent = await buildIntentMandate(
-        {
-          issuer: keyring.get("buyer_agent").kid,
-          buyer_agent_id: "agent_xyz",
-          constraints: { max_price: intent.max_price, category: "", ttl_seconds: 600 },
-          prompt_playback: goal,
-        },
-        keyring,
-      );
       store.appendMandate(transaction_id, mandateIntent);
-
-      const cart = await buildCartMandate(
-        mandateIntent,
-        {
-          item_id: item.item_id,
-          final_price: { value: chosen.final_price!, currency: "INR" },
-          merchant_id: item.merchant_id,
-        },
-        keyring,
-      );
       store.appendMandate(transaction_id, cart);
+
       step("sign", "Intent and cart mandates signed", {
         transaction_id,
         prompt_playback: goal,
+        constraints: mandateIntent.constraints,
         note: "the shopper's own words are inside the signed intent, so the mandate says what it was for",
       });
 
+      step("authorize", "Purchase authorized", {
+        checks: authority?.checks ?? [],
+        authorized: true,
+      });
+
       const chain: MandateChain = { transaction_id, intent: mandateIntent, cart };
-      const order = await authorizeCart(chain, item, keyring, runGateway);
+
+      const order = await authorizeCart(chain, item, keyring, runGateway, {
+        merchant: merchants.get(item.merchant_id),
+      });
       store.saveOrder(transaction_id, order);
       bus.emit({
         type: "payment.order_created",
@@ -893,7 +1002,9 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
-      const paid = await settlePayment(chain, item, keyring, runGateway, order, undefined);
+      const paid = await settlePayment(chain, item, keyring, runGateway, order, undefined, {
+        merchant: merchants.get(item.merchant_id),
+      });
       store.appendMandate(transaction_id, paid.payment);
       chain.payment = paid.payment;
       bus.emit({
@@ -1164,6 +1275,37 @@ export async function createApp(options: AppOptions = {}) {
       }
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  /**
+   * "Why can I trust this purchase?" — the same check that gates the money,
+   * rendered for a person. Not a display of green ticks: this calls into the
+   * gate itself, so a tick here means the payment would actually be allowed.
+   */
+  app.get("/transactions/:id/authorization", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const chain = store.loadChain(id);
+    if (!chain) {
+      res.status(404).json({ error: `no such transaction: ${id}` });
+      return;
+    }
+    const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
+    if (!item) {
+      res.status(409).json({ error: `catalog no longer has ${chain.cart?.item_id}` });
+      return;
+    }
+    const result = authorizationFor(chain, item, merchants.get(item.merchant_id));
+    if (!result) {
+      res.status(409).json({ error: "this transaction has no intent or cart yet" });
+      return;
+    }
+    res.json({
+      transaction_id: id,
+      asked_for: chain.intent?.prompt_playback ?? null,
+      constraints: chain.intent?.constraints ?? null,
+      agreed: chain.cart ? { item_id: chain.cart.item_id, price: chain.cart.final_price.value, merchant_id: chain.cart.merchant_id } : null,
+      ...result,
+    });
   });
 
   /** Stage 7 — the closing visual. */

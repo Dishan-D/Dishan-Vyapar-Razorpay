@@ -2,6 +2,7 @@ import type { Keyring } from "../mandates/keys.js";
 import { buildPaymentMandate, verifyChain, type MandateChain } from "../mandates/chain.js";
 import { mandateHash } from "../mandates/sign.js";
 import type { CartMandate, CatalogItem, IntentMandate, PaymentMandate } from "../mandates/schema.js";
+import { checkAuthority, type AuthorityResult } from "../mandates/authority.js";
 import type { OrderResult, PaymentGateway } from "./gateway.js";
 
 export class PaymentRefused extends Error {
@@ -31,11 +32,17 @@ export const toPaise = (rupees: number): number => Math.round(rupees * 100);
  * item's category, or arrive after its own authorization expired. All of it is
  * checked here, and all of it before the gateway exists in this function's world.
  */
+export interface MerchantCapability {
+  delivers_within_days?: number;
+  name?: string;
+}
+
 function preflight(
   chain: MandateChain,
   item: CatalogItem,
   chainOk: { ok: boolean; failures: string[] },
   now: Date,
+  merchant?: MerchantCapability,
 ): string[] {
   const reasons: string[] = [];
   const intent = chain.intent;
@@ -50,33 +57,17 @@ function preflight(
     reasons.push("cart mandate does not reference this intent mandate");
   }
 
-  const price = cart.final_price.value;
-  if (price > intent.constraints.max_price) {
-    reasons.push(
-      `agreed ₹${price} exceeds the ₹${intent.constraints.max_price} the buyer-agent was authorized to spend`,
-    );
-  }
-  if (price <= 0) reasons.push(`agreed price ₹${price} is not payable`);
+  if (cart.final_price.value <= 0) reasons.push(`agreed price ₹${cart.final_price.value} is not payable`);
 
   if (cart.item_id !== item.item_id) {
     reasons.push(`cart names ${cart.item_id} but ${item.item_id} was supplied for validation`);
   }
-  if (!item.category.startsWith(intent.constraints.category)) {
-    reasons.push(
-      `item category "${item.category}" is outside the intent's "${intent.constraints.category}"`,
-    );
-  }
 
-  const issued = Date.parse(intent.issued_at);
-  const ageSeconds = (now.getTime() - issued) / 1000;
-  if (!Number.isFinite(issued)) {
-    reasons.push("intent mandate has an unparseable issued_at");
-  } else if (ageSeconds > intent.constraints.ttl_seconds) {
-    reasons.push(
-      `intent mandate expired ${Math.round(ageSeconds - intent.constraints.ttl_seconds)}s ago ` +
-        `(ttl ${intent.constraints.ttl_seconds}s)`,
-    );
-  }
+  // Budget, category, attributes, delivery and expiry all live in one place, so
+  // what the trust panel shows a shopper and what actually stops the payment
+  // cannot drift apart — they are the same call.
+  const authority = checkAuthority(intent, cart, item, merchant, now);
+  reasons.push(...authority.failures);
 
   if (item.needs_merchant_confirmation) {
     reasons.push(`item ${item.item_id} is still awaiting merchant confirmation`);
@@ -101,10 +92,10 @@ export async function authorizeCart(
   item: CatalogItem,
   keyring: Keyring,
   gateway: PaymentGateway,
-  opts: { now?: Date } = {},
+  opts: { now?: Date; merchant?: MerchantCapability } = {},
 ): Promise<OrderResult> {
   const report = await verifyChain(chain, keyring);
-  const reasons = preflight(chain, item, report, opts.now ?? new Date());
+  const reasons = preflight(chain, item, report, opts.now ?? new Date(), opts.merchant);
   if (reasons.length > 0) throw new PaymentRefused(reasons);
 
   const cart = chain.cart as CartMandate;
@@ -148,10 +139,10 @@ export async function settlePayment(
   gateway: PaymentGateway,
   order: OrderResult,
   callback: CheckoutCallback | undefined,
-  opts: { now?: Date; verifiedByGateway?: boolean } = {},
+  opts: { now?: Date; verifiedByGateway?: boolean; merchant?: MerchantCapability } = {},
 ): Promise<PayResult> {
   const report = await verifyChain(chain, keyring);
-  const reasons = preflight(chain, item, report, opts.now ?? new Date());
+  const reasons = preflight(chain, item, report, opts.now ?? new Date(), opts.merchant);
   if (reasons.length > 0) throw new PaymentRefused(reasons);
 
   const cart = chain.cart as CartMandate;
@@ -220,9 +211,21 @@ export async function payForCart(
   item: CatalogItem,
   keyring: Keyring,
   gateway: PaymentGateway,
-  opts: { paymentId?: string; now?: Date } = {},
+  opts: { paymentId?: string; now?: Date; merchant?: MerchantCapability } = {},
 ): Promise<PayResult> {
   const order = await authorizeCart(chain, item, keyring, gateway, opts);
   const callback = opts.paymentId ? { razorpay_payment_id: opts.paymentId } : undefined;
   return settlePayment(chain, item, keyring, gateway, order, callback, opts);
+}
+
+
+/** The same check the gate runs, exposed for display. */
+export function authorizationFor(
+  chain: MandateChain,
+  item: CatalogItem,
+  merchant?: MerchantCapability,
+  now: Date = new Date(),
+): AuthorityResult | null {
+  if (!chain.intent || !chain.cart) return null;
+  return checkAuthority(chain.intent, chain.cart, item, merchant, now);
 }

@@ -49,11 +49,30 @@ export interface NegotiationPolicy {
 
 export type MandateType = "intent" | "cart" | "payment" | "fulfillment";
 
+/**
+ * What the shopper allowed their agent to do.
+ *
+ * Everything here is a limit, never an instruction: the agent may act inside
+ * this envelope and nowhere else. Attributes and delivery joined price and
+ * category because "under ₹1,100" is not the whole of what someone means when
+ * they say "a blue cotton saree, delivered tomorrow" — and an authorization
+ * that only checks the number would happily buy a red one.
+ */
+export interface IntentConstraints {
+  max_price: number;
+  category: string;
+  ttl_seconds: number;
+  /** Attribute values the item must match, e.g. { color: "blue", material: "cotton" }. */
+  attributes?: Record<string, string>;
+  /** Latest acceptable handover, in days from now. 0 = today, 1 = tomorrow. */
+  deliver_within_days?: number;
+}
+
 export interface IntentMandate {
   mandate_type: "intent";
   issuer: string;
   buyer_agent_id: string;
-  constraints: { max_price: number; category: string; ttl_seconds: number };
+  constraints: IntentConstraints;
   prompt_playback: string;
   issued_at: IsoTimestamp;
   buyer_agent_signature?: CompactJws;

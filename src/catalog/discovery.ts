@@ -1,5 +1,6 @@
 import type { CatalogItem } from "../mandates/schema.js";
 import { gateReasons } from "../structuring/extraction.js";
+import { normaliseAttributes, normaliseKey, valuesAgree } from "../mandates/authority.js";
 
 /** A buyer-agent's structured query. */
 export interface DiscoveryQuery {
@@ -8,6 +9,8 @@ export interface DiscoveryQuery {
   max_price?: number;
   /** Category constraint from the Intent Mandate, e.g. "apparel" or "apparel.saree". */
   category?: string;
+  /** Attribute requirements from the mandate — colour, material, size. */
+  attributes?: Record<string, string>;
 }
 
 export interface DiscoveryMatch {
@@ -76,6 +79,19 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
 
   for (const item of catalog) {
     if (query.category && !item.category.startsWith(query.category)) continue;
+
+    // Applied here, not only at the payment gate. Refusing at the till is
+    // correct but late: an agent should not spend three rounds haggling over a
+    // red saree when the shopper asked for blue.
+    if (query.attributes) {
+      const have = normaliseAttributes(item.attributes);
+      const mismatch = Object.entries(query.attributes).some(([k, want]) => {
+        const mine = have[normaliseKey(k)];
+        if (!mine) return false; // unstated is not a contradiction; the gate decides
+        return !valuesAgree(want, mine);
+      });
+      if (mismatch) continue;
+    }
 
     const hay = haystack(item);
     const matched = queryTerms.filter((t) => hay.includes(t));
