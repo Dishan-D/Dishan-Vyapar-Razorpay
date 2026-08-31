@@ -16,10 +16,11 @@ export async function api(path, options) {
 }
 
 const NAV = [
-  ["/", "Shop"],
+  ["/", "Home"],
+  ["/onboard.html", "Set up a store"],
+  ["/shop.html", "Shop"],
   ["/merchant.html", "Merchant"],
-  ["/shopper.html", "Shopper"],
-  ["/market.html", "Market"],
+  ["/market.html", "Live market"],
 ];
 
 function renderNav() {
@@ -49,25 +50,26 @@ export async function boot({ watch, onEvent, onBacklog } = {}) {
   const [{ body: config }, { body: health }] = await Promise.all([api("/config"), api("/health")]);
 
   const src = $("src");
-  const live = health.catalog_provider && health.catalog_provider !== "fixture";
-  src.textContent = live ? "Extracted live" : "Fixtures";
-  src.classList.toggle("on", Boolean(live));
+  if (src) {
+    const live = health.catalog_provider && health.catalog_provider !== "fixture";
+    src.textContent = live ? "Extracted live" : "Fixtures";
+    src.classList.toggle("on", Boolean(live));
+  }
 
   const gw = $("gw");
-  gw.textContent = config.gateway === "razorpay"
+  if (gw) gw.textContent = config.gateway === "razorpay"
     ? (config.requires_checkout ? "Razorpay · Checkout" : "Razorpay")
     : "Simulated";
-  gw.classList.toggle("on", config.gateway === "razorpay");
+  if (gw) gw.classList.toggle("on", config.gateway === "razorpay");
 
   if (typeof io === "function") {
     const socket = io();
     const conn = $("conn");
     socket.on("connect", () => {
-      conn.className = "livedot on";
-      conn.innerHTML = "<i></i>Live";
+      if (conn) { conn.className = "livedot on"; conn.innerHTML = "<i></i>Live"; }
       if (watch) socket.emit("watch", watch);
     });
-    socket.on("disconnect", () => { conn.className = "livedot"; conn.innerHTML = "<i></i>Offline"; });
+    socket.on("disconnect", () => { if (conn) { conn.className = "livedot"; conn.innerHTML = "<i></i>Offline"; } });
     if (onBacklog) socket.on("backlog", onBacklog);
     if (onEvent) socket.on("event", onEvent);
     config.socket = socket;

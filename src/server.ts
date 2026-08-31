@@ -19,7 +19,7 @@ import { parseIntent } from "./agent/intent.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
-import { buildCartMandate, buildIntentMandate, type MandateChain } from "./mandates/chain.js";
+import { buildCartMandate, buildIntentMandate, type MandateChain, verifyChain } from "./mandates/chain.js";
 import { loadOrCreateKeyring } from "./mandates/keystore.js";
 import type { CatalogItem, NegotiationPolicy } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
@@ -1471,6 +1471,106 @@ export async function createApp(options: AppOptions = {}) {
       item_id: policy.item_id,
       floor_price: { from: opportunity.change.from, to: updated.floor_price },
       note: "Applied because you approved it. Nothing here changes a price on its own.",
+    });
+  });
+
+  /**
+   * What the whole system has actually done. Every number is counted from
+   * stored state, so an empty install honestly reports zeroes rather than
+   * decorating the home page with invented traction.
+   */
+  app.get("/overview", async (_req, res) => {
+    const txns = store.listTransactions();
+    let verifiedValue = 0;
+    let delivered = 0;
+    let paid = 0;
+
+    for (const t of txns) {
+      const chain = store.loadChain(t.transaction_id);
+      if (!chain?.payment) continue;
+      paid++;
+      if (chain.fulfillment) {
+        delivered++;
+        verifiedValue += chain.cart?.final_price.value ?? 0;
+      }
+    }
+
+    const events = demand.all();
+    res.json({
+      merchants_online: structuring.merchants.length,
+      products_listed: catalogItems.length,
+      products_agent_ready: catalogItems.filter((i) => !i.needs_merchant_confirmation).length,
+      awaiting_merchant: catalogItems.filter((i) => i.needs_merchant_confirmation).length,
+      buyer_searches: new Set(events.map((e) => e.at)).size,
+      transactions_paid: paid,
+      transactions_delivered: delivered,
+      verified_gmv: verifiedValue,
+      catalog_source: structuring.provider,
+      gateway: gateway.kind,
+    });
+  });
+
+  /**
+   * A merchant's trust profile, assembled from what actually happened rather
+   * than scored by opinion. Each line names its own basis, because a number a
+   * buyer cannot interrogate is not a reason to trust anybody.
+   */
+  app.get("/merchants/:id/trust", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = merchants.get(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const ids = store.listTransactionIdsForMerchant(id);
+    let paid = 0;
+    let delivered = 0;
+    let intact = 0;
+    let broken = 0;
+
+    for (const tid of ids) {
+      const chain = store.loadChain(tid);
+      if (!chain?.payment) continue;
+      paid++;
+      if (chain.fulfillment) delivered++;
+      const report = await verifyChain(chain, keyring);
+      if (report.ok) intact++;
+      else broken++;
+    }
+
+    const mine = catalogItems.filter((i) => i.merchant_id === id);
+    const readiness = readinessFor(id);
+
+    res.json({
+      merchant_id: id,
+      name: merchant.name,
+      upi_vpa: merchant.upi_vpa,
+      on_upi_since: merchant.since,
+      claims: [
+        {
+          label: "Catalog is agent-readable",
+          ok: mine.some((i) => !i.needs_merchant_confirmation),
+          basis: `${mine.filter((i) => !i.needs_merchant_confirmation).length} of ${mine.length} products carry a confirmed price and stock count`,
+        },
+        {
+          label: "Verified transactions",
+          ok: intact > 0,
+          basis: intact === 0 ? "no completed sales yet" : `${intact} chains re-verified just now, signature by signature`,
+        },
+        {
+          label: "No broken mandate chains",
+          ok: broken === 0,
+          basis: broken === 0 ? "every stored chain verifies" : `${broken} chain(s) failed verification`,
+        },
+        {
+          label: "Fulfillment confirmed",
+          ok: paid > 0 && delivered === paid,
+          basis: paid === 0 ? "no paid sales yet" : `${delivered} of ${paid} paid sales confirmed handed over`,
+        },
+      ],
+      readiness,
+      totals: { paid, delivered, chains_verified: intact, chains_broken: broken },
     });
   });
 

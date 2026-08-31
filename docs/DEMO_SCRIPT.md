@@ -31,7 +31,7 @@ gap, stated in one object: `{"upi_vpa": "ammasnacks@paytm"}`.
 Everything this project adds sits on top of that one asset, and the money still
 lands in the same place it always did — the merchant changes nothing about how
 they get paid. The VPAs are visible under each shop name on `/`, and the
-before/after panel on `/shopper.html` makes the point checkable.
+before/after panel on `/shop.html` makes the point checkable.
 
 ## The header, on every page
 
@@ -121,7 +121,7 @@ discovery/audit).
 
 ---
 
-## 3 · `/shopper.html` — The buyer agent
+## 3 · `/shop.html` — The buyer agent
 
 **What it is:** the agentic path, end to end. You type a sentence; the agent does
 the rest and shows every step it took.
@@ -192,7 +192,7 @@ perfectly. The only thing that caught it was her own price history — one LLM
 scoring its own confidence is one opinion checking itself. Tap **₹110**. The item
 goes green, the readiness score moves.
 
-**1:20 — `/shopper.html` · the agent buys something.** Type the sentence and
+**1:20 — `/shop.html` · the agent buys something.** Type the sentence and
 send it. Point at the **`model`** badge on step 01 and the **`rules`** badges on
 everything under it: *"the model reads what I asked for and sets the budget. It
 never picks a price."* Two shops, two independent haggles, one justified pick.

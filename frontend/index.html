@@ -7,284 +7,161 @@
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .wrap { display:grid; grid-template-columns:minmax(0,1.08fr) minmax(0,1fr); gap:20px;
-          padding:18px 26px 72px; max-width:1460px; margin:0 auto; align-items:start; }
-  @media (max-width:1060px){ .wrap { grid-template-columns:1fr; } }
-  .col { display:grid; gap:16px; min-width:0; }
+  .hero { max-width:1120px; margin:0 auto; padding:64px 26px 40px; }
+  .hero h1 { font-size:44px; line-height:1.08; font-weight:600; letter-spacing:-.035em; margin:0 0 16px; max-width:15ch; }
+  .hero p.lede { font-size:17px; color:var(--ink-2); max-width:60ch; margin:0 0 28px; line-height:1.6; }
+  .cta-row { display:flex; gap:11px; flex-wrap:wrap; }
 
-  .shop { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
-  .shop + .shop { margin-top:14px; }
-  .shophead { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); background:var(--surface-2); }
-  .avatar { width:34px; height:34px; border-radius:9px; object-fit:cover; border:1px solid var(--border); background:var(--surface-3); flex:none; }
-  .avatar.ph { display:grid; place-items:center; font-size:13px; font-weight:600; color:var(--ink-3); }
-  .shophead .nm { font-size:13.5px; font-weight:600; }
-  .shophead .meta { font-size:11.5px; color:var(--ink-3); margin-top:1px; }
-  .shophead .vpa { font-family:var(--mono); font-size:10.5px; color:var(--ink-4); }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+           background:var(--border); border:1px solid var(--border); border-radius:var(--r);
+           overflow:hidden; margin:44px 0 0; max-width:1120px; }
+  .stat-cell { background:var(--surface); padding:16px 18px; }
+  .stat-cell .k { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; }
+  .stat-cell .v { font-size:26px; font-weight:600; letter-spacing:-.03em; margin-top:5px; font-variant-numeric:tabular-nums; }
+  .stat-cell .n { font-size:11.5px; color:var(--ink-3); margin-top:2px; }
 
-  .plist { padding:4px 16px 14px; }
-  .product {
-    display:grid; grid-template-columns:56px 1fr auto; gap:14px; align-items:center;
-    width:100%; text-align:left; padding:13px 0; background:none; border:0;
-    border-bottom:1px solid var(--border); color:inherit; transition:opacity .12s;
-  }
-  .plist .product:last-child { border-bottom:0; }
-  .product:hover:not(:disabled) .pname { color:var(--blue); }
-  .product:disabled { opacity:.62; }
-  .thumb { width:56px; height:56px; border-radius:9px; object-fit:cover; border:1px solid var(--border); background:var(--surface-3); }
-  .thumb.ph { display:grid; place-items:center; color:var(--ink-4); font-size:9px; text-align:center; line-height:1.3; padding:4px; }
-  .pname { font-size:14px; font-weight:550; letter-spacing:-.01em; }
-  .pmeta { color:var(--ink-3); font-size:12px; margin-top:1px; }
-  .prow { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
-  .pright { text-align:right; }
-  .pright .avail { font-size:11px; color:var(--ink-3); margin-top:3px; }
-  .heldwhy { margin-top:7px; font-size:11.5px; color:var(--red); }
+  .loop { max-width:1120px; margin:0 auto; padding:16px 26px 40px; }
+  .loopgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:12px; }
+  .lcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:16px; }
+  .lcard .step { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
+  .lcard h3 { font-size:14px; font-weight:600; margin:7px 0 5px; letter-spacing:-.01em; }
+  .lcard p { font-size:12.5px; color:var(--ink-3); margin:0; line-height:1.55; }
+  .lcard .who { font-size:10.5px; margin-top:9px; padding-top:9px; border-top:1px solid var(--border); color:var(--ink-4); }
+  .lcard .who b { color:var(--ink-2); font-weight:600; }
 
-  .fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
-  .presets { display:flex; gap:7px; flex-wrap:wrap; }
+  .band { border-top:1px solid var(--border); background:var(--surface); }
+  .band .inner { max-width:1120px; margin:0 auto; padding:40px 26px; }
+  .band h2 { font-size:19px; font-weight:600; letter-spacing:-.02em; margin:0 0 6px; }
+  .band p.sub { color:var(--ink-3); font-size:14px; margin:0 0 22px; max-width:62ch; }
+
+  .authority { display:grid; grid-template-columns:1fr 1fr; gap:12px; max-width:760px; }
+  @media (max-width:720px){ .authority { grid-template-columns:1fr; } .hero h1 { font-size:32px; } }
+  .acol { border:1px solid var(--border); border-radius:var(--r-sm); padding:15px; }
+  .acol.can { border-color:var(--green-3); background:var(--green-2); }
+  .acol.cannot { border-color:var(--border-2); background:var(--surface-2); }
+  .acol h4 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.07em; font-weight:650; }
+  .acol.can h4 { color:var(--green); }
+  .acol.cannot h4 { color:var(--ink-3); }
+  .acol li { list-style:none; font-size:13px; padding:4px 0; display:flex; gap:8px; }
+  .acol ul { margin:0; padding:0; }
+  .acol.can li::before { content:"✓"; color:var(--green); font-weight:600; }
+  .acol.cannot li::before { content:"✕"; color:var(--ink-4); }
+
+  .feed { max-width:1120px; margin:0 auto; padding:34px 26px 80px; }
 </style>
 </head>
 <body>
 <div id="nav"></div>
 
-<div class="pagehead">
-  <h1>Discover products</h1>
-  <p>Three local merchants · verified availability</p>
+<div class="hero">
+  <h1>Make your store discoverable to AI.</h1>
+  <p class="lede">
+    65–90 million Indian merchants take payment through a UPI QR and nothing else — no website,
+    no catalog, no API. Vyapar turns what they already have into a storefront an AI buyer can
+    search, negotiate with, and pay.
+  </p>
+  <div class="cta-row">
+    <a class="btn primary big" href="/onboard.html">Set up my store</a>
+    <a class="btn secondary big" href="/shop.html">See an AI buyer in action</a>
+  </div>
+
+  <div class="stats" id="stats"><div class="stat-cell"><div class="k">Loading</div></div></div>
 </div>
 
-<div class="wrap">
-  <div class="col">
-    <div id="products"><section><p class="empty">Loading…</p></section></div>
+<div class="loop">
+  <div class="loopgrid" id="loop"></div>
+</div>
 
-    <section>
-      <h2>Buyer mandate</h2>
-      <p class="hint">Signed into the Intent Mandate. The agent cannot exceed the ceiling; no shop goes below its own floor.</p>
-      <div class="fields">
-        <div><label for="max">Ceiling</label><input id="max" type="number" value="1500" /></div>
-        <div><label for="open">Opening offer</label><input id="open" type="number" value="1100" /></div>
+<div class="band">
+  <div class="inner">
+    <h2>Give the agent authority — not your wallet.</h2>
+    <p class="sub">
+      An agent that can spend freely is the thing people are right to refuse. This one acts inside
+      limits the shopper signed, and every one of them is checked before money moves.
+    </p>
+    <div class="authority">
+      <div class="acol can">
+        <h4>The agent may</h4>
+        <ul>
+          <li>Search every shop at once</li>
+          <li>Compare offers and reliability</li>
+          <li>Haggle within the merchant's own floor</li>
+          <li>Choose, and explain the choice</li>
+          <li>Pay — inside the signed limits</li>
+        </ul>
       </div>
-      <div class="presets">
-        <button class="btn secondary" data-max="1500" data-open="1100">Fair buyer</button>
-        <button class="btn secondary" data-max="900" data-open="800">Can't afford it</button>
-        <button class="btn secondary" data-max="5000" data-open="1300">Generous</button>
+      <div class="acol cannot">
+        <h4>The agent may not</h4>
+        <ul>
+          <li>Spend a rupee over the ceiling</li>
+          <li>Substitute a different kind of product</li>
+          <li>Ignore what was asked for</li>
+          <li>Go below a merchant's price floor</li>
+          <li>Confirm a delivery on the shop's behalf</li>
+        </ul>
       </div>
-    </section>
+    </div>
   </div>
+</div>
 
-  <div class="col">
-    <section id="txncard">
-      <h2>Transaction</h2>
-      <p class="hint" id="flowsub">Select a product to begin.</p>
-
-      <div class="tl" style="margin-top:18px">
-        <div class="step idle" id="s-neg"><span class="mk">01</span>
-          <div class="st">Discover &amp; negotiate</div>
-          <div class="sbody" id="b-neg"><p class="empty">Not started.</p></div>
-        </div>
-        <div class="step idle" id="s-pay"><span class="mk">02</span>
-          <div class="st">Payment</div>
-          <div class="sbody" id="b-pay"><p class="empty">Not started.</p></div>
-        </div>
-        <div class="step idle" id="s-ful"><span class="mk">03</span>
-          <div class="st">Fulfillment</div>
-          <div class="sbody" id="b-ful"><p class="empty">Not started.</p></div>
-        </div>
-        <div class="step idle" id="s-aud"><span class="mk">04</span>
-          <div class="st">Audit</div>
-          <div class="sbody" id="b-aud"><p class="empty">Not started.</p></div>
-        </div>
-      </div>
-    </section>
-  </div>
+<div class="feed">
+  <h2 style="font-size:13.5px">Live activity</h2>
+  <p class="hint" style="margin:0 0 14px">Everything below is the running system, not a reel.</p>
+  <div class="stream" id="stream"><p class="empty">Nothing yet — run a purchase and it appears here.</p></div>
 </div>
 
 <script type="module">
-import { boot, api, rupee, esc, note } from "/ui.js";
+import { boot, api, rupee, esc, clock } from "/ui.js";
 const $ = (id) => document.getElementById(id);
 
-let config = {}; let items = []; let merchants = []; let txnId = null;
+const LOOP = [
+  ["01", "The merchant sends what they have", "Photos, a voice note in Hinglish, a sentence. No forms, no formatting.", "Merchant"],
+  ["02", "AI reads it into a catalog", "Products, prices, stock — with a confidence score on every field.", "Model"],
+  ["03", "Anything doubtful is asked, not guessed", "A price that looks wrong goes back to the shopkeeper as a question.", "Merchant"],
+  ["04", "Buyer-agents discover the shop", "One request, every shop searched, each haggled with separately.", "Agent"],
+  ["05", "Negotiation inside both parties' bounds", "The shop's floor and the shopper's ceiling are both hard limits.", "Deterministic"],
+  ["06", "Authority checked before money moves", "Price, product, attributes, delivery — all verified against what was signed.", "Deterministic"],
+  ["07", "Razorpay takes the payment", "Test-mode orders and Checkout, landing on the same UPI ID as always.", "Razorpay"],
+  ["08", "The shopkeeper confirms handover", "Nothing marks itself delivered. Only their signature closes it.", "Merchant"],
+  ["09", "The whole sale becomes evidence", "Four signed mandates, hash-linked, re-verified on every read.", "Cryptography"],
+  ["10", "Lost demand comes back as advice", "What buyers wanted and walked away from — with a change they can approve.", "Merchant"],
+];
 
-const STEPS = ["neg","pay","ful","aud"];
-STEPS.forEach((k,i) => { $(`s-${k}`).querySelector(".mk").dataset.n = String(i+1).padStart(2,"0"); });
+$("loop").innerHTML = LOOP.map(([n, h, p, who]) => `
+  <div class="lcard">
+    <div class="step">${n}</div>
+    <h3>${esc(h)}</h3>
+    <p>${esc(p)}</p>
+    <div class="who">decided by <b>${esc(who)}</b></div>
+  </div>`).join("");
 
-function setStep(key, state, html) {
-  const step = $(`s-${key}`), mk = step.querySelector(".mk");
-  step.className = `step ${state}`;
-  mk.textContent = state === "done" ? "✓" : state === "failed" ? "✕" : mk.dataset.n;
-  if (html !== undefined) { $(`b-${key}`).innerHTML = html; $(`b-${key}`).classList.add("enter"); }
-}
-function resetFlow() { txnId = null; for (const k of STEPS) setStep(k, "idle", `<p class="empty">Not started.</p>`); }
-
-// ── shops ───────────────────────────────────────────────────────────────────
-const confChip = (label, v) => {
-  const cls = v < 0.6 ? "bad" : v >= 0.85 ? "ok" : "warn";
-  return `<span class="chip ${cls}">${label} ${Math.round(v*100)}%</span>`;
-};
-
-function productRow(item) {
-  const held = !item.transactable;
-  const attrs = Object.entries(item.attributes).map(([k,v]) => v).join(" · ");
-  const thumb = item.photo_url
-    ? `<img class="thumb" src="${item.photo_url}" alt=""
-           onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'voice note'}))" />`
-    : `<div class="thumb ph">voice<br>note</div>`;
-  return `<button class="product" data-id="${item.item_id}" ${held ? "disabled" : ""}>
-    ${thumb}
-    <div>
-      <div class="pname">${esc(item.name)}</div>
-      <div class="pmeta">${esc(attrs)}</div>
-      <div class="prow">
-        <span class="state ${held ? "held" : "ok"}"><span class="dot ${held ? "held" : "ok"}"></span>${held ? "Held" : "Available"}</span>
-        ${confChip("Price", item.price.confidence)}
-      </div>
-      ${held ? `<div class="heldwhy">Waiting for merchant clarification — ${esc(item.held_because.join("; "))}</div>` : ""}
-    </div>
-    <div class="pright">
-      <div class="money lg">${item.price.confidence === 0 ? "—" : rupee(item.price.value)}</div>
-      <div class="avail">${item.price.confidence === 0 ? "no price set" : item.stock.confidence === 0 ? "stock unknown" : `${item.stock.quantity} in stock`}</div>
-    </div>
-  </button>`;
+async function loadStats() {
+  const { body: o } = await api("/overview");
+  const cells = [
+    ["Merchants online", o.merchants_online, `${o.products_listed} products listed`],
+    ["Agent-ready", o.products_agent_ready, `${o.awaiting_merchant} awaiting a merchant answer`],
+    ["Purchases", o.transactions_paid, `${o.transactions_delivered} confirmed delivered`],
+    ["Verified GMV", rupee(o.verified_gmv), "only sales confirmed handed over"],
+  ];
+  $("stats").innerHTML = cells.map(([k, v, n]) =>
+    `<div class="stat-cell"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${esc(n)}</div></div>`).join("");
 }
 
-async function loadCatalog() {
-  const [{ body: cat }, { body: ms }] = await Promise.all([api("/catalog"), api("/merchants")]);
-  items = cat.items; merchants = ms.merchants;
-
-  $("products").innerHTML = merchants.map((m) => {
-    const mine = items.filter((i) => i.merchant_id === m.merchant_id);
-    const photo = mine.find((i) => i.photo_url)?.photo_url;
-    const avatar = photo
-      ? `<img class="avatar" src="${photo}" alt="" />`
-      : `<div class="avatar ph">${esc(m.name[0])}</div>`;
-    return `<div class="shop">
-      <div class="shophead">
-        ${avatar}
-        <div style="flex:1;min-width:0">
-          <div class="nm">${esc(m.name)}</div>
-          <div class="meta">${esc(m.city)} · ${mine.length} products · <span class="vpa">${esc(m.upi_vpa)}</span></div>
-        </div>
-        <span class="chip">Readiness ${m.readiness.score}</span>
-      </div>
-      <div class="plist">${mine.map(productRow).join("")}</div>
-    </div>`;
-  }).join("");
-
-  for (const el of document.querySelectorAll(".product[data-id]")) el.onclick = () => start(el.dataset.id);
+const seen = [];
+function renderStream() {
+  if (seen.length === 0) return;
+  $("stream").innerHTML = seen.slice(-24).reverse().map((e, i) => `
+    <div class="ev ${e.type.split(".")[0]}${i === 0 ? " enter" : ""}">
+      <span class="d"></span><span class="t">${clock(e.at)}</span>
+      <span><span class="m">${esc(e.message)}</span><div class="k">${e.type}</div></span>
+    </div>`).join("");
 }
 
-// ── transaction ─────────────────────────────────────────────────────────────
-const renderTurns = (log) => log.map((t) => `<div class="turn ${t.actor}">
-  <div class="side"><div class="who">${t.actor}</div><div class="rd">round ${t.round}</div></div>
-  <div class="body"><div class="amt">${t.amount ? rupee(t.amount) : "—"}</div><div class="why">Rule: ${esc(t.rationale)}</div></div>
-</div>`).join("");
-
-async function start(itemId) {
-  const item = items.find((i) => i.item_id === itemId);
-  if (!item) return;
-  const merchant = merchants.find((m) => m.merchant_id === item.merchant_id);
-
-  resetFlow();
-  $("flowsub").textContent = `${item.name} · ${merchant?.name ?? item.merchant_id}`;
-  setStep("neg", "active", `<p class="empty">Negotiating…</p>`);
-
-  // item_id pins the shop: two merchants stock the same case under one name.
-  const { status, body } = await api("/transactions", { method: "POST", body: JSON.stringify({
-    want: item.name, item_id: item.item_id,
-    max_price: Number($("max").value), opening_offer: Number($("open").value),
-  })});
-
-  if (status === 409) return setStep("neg","failed", note("warn", esc(body.error)));
-  if (status === 404) return setStep("neg","failed", note("warn","Nothing offerable matched."));
-  if (body.status === "no_deal") {
-    setStep("neg","failed", renderTurns(body.log) + note("bad", esc(body.reason)));
-    setStep("pay","idle", note("warn","No payment attempted — the merchant's floor held."));
-    return;
-  }
-  if (status !== 201) return setStep("neg","failed", note("bad", esc(body.error ?? "unexpected error")));
-
-  txnId = body.transaction_id;
-  setStep("neg","done", renderTurns(body.log) +
-    note("ok", `Agreed at <strong>${rupee(body.final_price)}</strong> — above the shop's floor, within the mandate.`));
-
-  if (body.status === "awaiting_payment") {
-    setStep("pay","active",
-      note("warn", `Order open for ${rupee(body.final_price)}. Complete it in Razorpay Checkout.`) +
-      `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>` +
-      `<button class="btn go" id="reopen" style="margin-top:12px">Open Checkout</button>`);
-    $("reopen").onclick = () => openCheckout(body);
-    await loadAudit(); openCheckout(body); return;
-  }
-
-  setStep("pay","done", note("ok","Payment confirmed") +
-    `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>` +
-    (body.gateway === "simulated" ? note("warn","Simulated gateway — add Razorpay test keys for real IDs.") : ""));
-  awaitFulfillment(); await loadAudit();
-}
-
-function openCheckout(deal) {
-  if (!config.razorpay_key_id || typeof window.Razorpay !== "function") {
-    $("b-pay").innerHTML += note("bad","Razorpay Checkout could not load."); return;
-  }
-  new window.Razorpay({
-    key: config.razorpay_key_id, order_id: deal.order_id, amount: deal.amount_paise,
-    currency: "INR", name: "Vyapar", description: `${deal.item_id} · ${rupee(deal.final_price)}`,
-    handler: async (response) => {
-      // Not trusted here — the server verifies the signature against the order
-      // it authorized before it will sign a Payment Mandate.
-      const { status, body } = await api(`/transactions/${deal.transaction_id}/settle-payment`, {
-        method: "POST", body: JSON.stringify(response) });
-      if (status !== 201) { $("b-pay").innerHTML += note("bad", esc((body.reasons ?? [body.error]).join("; "))); return; }
-      setStep("pay","done", note("ok","Payment confirmed") +
-        `<dl class="kv"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>`);
-      awaitFulfillment(); await loadAudit();
-    },
-    modal: { ondismiss: () => { $("b-pay").innerHTML += note("warn","Checkout dismissed — the order stands unpaid, and no payment mandate was issued."); } },
-  }).open();
-}
-
-function awaitFulfillment() {
-  setStep("ful","active",
-    note("warn","Awaiting merchant handover. Nothing here infers delivery — only the shopkeeper's signature closes it.") +
-    `<button class="btn primary" id="confirm" style="margin-top:12px">Merchant: I handed it over</button>`);
-  $("confirm").onclick = async () => {
-    $("confirm").disabled = true;
-    const { status, body } = await api(`/transactions/${txnId}/confirm-fulfillment`, {
-      method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }) });
-    setStep("ful", status === 201 ? "done" : "failed",
-      status === 201 ? note("ok","Delivered — signed by the merchant.")
-                     : note("bad", esc((body.reasons ?? [body.error]).join("; "))));
-    await loadAudit();
-  };
-}
-
-const MANDATE_LABEL = { intent:"Intent", cart:"Negotiation", payment:"Payment", fulfillment:"Fulfillment" };
-
-async function loadAudit() {
-  if (!txnId) return;
-  const { body } = await api(`/transactions/${txnId}/audit`);
-  const rows = body.timeline.map((s) => {
-    const label = MANDATE_LABEL[s.stage] ?? s.stage;
-    if (!s.present) return `<div class="turn" style="opacity:.5"><div class="side"><div class="who">${label}</div></div>
-      <div class="body"><div class="why">${esc(s.headline)}</div></div></div>`;
-    return `<div class="turn"><div class="side"><div class="who">${label}</div></div>
-      <div class="body">
-        <div style="font-size:13px">${s.verified ? "✓" : "✕"} ${esc(s.headline)}</div>
-        <div class="mono" style="margin-top:3px">${esc(s.hash.slice(0,30))}…</div>
-        <div class="why">signed by ${s.signatures.map((x) => esc(x.role)).join(", ")}</div>
-      </div></div>`;
-  }).join("");
-  setStep("aud", body.verified ? "done" : "failed",
-    (body.verified ? note("ok","Chain verified — every signature and hash link re-checked just now.")
-                   : note("bad", esc(body.failures.join("; ")))) + rows);
-}
-
-for (const p of document.querySelectorAll(".presets .btn")) {
-  p.onclick = () => { $("max").value = p.dataset.max; $("open").value = p.dataset.open; };
-}
-
-config = await boot({ onEvent: (e) => { if (e.type.startsWith("clarification")) loadCatalog(); } });
-resetFlow();
-loadCatalog();
+await loadStats();
+await boot({
+  onBacklog: (events) => { seen.length = 0; seen.push(...events); renderStream(); },
+  onEvent: (e) => { seen.push(e); renderStream(); loadStats(); },
+});
 </script>
-<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </body>
 </html>

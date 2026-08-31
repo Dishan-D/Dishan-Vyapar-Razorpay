@@ -47,6 +47,24 @@
   .qr { display:flex; gap:16px; align-items:center; }
   .qr img { width:96px; height:96px; border-radius:var(--r-sm); border:1px solid var(--border); background:#fff; padding:6px; }
   .signed { display:flex; align-items:center; gap:8px; padding:11px 13px; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface-2); margin-top:12px; }
+
+  .opp { border:1px solid var(--border); border-radius:var(--r); padding:16px; }
+  .opp + .opp { margin-top:11px; }
+  .opp.act { border-color:var(--amber-3); background:var(--amber-2); }
+  .opp h3 { margin:0 0 9px; font-size:14.5px; font-weight:600; letter-spacing:-.01em; }
+  .opp.act h3 { color:#6f4608; }
+  .opp .ev { list-style:none; margin:0 0 12px; padding:0; }
+  .opp .ev li { font-size:12.5px; color:var(--ink-2); padding:2.5px 0; display:flex; gap:8px; }
+  .opp .ev li::before { content:"·"; color:var(--ink-4); }
+  .opp.act .ev li { color:#85540a; }
+  .opp .rec { font-size:13.5px; padding:11px 13px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); }
+  .opp .delta { display:flex; align-items:baseline; gap:9px; margin:11px 0 0; font-variant-numeric:tabular-nums; }
+  .opp .delta .from { color:var(--ink-3); text-decoration:line-through; font-size:14px; }
+  .opp .delta .to { font-size:20px; font-weight:600; color:var(--green); }
+  .trust li { list-style:none; display:grid; grid-template-columns:16px 1fr; gap:10px; padding:7px 0; font-size:13px; }
+  .trust li + li { border-top:1px solid var(--border); }
+  .trust ul { margin:0; padding:0; }
+  .trust .b { color:var(--ink-3); font-size:12px; margin-top:1px; }
 </style>
 </head>
 <body>
@@ -85,6 +103,18 @@
     <section>
       <h2>Agent Readiness</h2>
       <div id="score" style="margin-top:12px"><p class="empty">Loading…</p></div>
+    </section>
+
+    <section>
+      <h2>Grow revenue</h2>
+      <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
+      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+    </section>
+
+    <section>
+      <h2>Commerce Trust Passport</h2>
+      <p class="hint">What a buyer-agent can check about you, and how each line is known.</p>
+      <div class="trust" id="trust" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -251,7 +281,53 @@ function renderStream() {
     </div>`).join("");
 }
 
-const refresh = () => Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory()]);
+// ── revenue ─────────────────────────────────────────────────────────────────
+async function loadOpportunities() {
+  const { body } = await api(`/merchants/${merchantId}/opportunities`);
+  if (body.opportunities.length === 0) {
+    $("opps").innerHTML = `<p class="empty">No buyer activity recorded yet. Run a few searches and lost sales show up here.</p>`;
+    return;
+  }
+  $("opps").innerHTML = body.opportunities.map((o) => `
+    <div class="opp ${o.change ? "act" : ""}">
+      <h3>${esc(o.headline)}</h3>
+      <ul class="ev">${o.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
+      <div class="rec">${esc(o.recommendation)}</div>
+      ${o.change ? `<div class="delta">
+        <span class="hint">Price floor</span>
+        <span class="from">${rupee(o.change.from)}</span><span>→</span><span class="to">${rupee(o.change.to)}</span>
+      </div>
+      <div class="row" style="margin-top:13px">
+        <button class="btn go" data-approve="${o.id}">Approve</button>
+        <button class="btn secondary" data-ignore="${o.id}">Not now</button>
+      </div>` : ""}
+    </div>`).join("");
+
+  for (const b of document.querySelectorAll("[data-approve]")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      const { status, body: r } = await api(`/merchants/${merchantId}/opportunities/${b.dataset.approve}/approve`, { method: "POST" });
+      const card = b.closest(".opp");
+      card.innerHTML = status === 200
+        ? note("ok", `Floor lowered to ${rupee(r.floor_price.to)}. ${esc(r.note)}`)
+        : note("bad", esc(r.error));
+      if (status === 200) refresh();
+    };
+  }
+  for (const b of document.querySelectorAll("[data-ignore]")) {
+    b.onclick = () => { b.closest(".opp").style.display = "none"; };
+  }
+}
+
+async function loadTrust() {
+  const { body } = await api(`/merchants/${merchantId}/trust`);
+  $("trust").innerHTML = `<ul>${body.claims.map((c) => `
+    <li><span style="color:${c.ok ? "var(--green)" : "var(--ink-4)"}">${c.ok ? "✓" : "○"}</span>
+    <span>${esc(c.label)}<div class="b">${esc(c.basis)}</div></span></li>`).join("")}</ul>
+    <p class="hint" style="margin-top:12px">On UPI as <span class="mono">${esc(body.upi_vpa)}</span> since ${esc(body.on_upi_since)}.</p>`;
+}
+
+const refresh = () => Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust()]);
 
 await loadMerchants();
 await refresh();
@@ -264,7 +340,8 @@ await boot({
     seen.push(e); renderStream();
     // The dashboard reflects server state; it never keeps its own copy.
     if (e.type.startsWith("clarification")) refresh();
-    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); }
+    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); }
+    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") loadOpportunities();
   },
 });
 </script>

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Set up a store · Vyapar</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .wrap { max-width:860px; margin:0 auto; padding:26px 26px 90px; }
+  .steps { display:flex; gap:8px; margin-bottom:26px; }
+  .sdot { flex:1; height:3px; border-radius:2px; background:var(--border); }
+  .sdot.on { background:var(--ink); }
+  .stepno { font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
+  h1 { font-size:27px; font-weight:600; letter-spacing:-.03em; margin:6px 0 7px; }
+  .lede { color:var(--ink-2); font-size:14.5px; margin:0 0 26px; max-width:56ch; line-height:1.6; }
+
+  .fields { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .fields { grid-template-columns:1fr; } }
+  .full { grid-column:1/-1; }
+
+  .tabs2 { display:flex; gap:3px; padding:3px; background:var(--surface-2); border:1px solid var(--border); border-radius:11px; margin-bottom:16px; }
+  .tabs2 button { flex:1; background:none; border:0; border-radius:8px; padding:9px; font-size:13px; font-weight:550; color:var(--ink-3); }
+  .tabs2 button.on { background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
+  .pane { display:none; } .pane.on { display:block; }
+
+  .drop { border:1.5px dashed var(--border-2); border-radius:var(--r); padding:34px 20px; text-align:center;
+          background:var(--surface-2); transition:border-color .15s, background .15s; cursor:pointer; }
+  .drop.over { border-color:var(--ink-3); background:var(--surface-3); }
+  .drop .big { font-size:15px; font-weight:550; margin-bottom:4px; }
+  .thumbs { display:flex; gap:9px; flex-wrap:wrap; margin-top:14px; }
+  .thumbs img { width:74px; height:74px; object-fit:cover; border-radius:9px; border:1px solid var(--border); }
+  textarea { width:100%; min-height:130px; resize:vertical; background:var(--surface); border:1px solid var(--border-2);
+             border-radius:var(--r-sm); padding:12px; font:inherit; font-size:14px; line-height:1.6; color:var(--ink); }
+  textarea:focus { outline:none; border-color:var(--ink-3); box-shadow:0 0 0 3px var(--surface-3); }
+  .samples { display:flex; gap:7px; flex-wrap:wrap; margin-top:10px; }
+  .samples button { font-size:11.5px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border);
+                    border-radius:999px; padding:4px 11px; }
+  .samples button:hover { color:var(--ink); border-color:var(--border-2); }
+
+  .added { display:flex; gap:14px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); font-size:12.5px; color:var(--ink-3); }
+  .added b { color:var(--ink); font-weight:600; }
+
+  .proc { display:grid; gap:0; }
+  .pline { display:grid; grid-template-columns:20px 1fr auto; gap:11px; padding:11px 0; align-items:center; font-size:13.5px; }
+  .pline + .pline { border-top:1px solid var(--border); }
+  .pline .mk { width:15px; height:15px; }
+  .pline.wait { color:var(--ink-4); }
+  .pline.now { color:var(--ink); }
+  .pline.ok { color:var(--ink); }
+  .pline .el { font-family:var(--mono); font-size:10.5px; color:var(--ink-4); }
+  .spin2 { width:13px; height:13px; border-radius:50%; border:1.5px solid var(--border-2); border-top-color:var(--ink-3); animation:sp .7s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+
+  .prod { display:grid; grid-template-columns:64px 1fr auto; gap:14px; align-items:center; padding:13px 0; }
+  .prod + .prod { border-top:1px solid var(--border); }
+  .prod img, .prod .ph { width:64px; height:64px; border-radius:10px; object-fit:cover; border:1px solid var(--border); background:var(--surface-3); }
+  .prod .ph { display:grid; place-items:center; font-size:9px; color:var(--ink-4); text-align:center; }
+  .prod .nm { font-size:14px; font-weight:550; }
+  .prod .at { font-size:12px; color:var(--ink-3); margin-top:1px; }
+
+  .ba { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
+  @media (max-width:640px){ .ba { grid-template-columns:1fr; } }
+  .bacol { border:1px solid var(--border); border-radius:var(--r-sm); padding:16px; }
+  .bacol.after { border-color:var(--green-3); background:var(--green-2); }
+  .bacol h4 { margin:0 0 10px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:650; color:var(--ink-4); }
+  .bacol.after h4 { color:var(--green); }
+  .bacol li { list-style:none; font-size:13px; padding:3px 0; display:flex; gap:8px; }
+  .bacol ul { margin:0; padding:0; }
+  .bacol.before li::before { content:"—"; color:var(--ink-4); }
+  .bacol.after li::before { content:"✓"; color:var(--green); }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+
+<div class="wrap">
+  <div class="steps"><div class="sdot on" id="d1"></div><div class="sdot" id="d2"></div><div class="sdot" id="d3"></div></div>
+
+  <!-- STEP 1 -->
+  <section id="step1">
+    <div class="stepno">Step 1 of 3</div>
+    <h1>Your shop</h1>
+    <p class="lede">Just enough to know who you are and where the money goes. Nothing about products yet.</p>
+    <div class="fields">
+      <div class="full"><label for="name">Shop name</label><input id="name" placeholder="Ramesh Textiles" /></div>
+      <div><label for="city">Town or city</label><input id="city" placeholder="Surat" /></div>
+      <div><label for="vpa">Your UPI ID</label><input id="vpa" placeholder="rameshtextiles@okaxis" /></div>
+      <div><label for="wa">WhatsApp number</label><input id="wa" placeholder="+91…" /></div>
+      <div><label for="del">How soon can you hand over?</label>
+        <select id="del"><option value="0">Same day</option><option value="1" selected>Next day</option><option value="3">Two to three days</option></select></div>
+    </div>
+    <div class="row" style="margin-top:20px"><button class="btn primary big" id="go1">Continue</button></div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section id="step2" style="display:none">
+    <div class="stepno">Step 2 of 3</div>
+    <h1>Tell us what you sell</h1>
+    <p class="lede">Any format works. Send a photo of your shelf, talk it through, or type a line — whatever you already have. Nothing needs to be tidy.</p>
+
+    <div class="tabs2">
+      <button class="on" data-pane="photos">Photos</button>
+      <button data-pane="voice">Voice</button>
+      <button data-pane="text">Text</button>
+    </div>
+
+    <div class="pane on" id="pane-photos">
+      <div class="drop" id="drop">
+        <div class="big">Drop photos here, or click to choose</div>
+        <div class="hint">Products, a shelf, a handwritten price list — all fine.</div>
+        <input type="file" id="files" accept="image/*" multiple hidden />
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <div class="pane" id="pane-voice">
+      <textarea id="voice" placeholder="Type out what you'd say, or paste a transcription…"></textarea>
+      <div class="samples">
+        <button data-voice="blue cotton saree hai 1200 ka, ek hi piece bacha hai. white kurta 650, size L, chaar piece hain">Sample: sarees &amp; kurtas</button>
+        <button data-voice="murukku packet 90 rupees, kaara mixture 110, laddu box 120 — ellame fresh">Sample: snacks</button>
+      </div>
+      <p class="hint" style="margin-top:11px">Recording a real voice note is out of scope here — this stands in for the transcription, and the README says so.</p>
+    </div>
+
+    <div class="pane" id="pane-text">
+      <textarea id="desc" placeholder="I sell sarees, kurtas and dress materials. Most prices are negotiable."></textarea>
+    </div>
+
+    <div class="added" id="added"><span>Nothing added yet.</span></div>
+    <div class="row" style="margin-top:20px">
+      <button class="btn primary big" id="go2">Build my storefront</button>
+      <button class="btn secondary" id="back1">Back</button>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section id="step3" style="display:none">
+    <div class="stepno">Step 3 of 3</div>
+    <h1 id="h3">Reading your shop</h1>
+    <p class="lede" id="l3">This is a real extraction, so it takes a few seconds.</p>
+    <div class="card"><div class="proc" id="proc"></div></div>
+    <div id="result" style="margin-top:20px"></div>
+  </section>
+</div>
+
+<script type="module">
+import { boot, api, rupee, esc } from "/ui.js";
+const $ = (id) => document.getElementById(id);
+
+let merchantId = null;
+const photos = [];
+
+// ── step 1 ─────────────────────────────────────────────────────────────────
+$("go1").onclick = async () => {
+  const name = $("name").value.trim();
+  if (!name) { $("name").focus(); return; }
+  $("go1").disabled = true;
+
+  const { status, body } = await api("/onboarding/merchants", { method: "POST", body: JSON.stringify({
+    name, city: $("city").value.trim(), upi_vpa: $("vpa").value.trim(),
+    whatsapp: $("wa").value.trim(), delivers_within_days: Number($("del").value),
+  })});
+  $("go1").disabled = false;
+  if (status !== 201) { alert(body.error ?? "could not create the shop"); return; }
+
+  merchantId = body.merchant_id;
+  $("step1").style.display = "none";
+  $("step2").style.display = "";
+  $("d2").classList.add("on");
+};
+
+// ── step 2 ─────────────────────────────────────────────────────────────────
+for (const b of document.querySelectorAll(".tabs2 button")) {
+  b.onclick = () => {
+    for (const x of document.querySelectorAll(".tabs2 button")) x.classList.toggle("on", x === b);
+    for (const p of document.querySelectorAll(".pane")) p.classList.toggle("on", p.id === `pane-${b.dataset.pane}`);
+  };
+}
+for (const b of document.querySelectorAll("[data-voice]")) {
+  b.onclick = () => { $("voice").value = b.dataset.voice; summarise(); };
+}
+
+const drop = $("drop"), files = $("files");
+drop.onclick = () => files.click();
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+files.onchange = () => addFiles(files.files);
+
+function addFiles(list) {
+  for (const f of list) if (f.type.startsWith("image/")) photos.push(f);
+  $("thumbs").innerHTML = photos.map((f) => `<img src="${URL.createObjectURL(f)}" alt="" />`).join("");
+  summarise();
+}
+function summarise() {
+  const bits = [];
+  if (photos.length) bits.push(`<b>${photos.length}</b> photo${photos.length > 1 ? "s" : ""}`);
+  if ($("voice").value.trim()) bits.push("<b>1</b> voice note");
+  if ($("desc").value.trim()) bits.push("<b>1</b> description");
+  $("added").innerHTML = bits.length ? bits.map((b) => `<span>${b}</span>`).join("") : "<span>Nothing added yet.</span>";
+}
+$("voice").oninput = summarise;
+$("desc").oninput = summarise;
+$("back1").onclick = () => { $("step2").style.display = "none"; $("step1").style.display = ""; };
+
+// ── step 3 ─────────────────────────────────────────────────────────────────
+// Named for what the pipeline actually does at each point, so the list is a
+// report rather than a loading animation dressed up as one.
+const STAGES = [
+  ["Sending what you gave us", "upload"],
+  ["Reading photos and voice notes", "extract"],
+  ["Identifying products and prices", "extract"],
+  ["Checking prices against your own range", "sanity"],
+  ["Holding back anything unclear", "gate"],
+  ["Preparing your AI storefront", "done"],
+];
+
+function renderStages(activeIndex, elapsed) {
+  $("proc").innerHTML = STAGES.map((s, i) => {
+    const state = i < activeIndex ? "ok" : i === activeIndex ? "now" : "wait";
+    const mark = state === "ok" ? '<span style="color:var(--green)">✓</span>'
+      : state === "now" ? '<span class="spin2"></span>' : '<span style="color:var(--ink-4)">○</span>';
+    return `<div class="pline ${state}"><span class="mk">${mark}</span><span>${esc(s[0])}</span>
+      <span class="el">${state === "ok" ? elapsed[i] ?? "" : ""}</span></div>`;
+  }).join("");
+}
+
+$("go2").onclick = async () => {
+  if (!photos.length && !$("voice").value.trim() && !$("desc").value.trim()) {
+    alert("Add a photo, a voice note, or a line of text first.");
+    return;
+  }
+  $("step2").style.display = "none";
+  $("step3").style.display = "";
+  $("d3").classList.add("on");
+
+  const started = Date.now();
+  const elapsed = [];
+  let stage = 0;
+  renderStages(stage, elapsed);
+  const advance = () => { elapsed[stage] = `${((Date.now() - started) / 1000).toFixed(1)}s`; stage++; renderStages(stage, elapsed); };
+
+  const form = new FormData();
+  for (const f of photos) form.append("photos", f);
+  if ($("voice").value.trim()) form.append("voice_note", $("voice").value.trim());
+  if ($("desc").value.trim()) form.append("description", $("desc").value.trim());
+
+  try {
+    const up = await fetch(`/onboarding/merchants/${merchantId}/inputs`, { method: "POST", body: form });
+    if (!up.ok) throw new Error((await up.json()).error ?? "upload failed");
+    advance();
+
+    // The remaining stages all happen inside one server call, so they are
+    // marked off as it returns rather than pretending to tick along on a timer.
+    const res = await fetch(`/onboarding/merchants/${merchantId}/structure`, { method: "POST" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? "structuring failed");
+    while (stage < STAGES.length) advance();
+
+    $("h3").textContent = "Your AI storefront is ready.";
+    $("l3").textContent = body.store_summary ?? "";
+    renderResult(body);
+  } catch (err) {
+    $("h3").textContent = "That didn't work";
+    $("l3").textContent = "";
+    $("result").innerHTML = `<div class="note bad">${esc(err.message)}</div>
+      <div class="row" style="margin-top:12px"><button class="btn secondary" onclick="location.reload()">Start again</button></div>`;
+  }
+};
+
+function renderResult(body) {
+  const rows = body.items.map((i) => `
+    <div class="prod">
+      ${i.photo_url ? `<img src="${i.photo_url}" alt="" />` : `<div class="ph">voice<br>note</div>`}
+      <div>
+        <div class="nm">${esc(i.name)}</div>
+        <div class="at">${esc(Object.values(i.attributes).join(" · "))}${i.category ? ` · ${esc(i.category)}` : ""}</div>
+        <div class="row" style="margin-top:6px">
+          <span class="state ${i.transactable ? "ok" : "held"}"><span class="dot ${i.transactable ? "ok" : "held"}"></span>${i.transactable ? "Agent-readable" : "Waiting on you"}</span>
+          ${i.policy ? `<span class="chip">Negotiable to ${rupee(i.policy.floor_price)}</span>` : ""}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="money lg">${i.price.value > 0 ? rupee(i.price.value) : "—"}</div>
+        <div class="hint">${i.stock.confidence > 0 ? `${i.stock.quantity} in stock` : "stock unknown"}</div>
+      </div>
+    </div>`).join("");
+
+  $("result").innerHTML = `
+    <section>
+      <h2>${body.products} product${body.products === 1 ? "" : "s"}${body.held > 0 ? ` · ${body.held} waiting on you` : ""}</h2>
+      <p class="hint">Read by ${esc(body.provider)}${body.photos_used ? ` from ${body.photos_used} photo(s)` : ""} and your own words.</p>
+      <div style="margin-top:14px">${rows}</div>
+    </section>
+
+    <section style="margin-top:16px">
+      <h2>What just changed</h2>
+      <div class="ba">
+        <div class="bacol before">
+          <h4>Before</h4>
+          <ul>
+            <li>A UPI QR that takes money</li>
+            <li>Photos on a phone</li>
+            <li>Prices in your head</li>
+            <li>Nothing a machine can read</li>
+          </ul>
+        </div>
+        <div class="bacol after">
+          <h4>Now</h4>
+          <ul>
+            <li>${body.products} structured products</li>
+            <li>Searchable by AI buyers</li>
+            <li>Price floors an agent cannot cross</li>
+            <li>Payments on the same UPI ID</li>
+          </ul>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <a class="btn primary" href="/shop.html">Preview as an AI buyer</a>
+        <a class="btn secondary" href="/merchant.html?m=${merchantId}">Go to my dashboard</a>
+      </div>
+    </section>`;
+}
+
+await boot({});
+</script>
+</body>
+</html>

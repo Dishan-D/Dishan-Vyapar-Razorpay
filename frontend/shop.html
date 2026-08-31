@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Buyer agent · Vyapar</title>
+<title>Shop · Vyapar</title>
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
@@ -57,6 +57,31 @@
   .verdict { border:1px solid var(--green-3); background:var(--green-2); border-radius:var(--r); padding:16px; }
   .verdict .h { font-size:15px; font-weight:600; color:#0d5c3a; }
   .verdict .why { font-size:13px; color:#0d5c3a; margin-top:6px; }
+
+  .auth { border:1px solid var(--border); border-radius:var(--r-sm); overflow:hidden; margin-top:10px; }
+  .auth.ok { border-color:var(--green-3); }
+  .auth .ahead { display:flex; align-items:center; gap:9px; padding:11px 14px; background:var(--surface-2); font-size:12.5px; font-weight:600; }
+  .auth.ok .ahead { background:var(--green-2); color:#0d5c3a; }
+  .auth .arow { display:grid; grid-template-columns:16px 1fr auto; gap:11px; padding:9px 14px; align-items:baseline; font-size:12.5px; }
+  .auth .arow + .arow { border-top:1px solid var(--border); }
+  .auth .arow .need { color:var(--ink-3); font-size:11.5px; text-align:right; font-variant-numeric:tabular-nums; }
+  .auth .arow.no { background:var(--red-2); }
+  .auth .arow .why2 { grid-column:2/-1; color:var(--red); font-size:11.5px; margin-top:2px; }
+
+  .summary { border:1px solid var(--border); border-radius:var(--r); padding:16px; margin-top:12px; background:var(--surface-2); }
+  .summary .top { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .summary .ttl { font-size:15px; font-weight:600; }
+  .summary .who2 { font-size:12.5px; color:var(--ink-3); margin-top:1px; }
+  .summary ul { margin:12px 0 0; padding:0; }
+  .summary li { list-style:none; font-size:12.5px; padding:3px 0; display:flex; gap:8px; color:var(--ink-2); }
+  .summary li::before { content:"✓"; color:var(--green); font-weight:600; }
+
+  .drawer { margin-top:12px; border:1px solid var(--border); border-radius:var(--r-sm); }
+  .drawer summary { padding:11px 14px; font-size:12.5px; font-weight:550; color:var(--ink-2); }
+  .drawer .body2 { padding:0 14px 14px; }
+  .chainline { display:grid; grid-template-columns:16px 1fr; gap:10px; padding:7px 0; font-size:12.5px; }
+  .chainline + .chainline { border-top:1px solid var(--border); }
+  .chainline .cm { color:var(--green); }
 
   .ba { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   @media (max-width:700px){ .ba { grid-template-columns:1fr; } }
@@ -122,6 +147,20 @@ const stepRow = (icon, head, body = "", model = false) => `
     <span class="icn">${icon}</span>
     <div><div class="hd">${head}${model ? '<span class="badge model">model</span>' : '<span class="badge">rules</span>'}</div>${body}</div>
   </div>`;
+
+/** The gate, rendered. Every row is the comparison that decides the payment. */
+function authorityBlock(checks, authorized) {
+  if (!checks?.length) return "";
+  return `<div class="auth ${authorized ? "ok" : ""}">
+    <div class="ahead">${authorized ? "✓ Purchase authorized" : "✕ Purchase blocked"}</div>
+    ${checks.map((c) => `<div class="arow ${c.ok ? "" : "no"}">
+      <span>${c.ok ? "✓" : "✕"}</span>
+      <span>${esc(c.label)}</span>
+      <span class="need">${esc(c.actual)}<br><span style="opacity:.7">need ${esc(c.required)}</span></span>
+      ${c.ok ? "" : `<span class="why2">${esc(c.reason ?? "")}</span>`}
+    </div>`).join("")}
+  </div>`;
+}
 
 function offerCard(o, won) {
   const path = o.outcome.log.filter((t) => t.amount !== null);
@@ -223,6 +262,12 @@ async function run() {
         `<div class="verdict" style="margin-top:10px"><div class="h">Recommended: ${esc(body.merchant)}</div><div class="why">${esc(last)}</div></div>`));
     } else if (t.stage === "sign") {
       html.push(stepRow("04", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
+    } else if (t.stage === "authorize") {
+      html.push(stepRow("05", esc(t.headline), authorityBlock(t.checks, t.authorized)));
+    } else if (t.stage === "blocked") {
+      html.push(stepRow("✕", esc(t.headline),
+        authorityBlock(t.checks, false) +
+        `<div class="nt" style="margin-top:9px">Not bought. Trying the next shop.</div>`));
     } else if (t.stage === "pay") {
       html.push(stepRow("05", esc(t.headline),
         `<dl class="kv" style="margin-top:8px">${t.order_id ? `<dt>order</dt><dd>${esc(t.order_id)}</dd>` : ""}${t.payment_id ? `<dt>payment</dt><dd>${esc(t.payment_id)}</dd>` : ""}</dl>` +
@@ -252,6 +297,43 @@ async function run() {
   $("go").disabled = false;
 }
 
+function purchaseSummary(body) {
+  const c = body.intent;
+  return `<div class="summary">
+    <div class="top">
+      <div><div class="ttl">${esc(body.comparison?.selected?.item_name ?? c.want)}</div>
+      <div class="who2">${esc(body.merchant ?? "")}</div></div>
+      <div class="money lg">${rupee(body.final_price)}</div>
+    </div>
+    <ul>
+      <li>Within your ${rupee(c.max_price)} limit</li>
+      <li>The shop agreed this price</li>
+      <li>Matches what you asked for</li>
+      <li>Purchase authority verified</li>
+    </ul>
+  </div>`;
+}
+
+/** The signed chain so far, read back from the server, not asserted here. */
+async function showTrust(txnId) {
+  const { status, body } = await api(`/transactions/${txnId}/audit`);
+  if (status !== 200) return;
+  const rows = body.timeline.filter((t) => t.present).map((t) =>
+    `<div class="chainline"><span class="cm">${t.verified ? "✓" : "✕"}</span>
+     <span>${esc(t.headline)}<div class="mono">${esc(t.hash.slice(0, 34))}…</div></span></div>`).join("");
+  $("run").insertAdjacentHTML("beforeend", `
+    <details class="drawer">
+      <summary>Why can I trust this purchase?</summary>
+      <div class="body2">
+        <p class="hint" style="margin:0 0 10px">
+          Each step below is a signed record, re-verified when this loaded — not a stored tick.
+        </p>
+        ${rows}
+        <div class="hint" style="margin-top:10px">${body.verified ? "Chain verified." : esc(body.failures.join("; "))}</div>
+      </div>
+    </details>`);
+}
+
 function checkout(run) {
   new window.Razorpay({
     key: config.razorpay_key_id, order_id: run.order_id, amount: run.amount_paise,
@@ -259,9 +341,10 @@ function checkout(run) {
     handler: async (response) => {
       const { status, body } = await api(`/transactions/${run.transaction_id}/settle-payment`, {
         method: "POST", body: JSON.stringify(response) });
-      $("pay").outerHTML = status === 201
-        ? note("ok", `Paid. <span class="mono">${esc(body.payment_id)}</span> · <a href="/transactions/${run.transaction_id}/audit" target="_blank">audit the chain</a>`)
-        : note("bad", esc((body.reasons ?? [body.error]).join("; ")));
+      if (status !== 201) { $("pay").outerHTML = note("bad", esc((body.reasons ?? [body.error]).join("; "))); return; }
+      $("pay").outerHTML =
+        note("ok", `Paid. <span class="mono">${esc(body.payment_id)}</span>`) +
+        note("warn", "Waiting for the shop to confirm handover. Nothing marks itself delivered.");
     },
   }).open();
 }

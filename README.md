@@ -79,7 +79,7 @@ runs in the UI. See [docs/RAZORPAY_SETUP.md](docs/RAZORPAY_SETUP.md).
 |---|---|---|
 | `/` | walkthrough | one shop, one transaction, the signed chain |
 | `/merchant.html` | the merchant | catalog as an agent sees it, questions waiting on them, readiness score, commerce history, live ticker |
-| `/shopper.html` | the buyer-agent | its own reasoning as it shops three merchants and picks one |
+| `/shop.html` | the buyer-agent | its own reasoning as it shops three merchants and picks one |
 | `/market.html` | the wide shot | one buyer-agent, three shops, lines lighting up per event |
 
 ## API
