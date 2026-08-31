@@ -221,7 +221,23 @@ export async function runStructuring(live: boolean, onProgress?: StructuringProg
   };
 }
 
-export async function writeCatalog(result: StructuringResult): Promise<string> {
+/**
+ * Write the serving catalog — unless that would throw away a better one.
+ *
+ * A fixture run must not clobber a live one. Extraction costs real minutes
+ * against a rate limit, and every milestone check runs the fixture path, so
+ * without this guard a single `npm run milestone-b` silently reverts a catalog
+ * that took three minutes to build.
+ */
+export async function writeCatalog(result: StructuringResult, force = false): Promise<string | null> {
+  if (!force && result.provider === "fixture" && (await exists(CATALOG_FILE))) {
+    const existing = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as CatalogDoc;
+    if (existing.provider && existing.provider !== "fixture") return null;
+  }
+  return writeCatalogForce(result);
+}
+
+async function writeCatalogForce(result: StructuringResult): Promise<string> {
   const doc = {
     generated_at: new Date().toISOString(),
     provider: result.provider,

@@ -1,5 +1,15 @@
 export interface SeedPlan {
   merchant_id: string;
+  /**
+   * Pinned, not searched.
+   *
+   * An earlier version looked these up by product name, which quietly broke the
+   * moment a live extraction renamed something ("Blue Cotton Saree" became
+   * "Blue Cotton Saree with Gold Border"). Worse, `merchant_id` was then only a
+   * label: discovery could satisfy a plan from a different shop entirely, and
+   * the per-merchant totals went wrong without anything erroring.
+   */
+  item_id: string;
   want: string;
   max_price: number;
   opening_offer: number;
@@ -16,22 +26,22 @@ export interface SeedPlan {
  */
 export const SEED_PLANS: SeedPlan[] = [
   // Meena's Sarees — confirms everything.
-  { merchant_id: "mer_meena", want: "Blue Cotton Saree", max_price: 1500, opening_offer: 1100, confirm: true },
-  { merchant_id: "mer_meena", want: "White Cotton Kurta", max_price: 800, opening_offer: 600, confirm: true },
-  { merchant_id: "mer_meena", want: "Cotton Towel Set", max_price: 500, opening_offer: 430, confirm: true },
-  { merchant_id: "mer_meena", want: "Blue Cotton Saree", max_price: 1400, opening_offer: 1150, confirm: true },
+  { merchant_id: "mer_meena", item_id: "itm_meena_001", want: "Blue Cotton Saree", max_price: 1500, opening_offer: 1100, confirm: true },
+  { merchant_id: "mer_meena", item_id: "itm_meena_002", want: "White Cotton Kurta", max_price: 800, opening_offer: 600, confirm: true },
+  { merchant_id: "mer_meena", item_id: "itm_meena_005", want: "Cotton Towel Set", max_price: 500, opening_offer: 430, confirm: true },
+  { merchant_id: "mer_meena", item_id: "itm_meena_001", want: "Blue Cotton Saree", max_price: 1400, opening_offer: 1150, confirm: true },
 
   // Rafiq Mobile Accessories — wide band, and two handovers never confirmed.
-  { merchant_id: "mer_rafiq", want: "Silicone Phone Case", max_price: 300, opening_offer: 150, confirm: true },
-  { merchant_id: "mer_rafiq", want: "Type-C Fast Charger", max_price: 500, opening_offer: 300, confirm: true },
-  { merchant_id: "mer_rafiq", want: "Wired Earphones", max_price: 400, opening_offer: 200, confirm: true },
-  { merchant_id: "mer_rafiq", want: "Tempered Glass Screen Guard", max_price: 200, opening_offer: 90, confirm: false },
-  { merchant_id: "mer_rafiq", want: "Silicone Phone Case", max_price: 300, opening_offer: 160, confirm: false },
+  { merchant_id: "mer_rafiq", item_id: "itm_rafiq_001", want: "Silicone Phone Case", max_price: 300, opening_offer: 150, confirm: true },
+  { merchant_id: "mer_rafiq", item_id: "itm_rafiq_002", want: "Type-C Fast Charger", max_price: 500, opening_offer: 300, confirm: true },
+  { merchant_id: "mer_rafiq", item_id: "itm_rafiq_003", want: "Wired Earphones", max_price: 400, opening_offer: 200, confirm: true },
+  { merchant_id: "mer_rafiq", item_id: "itm_rafiq_004", want: "Tempered Glass Screen Guard", max_price: 200, opening_offer: 90, confirm: false },
+  { merchant_id: "mer_rafiq", item_id: "itm_rafiq_001", want: "Silicone Phone Case", max_price: 300, opening_offer: 160, confirm: false },
 
   // Amma's Snacks — small basket, all confirmed.
-  { merchant_id: "mer_amma", want: "Murukku Packet", max_price: 120, opening_offer: 80, confirm: true },
-  { merchant_id: "mer_amma", want: "Kaara Mixture Packet", max_price: 140, opening_offer: 95, confirm: true },
-  { merchant_id: "mer_amma", want: "Laddu Box", max_price: 150, opening_offer: 105, confirm: true },
+  { merchant_id: "mer_amma", item_id: "itm_amma_001", want: "Murukku Packet", max_price: 120, opening_offer: 80, confirm: true },
+  { merchant_id: "mer_amma", item_id: "itm_amma_002", want: "Kaara Mixture Packet", max_price: 140, opening_offer: 95, confirm: true },
+  { merchant_id: "mer_amma", item_id: "itm_amma_003", want: "Laddu Box", max_price: 150, opening_offer: 105, confirm: true },
 ];
 
 export interface SeedOutcome {
@@ -53,6 +63,7 @@ export async function seedHistory(api: Fetcher, plans: readonly SeedPlan[] = SEE
       method: "POST",
       body: JSON.stringify({
         want: plan.want,
+        item_id: plan.item_id,
         max_price: plan.max_price,
         opening_offer: plan.opening_offer,
       }),

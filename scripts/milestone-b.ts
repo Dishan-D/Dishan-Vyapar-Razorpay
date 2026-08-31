@@ -35,6 +35,9 @@ function conf(n: number): string {
 
 async function main(): Promise<void> {
   const live = process.argv.includes("--live");
+  // --fixtures deliberately reclaims the catalog from a live run, for a demo
+  // that needs to behave the same way twice.
+  const force = process.argv.includes("--fixtures");
   console.log(bold("\nVyapar-to-Agent · Milestone B — structuring agent"));
 
   if (live && !hasCredentials()) {
@@ -125,13 +128,17 @@ async function main(): Promise<void> {
     }
   }
 
-  const catalogPath = await writeCatalog(result);
+  const catalogPath = await writeCatalog(result, force);
 
   heading("Milestone B — definition of done");
   const wrote = result.items.length > 0;
   const flagged = blocked > 0;
   const passable = allowed > 0;
-  console.log(`  ${wrote ? g("✅") : r("❌")} catalog written  ${dim(catalogPath)}`);
+  console.log(
+    catalogPath
+      ? `  ${wrote ? g("✅") : r("❌")} catalog written  ${dim(catalogPath)}`
+      : `  ${g("✅")} catalog kept ${dim("— a live catalog is already on disk; fixtures did not overwrite it")}`,
+  );
   console.log(
     `  ${flagged ? g("✅") : r("❌")} ambiguous items flagged and blocked: ${blocked}/${result.items.length}`,
   );

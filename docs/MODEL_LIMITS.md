@@ -66,3 +66,33 @@ trace, in the server log, and as a warning row in the UI.
   claiming to be fully live.
 - Interactive use is cheap. Fourteen back-to-back agent runs all completed on
   Groq in under 800 ms each — 177 tokens apiece never troubles the ceiling.
+
+## Live extraction is not deterministic — pick which catalog you demo on
+
+The same photos and voice notes give a different catalog on each live run. Two
+runs an hour apart produced:
+
+| | Run A | Run B |
+|---|---|---|
+| Saree name | "…with Gold Zari Work" | "…with Gold Border" |
+| Saree stock | 1 (confidence 0.95) | **0 (confidence 0.00)** → item held |
+| Banana chips | "Vazhakka Chips" | **"Pineapple Chips"** |
+
+In run B the model dropped the stock count despite the voice note plainly saying
+*"ek hi piece bacha hai"* — one piece left — so the saree became unbuyable and
+anything that assumed it was for sale stopped working.
+
+That is worth knowing rather than hiding: it is what reading a real recording is
+actually like. But it means **the served catalog should be a decision, not an
+accident**:
+
+```bash
+npm run milestone-b -- --live       # real extraction, ~3 min, writes data/catalog.json
+npm run milestone-b -- --fixtures   # deliberately reclaim it for a repeatable demo
+npm run milestone-b                 # fixtures, but will NOT overwrite a live catalog
+```
+
+For a recorded demo, run on **fixtures** — every screen then behaves the same on
+take three as on take one — and show `--live` separately as proof the extraction
+is real. Nothing about the pipeline changes between the two; only where the
+confidence numbers came from, and the header pill says which.

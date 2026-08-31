@@ -89,8 +89,21 @@ async function main(): Promise<void> {
     for (const c of meena.caveats) console.log(`  ${dim("•")} ${dim(c)}`);
 
     heading("Milestone H — definition of done");
-    const aggregated = meena.completed_transactions === 4 && rafiq.fulfillment_confirmation_rate < 1;
-    console.log(`  ${aggregated ? g("✅") : r("❌")} aggregates only verified, fulfilled chains`);
+    // Assert the arithmetic, not the inventory. Which items are sellable depends
+    // on what the extraction made of them, and on a live catalog that changes
+    // between runs — a test that pins it to four sales is testing the model's
+    // mood, not the report.
+    const seeded = outcomes.filter((o) => o.status === "fulfilled" || o.status === "paid");
+    const meenaFulfilled = outcomes.filter((o) => o.merchant_id === "mer_meena" && o.status === "fulfilled").length;
+    const aggregated =
+      seeded.length > 0 &&
+      meena.completed_transactions === meenaFulfilled &&
+      rafiq.fulfillment_confirmation_rate < 1 &&
+      rafiq.paid_transactions > rafiq.completed_transactions;
+    console.log(
+      `  ${aggregated ? g("✅") : r("❌")} aggregates only verified, fulfilled chains ` +
+        dim(`(Meena ${meena.completed_transactions} delivered of ${meena.paid_transactions} paid; Rafiq ${rafiq.completed_transactions}/${rafiq.paid_transactions})`),
+    );
     console.log(`  ${good.ok ? g("✅") : r("❌")} report is signed and verifies`);
     console.log(`  ${!bad.ok ? g("✅") : r("❌")} tampering with one field breaks verification`);
     console.log(`  ${stillOk.ok ? g("✅") : r("❌")} key reordering does not`);
