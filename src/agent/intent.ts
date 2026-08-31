@@ -57,7 +57,20 @@ export function keepOnlyStatedAttributes(
     (stated ? kept : dropped).push({ key: attr.key, value: attr.value });
   }
 
-  return { intent: { ...intent, attributes: kept }, dropped };
+  // Same rule for the delivery deadline. Asked only for "a white cotton kurta
+  // under 800", one run came back demanding same-day handover and ruled out
+  // every shop for being a day too slow — a requirement the shopper never made,
+  // enforced against them.
+  const mentionsTiming = /\btoday\b|\btomorrow\b|\bsame.?day\b|\bovernight\b|\bby\s+\w+day\b|\burgent\b|\bwithin\s+\d+\s+days?\b|\bthis\s+week\b/.test(
+    haystack,
+  );
+  let deliver = intent.deliver_within_days;
+  if (!mentionsTiming && deliver >= 0) {
+    dropped.push({ key: "deliver_within_days", value: String(deliver) });
+    deliver = -1;
+  }
+
+  return { intent: { ...intent, attributes: kept, deliver_within_days: deliver }, dropped };
 }
 
 const SYSTEM = `You turn a shopper's plain sentence into a buying mandate for an agent that will go and haggle on their behalf.

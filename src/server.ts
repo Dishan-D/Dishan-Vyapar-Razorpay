@@ -3,6 +3,12 @@ import path from "node:path";
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server as IOServer } from "socket.io";
 import QRCode from "qrcode";
+import multer from "multer";
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { OnboardingStore, type OnboardedMerchant } from "./onboarding/store.js";
+import { extractStorefront } from "./structuring/storefront.js";
+import { toCatalogItem, evaluateGate } from "./structuring/extraction.js";
 import { buildAuditBundle } from "./audit/bundle.js";
 import { buildCommerceHistory } from "./audit/history.js";
 import { readinessScore } from "./marketplace/readiness.js";
@@ -78,6 +84,42 @@ export async function createApp(options: AppOptions = {}) {
   // rather than encoded in a confidence value, so nothing the model returns can
   // ever be mistaken for a human's word.
   const merchantConfirmed = new Set<string>(structuring.merchantConfirmed);
+
+  // ── Onboarding: shops created at runtime join the seeded three ─────────────
+  const onboarding = new OnboardingStore(store.handle);
+  const UPLOAD_DIR = path.resolve("data", "uploads");
+  await mkdir(UPLOAD_DIR, { recursive: true });
+
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+      filename: (_req, file, cb) =>
+        cb(null, `${randomUUID().slice(0, 8)}${path.extname(file.originalname).toLowerCase() || ".jpg"}`),
+    }),
+    limits: { fileSize: 12 * 1024 * 1024, files: 8 },
+    fileFilter: (_req, file, cb) => cb(null, /^image\//.test(file.mimetype)),
+  });
+
+  /** Photos a merchant uploaded, served back for their own catalog. */
+  const photoUrlFor = new Map<string, string>();
+
+  /** Load anything onboarded in a previous run back into the live catalog. */
+  function restoreOnboarded(): void {
+    for (const m of onboarding.listMerchants()) {
+      if (!merchants.has(m.merchant_id)) {
+        merchants.set(m.merchant_id, m);
+        structuring.merchants.push(m);
+      }
+    }
+    for (const row of onboarding.listItems()) {
+      if (!catalogItems.some((i) => i.item_id === row.item.item_id)) {
+        catalogItems.push(row.item);
+        if (row.policy) policies.set(row.policy.item_id, row.policy);
+        if (row.photo_url) photoUrlFor.set(row.item.item_id, row.photo_url);
+      }
+    }
+  }
+  restoreOnboarded();
 
   /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
   const sanityFor = (item: CatalogItem) =>
@@ -243,6 +285,7 @@ export async function createApp(options: AppOptions = {}) {
   // The merchant's own photos, served as-is. They are the input to Stage 1, so
   // showing them next to what was extracted is the point, not decoration.
   app.use("/media", express.static(path.resolve("data", "sample_products")));
+  app.use("/uploads", express.static(path.resolve("data", "uploads")));
 
   app.get("/health", (_req, res) => {
     res.json({
@@ -282,7 +325,9 @@ export async function createApp(options: AppOptions = {}) {
           held_because: gateReasons(item, sanity),
           sanity,
           audit: structuring.audits[item.item_id] ?? null,
-          photo_url: photo?.present && photo.filename ? `/media/${photo.filename}` : null,
+          photo_url:
+            photoUrlFor.get(item.item_id) ??
+            (photo?.present && photo.filename ? `/media/${photo.filename}` : null),
           photo_filename: photo?.filename ?? null,
         };
       }),
@@ -1075,6 +1120,216 @@ export async function createApp(options: AppOptions = {}) {
     res.json(
       await buildCommerceHistory(merchant, chains, structuring.policies, keyring, { from, to }),
     );
+  });
+
+  /**
+   * Step 1 — the shop itself. Deliberately tiny: a name, a place, a UPI id.
+   * Anything more would be a form, and the point is that they do not fill in
+   * forms.
+   */
+  app.post("/onboarding/merchants", (req: Request, res: Response) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) {
+      res.status(400).json({ error: "a shop name is required" });
+      return;
+    }
+
+    const merchant: OnboardedMerchant = {
+      merchant_id: `mer_${randomUUID().slice(0, 8)}`,
+      name,
+      city: String(req.body?.city ?? "").trim() || "—",
+      whatsapp: String(req.body?.whatsapp ?? "").trim(),
+      upi_vpa: String(req.body?.upi_vpa ?? "").trim() || "not linked yet",
+      since: String(req.body?.since ?? new Date().getFullYear()),
+      qr_note: String(req.body?.qr_note ?? "").trim() || "QR at the counter",
+      delivers_within_days: Number(req.body?.delivers_within_days ?? 1),
+      onboarded: true,
+      store_summary: null,
+      created_at: new Date().toISOString(),
+    };
+
+    onboarding.createMerchant(merchant);
+    merchants.set(merchant.merchant_id, merchant);
+    structuring.merchants.push(merchant);
+
+    bus.emit({
+      type: "extraction.completed",
+      merchant_id: merchant.merchant_id,
+      message: `${merchant.name} started setting up`,
+    });
+    res.status(201).json(merchant);
+  });
+
+  /**
+   * Step 2 — whatever they have. Photos, transcribed voice notes, a sentence.
+   * No modality is required and none is privileged; they are all just evidence
+   * about the same shop, read together in step 3.
+   */
+  app.post(
+    "/onboarding/merchants/:id/inputs",
+    upload.array("photos", 8),
+    (req: Request, res: Response) => {
+      const id = String(req.params.id);
+      if (!onboarding.getMerchant(id)) {
+        res.status(404).json({ error: `no such shop: ${id}` });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      for (const f of files) onboarding.addInput(id, { kind: "photo", value: f.filename, added_at: now });
+
+      const voice = req.body?.voice_note;
+      for (const v of Array.isArray(voice) ? voice : voice ? [voice] : []) {
+        if (String(v).trim()) onboarding.addInput(id, { kind: "voice", value: String(v).trim(), added_at: now });
+      }
+      const description = String(req.body?.description ?? "").trim();
+      if (description) onboarding.addInput(id, { kind: "text", value: description, added_at: now });
+
+      const all = onboarding.listInputs(id);
+      res.status(201).json({
+        merchant_id: id,
+        added: { photos: files.length, voice_notes: Array.isArray(voice) ? voice.length : voice ? 1 : 0, text: description ? 1 : 0 },
+        totals: {
+          photos: all.filter((i) => i.kind === "photo").length,
+          voice_notes: all.filter((i) => i.kind === "voice").length,
+          text: all.filter((i) => i.kind === "text").length,
+        },
+      });
+    },
+  );
+
+  app.get("/onboarding/merchants/:id/inputs", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!onboarding.getMerchant(id)) {
+      res.status(404).json({ error: `no such shop: ${id}` });
+      return;
+    }
+    res.json({ merchant_id: id, inputs: onboarding.listInputs(id) });
+  });
+
+  /**
+   * Step 3 — read the lot and build the storefront.
+   *
+   * Runs the same five stages the seeded merchants go through: draft
+   * extraction, price sanity against this shop's own other prices, the combined
+   * gate, and a clarification for anything held. Nothing here is a special
+   * onboarding path — a shop set up on stage is gated exactly like the fixtures.
+   */
+  app.post("/onboarding/merchants/:id/structure", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = onboarding.getMerchant(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such shop: ${id}` });
+      return;
+    }
+
+    const inputs = onboarding.listInputs(id);
+    if (inputs.length === 0) {
+      res.status(409).json({ error: "nothing to read yet — add photos, a voice note, or a description first" });
+      return;
+    }
+
+    try {
+      const extraction = await extractStorefront({
+        merchant_name: merchant.name,
+        ...(inputs.find((i) => i.kind === "text") ? { description: inputs.filter((i) => i.kind === "text").map((i) => i.value).join(" ") } : {}),
+        voice_notes: inputs.filter((i) => i.kind === "voice").map((i) => i.value),
+        photos: inputs.filter((i) => i.kind === "photo").map((i) => path.join(UPLOAD_DIR, i.value)),
+      });
+
+      const photos = inputs.filter((i) => i.kind === "photo");
+      const rows = extraction.products.map((product, index) => {
+        const item = toCatalogItem(
+          {
+            item_id: `itm_${id.slice(4)}_${String(index + 1).padStart(3, "0")}`,
+            sample_id: `onboard_${index}`,
+            merchant_id: id,
+            merchant_name: merchant.name,
+            voice_note: product.notes,
+          },
+          {
+            sample_id: `onboard_${index}`,
+            extraction: product,
+            provider: extraction.provider,
+            extracted_at: new Date().toISOString(),
+          },
+        );
+        // Photos are attached in order; with a shelf photo there is no reliable
+        // mapping back to a single product, so this is a display hint only.
+        const photo = photos[index];
+        return { item, ...(photo ? { photo_url: `/uploads/${photo.value}` } : {}) };
+      });
+
+      // Stage 2–3: sanity against this shop's own prices, then the combined gate.
+      const draft = rows.map((r) => r.item);
+      for (const row of rows) {
+        const sanity = priceSanity(row.item, draft);
+        row.item.needs_merchant_confirmation = evaluateGate(row.item, sanity).held;
+      }
+
+      // A sellable item needs a floor before an agent may haggle over it. The
+      // merchant has not set one yet, so it opens at list with a modest band
+      // they can tighten — never a floor the system invented and hid.
+      const stored = rows.map((r) => ({
+        ...r,
+        ...(r.item.price.value > 0
+          ? {
+              policy: {
+                item_id: r.item.item_id,
+                list_price: r.item.price.value,
+                floor_price: Math.round(r.item.price.value * 0.85),
+                max_rounds: 3,
+                set_by: "merchant" as const,
+                set_at: new Date().toISOString(),
+              },
+            }
+          : {}),
+      }));
+
+      onboarding.replaceItems(id, stored);
+      const updated: OnboardedMerchant = { ...merchant, store_summary: extraction.store_summary };
+      onboarding.updateMerchant(updated);
+      merchants.set(id, updated);
+
+      // Splice into the live catalog, replacing any earlier attempt.
+      for (let i = catalogItems.length - 1; i >= 0; i--) {
+        if (catalogItems[i]!.merchant_id === id) catalogItems.splice(i, 1);
+      }
+      for (const row of stored) {
+        catalogItems.push(row.item);
+        if (row.policy) policies.set(row.policy.item_id, row.policy);
+        if (row.photo_url) photoUrlFor.set(row.item.item_id, row.photo_url);
+      }
+
+      await openClarifications();
+
+      const held = stored.filter((r) => r.item.needs_merchant_confirmation).length;
+      bus.emit({
+        type: "extraction.completed",
+        merchant_id: id,
+        message: `${merchant.name} is agent-readable — ${stored.length} products, ${held} awaiting confirmation`,
+      });
+
+      res.status(201).json({
+        merchant_id: id,
+        store_summary: extraction.store_summary,
+        provider: extraction.provider,
+        photos_used: extraction.photos_used,
+        products: stored.length,
+        held,
+        items: stored.map((r) => ({
+          ...r.item,
+          transactable: !r.item.needs_merchant_confirmation,
+          photo_url: r.photo_url ?? null,
+          policy: r.policy ?? null,
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[onboarding ${id}] structuring failed:`, message);
+      res.status(502).json({ error: `could not read the shop: ${message}` });
+    }
   });
 
   app.get("/merchants", (_req, res) => {

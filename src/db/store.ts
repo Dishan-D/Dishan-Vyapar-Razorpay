@@ -211,6 +211,11 @@ export class Store {
     return CHAIN_ORDER.filter((t) => present.has(t));
   }
 
+  /** The raw handle, for the onboarding tables that live alongside these. */
+  get handle(): Database.Database {
+    return this.db;
+  }
+
   close(): void {
     this.db.close();
   }
