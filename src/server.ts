@@ -7,6 +7,8 @@ import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { OnboardingStore, type OnboardedMerchant } from "./onboarding/store.js";
+import { DemandLog } from "./revenue/demand.js";
+import { findOpportunities } from "./revenue/opportunities.js";
 import { extractStorefront } from "./structuring/storefront.js";
 import { toCatalogItem, evaluateGate } from "./structuring/extraction.js";
 import { buildAuditBundle } from "./audit/bundle.js";
@@ -19,7 +21,7 @@ import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
 import { buildCartMandate, buildIntentMandate, type MandateChain } from "./mandates/chain.js";
 import { loadOrCreateKeyring } from "./mandates/keystore.js";
-import type { CatalogItem } from "./mandates/schema.js";
+import type { CatalogItem, NegotiationPolicy } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { indexPolicies } from "./negotiation/policies.js";
@@ -87,6 +89,7 @@ export async function createApp(options: AppOptions = {}) {
 
   // ── Onboarding: shops created at runtime join the seeded three ─────────────
   const onboarding = new OnboardingStore(store.handle);
+  const demand = new DemandLog(store.handle);
   const UPLOAD_DIR = path.resolve("data", "uploads");
   await mkdir(UPLOAD_DIR, { recursive: true });
 
@@ -825,7 +828,16 @@ export async function createApp(options: AppOptions = {}) {
       step("start", "Reading what you asked for…");
 
       // 1 — language → mandate
-      const { intent, parsedBy, fallbackReason, droppedAttributes } = await parseIntent(goal);
+      const parsed = await parseIntent(goal);
+      // A caller may pin the mandate instead of having it read. Useful when a
+      // run has to behave the same way twice — the model's opening offer varies
+      // between runs, which is fine in life and unhelpful on stage.
+      const pinned = {
+        ...(typeof req.body?.max_price === "number" ? { max_price: req.body.max_price } : {}),
+        ...(typeof req.body?.opening_offer === "number" ? { opening_offer: req.body.opening_offer } : {}),
+      };
+      const { parsedBy, fallbackReason, droppedAttributes } = parsed;
+      const intent = { ...parsed.intent, ...pinned };
       if (fallbackReason) {
         console.warn(`[agent] intent parsing fell back to rules — ${fallbackReason}`);
       }
@@ -867,6 +879,43 @@ export async function createApp(options: AppOptions = {}) {
           ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
         },
       );
+      // Recorded per shop, not per search: a merchant needs to know that buyers
+      // came to them and left, which a search-level log cannot tell them.
+      const now = new Date().toISOString();
+      for (const offer of comparison.offers) {
+        demand.record({
+          at: now,
+          want: intent.want,
+          max_price: intent.max_price,
+          merchant_id: offer.merchant_id,
+          item_id: offer.item_id,
+          outcome: offer.eligible ? "sold" : "lost_on_price",
+          asked_price: offer.list_price,
+          offered_price: offer.final_price,
+          opening_offer: intent.opening_offer,
+          detail: offer.note,
+        });
+      }
+      // Shops that stock nothing matching still saw the demand go past them.
+      for (const view of views) {
+        if (comparison.offers.some((o) => o.merchant_id === view.merchant_id)) continue;
+        const heldMatch = catalogItems.some(
+          (i) => i.merchant_id === view.merchant_id && i.needs_merchant_confirmation,
+        );
+        demand.record({
+          at: now,
+          want: intent.want,
+          max_price: intent.max_price,
+          merchant_id: view.merchant_id,
+          item_id: null,
+          outcome: heldMatch ? "held" : "no_match",
+          asked_price: null,
+          offered_price: null,
+          opening_offer: intent.opening_offer,
+          detail: null,
+        });
+      }
+
       step("shop", `Checked ${views.length} shops; ${comparison.offers.length} stock it`, {
         offers: comparison.offers.map((o) => ({
           merchant_id: o.merchant_id,
@@ -966,6 +1015,18 @@ export async function createApp(options: AppOptions = {}) {
         }
 
         rejected.push({ merchant: candidate.merchant_name, reasons: result?.failures ?? ["authorization failed"] });
+        demand.record({
+          at: new Date().toISOString(),
+          want: intent.want,
+          max_price: intent.max_price,
+          merchant_id: candidate.merchant_id,
+          item_id: candidate.item_id,
+          outcome: "no_match",
+          asked_price: candidate.list_price,
+          offered_price: candidate.final_price,
+          opening_offer: intent.opening_offer,
+          detail: (result?.failures ?? []).join("; "),
+        });
         step("blocked", `${candidate.merchant_name} ruled out — ${result?.failures[0] ?? "does not match"}`, {
           merchant_id: candidate.merchant_id,
           item_name: candidate.item_name,
@@ -1330,6 +1391,87 @@ export async function createApp(options: AppOptions = {}) {
       console.error(`[onboarding ${id}] structuring failed:`, message);
       res.status(502).json({ error: `could not read the shop: ${message}` });
     }
+  });
+
+  /**
+   * Milestone: revenue. What buyers asked for, what the shop lost, and what
+   * could be changed about it — each with the evidence behind it.
+   */
+  app.get("/merchants/:id/opportunities", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const events = demand.forMerchant(id);
+    res.json({
+      merchant_id: id,
+      searches_seen: events.length,
+      buyers_lost: events.filter((e) => e.outcome !== "sold").length,
+      opportunities: findOpportunities(id, events, catalogItems, policies),
+      recent: events.slice(0, 12),
+    });
+  });
+
+  /**
+   * The merchant's decision, not the system's.
+   *
+   * An opportunity carries the exact change it would make; approving applies
+   * that and nothing else. Nothing adjusts a floor without passing through
+   * here — an AI that can quietly move a merchant's margin is not a tool they
+   * can trust with their shop.
+   */
+  app.post("/merchants/:id/opportunities/:oppId/approve", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const oppId = String(req.params.oppId);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const opportunity = findOpportunities(id, demand.forMerchant(id), catalogItems, policies).find(
+      (o) => o.id === oppId,
+    );
+    if (!opportunity) {
+      res.status(404).json({ error: `no such opportunity: ${oppId}` });
+      return;
+    }
+    if (!opportunity.change) {
+      res.status(409).json({ error: "this one is advice, not a change — there is nothing to apply" });
+      return;
+    }
+
+    const policy = policies.get(opportunity.change.item_id);
+    if (!policy) {
+      res.status(409).json({ error: `no negotiation policy for ${opportunity.change.item_id}` });
+      return;
+    }
+    if (opportunity.change.to >= policy.list_price) {
+      res.status(409).json({ error: "a floor at or above the asking price is not a floor" });
+      return;
+    }
+
+    const updated: NegotiationPolicy = { ...policy, floor_price: opportunity.change.to, set_at: new Date().toISOString() };
+    policies.set(policy.item_id, updated);
+
+    const row = onboarding.listItems().find((r) => r.item.item_id === policy.item_id);
+    if (row) onboarding.saveItem({ ...row, policy: updated });
+
+    const item = catalogItems.find((i) => i.item_id === policy.item_id);
+    bus.emit({
+      type: "clarification.resolved",
+      merchant_id: id,
+      item_id: policy.item_id,
+      message: `Floor on ${item?.name ?? policy.item_id} lowered to ₹${updated.floor_price} — approved by the merchant`,
+      data: { from: opportunity.change.from, to: opportunity.change.to },
+    });
+
+    res.json({
+      approved: oppId,
+      item_id: policy.item_id,
+      floor_price: { from: opportunity.change.from, to: updated.floor_price },
+      note: "Applied because you approved it. Nothing here changes a price on its own.",
+    });
   });
 
   app.get("/merchants", (_req, res) => {

@@ -57,6 +57,20 @@ export function keepOnlyStatedAttributes(
     (stated ? kept : dropped).push({ key: attr.key, value: attr.value });
   }
 
+  // The budget is the single most consequential number the model returns, and
+  // it is usually stated outright. One run read "under 1020" as a ₹1,190
+  // ceiling — which would have authorized the agent to overspend by ₹170. If
+  // the shopper wrote a number, that number wins.
+  const stated = [...text.matchAll(/(?:₹|rs\.?\s*)?(\d[\d,]{1,7})/gi)]
+    .map((m) => Number(m[1]!.replace(/,/g, "")))
+    .filter((n) => n >= 10);
+  let maxPrice = intent.max_price;
+  if (stated.length > 0 && !stated.includes(Math.round(maxPrice))) {
+    const nearest = stated.reduce((a, b) => (Math.abs(b - maxPrice) < Math.abs(a - maxPrice) ? b : a));
+    dropped.push({ key: "max_price", value: `${maxPrice} → ${nearest} (as stated)` });
+    maxPrice = nearest;
+  }
+
   // Same rule for the delivery deadline. Asked only for "a white cotton kurta
   // under 800", one run came back demanding same-day handover and ruled out
   // every shop for being a day too slow — a requirement the shopper never made,
@@ -70,7 +84,10 @@ export function keepOnlyStatedAttributes(
     deliver = -1;
   }
 
-  return { intent: { ...intent, attributes: kept, deliver_within_days: deliver }, dropped };
+  return {
+    intent: { ...intent, attributes: kept, deliver_within_days: deliver, max_price: maxPrice },
+    dropped,
+  };
 }
 
 const SYSTEM = `You turn a shopper's plain sentence into a buying mandate for an agent that will go and haggle on their behalf.
