@@ -17,7 +17,7 @@ import type { CatalogItem } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { indexPolicies } from "./negotiation/policies.js";
-import { gatewayFromEnv, publishableKeyId, type PaymentGateway } from "./payments/gateway.js";
+import { gatewayFromEnv, publishableKeyId, SimulatedGateway, type PaymentGateway } from "./payments/gateway.js";
 import { authorizeCart, settlePayment, PaymentRefused } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
 import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
@@ -62,6 +62,17 @@ export async function createApp(options: AppOptions = {}) {
   const notifier: Notifier =
     options.notifier ?? (twilioConfig ? new WhatsAppNotifier(twilioConfig) : new DashboardNotifier());
   const bus = options.bus ?? new EventBus();
+
+  /**
+   * A settlement rail the agent can finish on by itself.
+   *
+   * With real Razorpay keys a payment id can only come from a browser, so an
+   * autonomous run always stops at the order — correct, and the right default
+   * when real money is involved. But it also means the agentic loop can never be
+   * shown closing. This rail lets it close, with `sim_` ids that cannot be
+   * mistaken for Razorpay's and a trace that says which rail was used.
+   */
+  const testRail = new SimulatedGateway();
 
   // Items the merchant has personally answered for. Kept beside the catalog
   // rather than encoded in a confidence value, so nothing the model returns can
@@ -254,6 +265,7 @@ export async function createApp(options: AppOptions = {}) {
       gateway: gateway.kind,
       requires_checkout: gateway.requiresCheckout,
       razorpay_key_id: publishableKeyId(gateway),
+      test_rail_available: true,
     });
   });
 
@@ -570,7 +582,7 @@ export async function createApp(options: AppOptions = {}) {
       res.status(404).json({ error: `no such merchant: ${id}` });
       return;
     }
-    const base = process.env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`;
+    const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
     const png = await QRCode.toBuffer(`${base}/merchant.html?m=${id}`, {
       width: 320,
       margin: 1,
@@ -713,7 +725,11 @@ export async function createApp(options: AppOptions = {}) {
       res.status(400).json({ error: "`goal` is required — say what you want in a sentence" });
       return;
     }
-    const autoConfirm = req.body?.auto_confirm !== false;
+
+    // "test_rail" lets the agent finish the purchase on its own; anything else
+    // uses the configured gateway, which with real keys hands off to Checkout.
+    const useTestRail = req.body?.settle === "test_rail";
+    const runGateway: PaymentGateway = useTestRail ? testRail : gateway;
     const trace: Array<Record<string, unknown>> = [];
     const step = (
       stage: string,
@@ -726,11 +742,19 @@ export async function createApp(options: AppOptions = {}) {
 
     try {
       // 1 — language → mandate
-      const { intent, parsedBy } = await parseIntent(goal);
+      const { intent, parsedBy, fallbackReason } = await parseIntent(goal);
+      if (fallbackReason) {
+        console.warn(`[agent] intent parsing fell back to rules — ${fallbackReason}`);
+      }
       step(
         "understand",
         `Read that as: ${intent.want}, ceiling ₹${intent.max_price}`,
-        { intent, parsed_by: parsedBy, note: intent.reasoning },
+        {
+          intent,
+          parsed_by: parsedBy,
+          note: intent.reasoning,
+          ...(fallbackReason ? { fallback_reason: fallbackReason } : {}),
+        },
         parsedBy === "rules" ? "rules" : "model",
       );
       bus.emit({ type: "discovery.queried", message: `Agent understood: "${goal}" → ${intent.want} under ₹${intent.max_price}` });
@@ -815,7 +839,7 @@ export async function createApp(options: AppOptions = {}) {
       });
 
       const chain: MandateChain = { transaction_id, intent: mandateIntent, cart };
-      const order = await authorizeCart(chain, item, keyring, gateway);
+      const order = await authorizeCart(chain, item, keyring, runGateway);
       store.saveOrder(transaction_id, order);
       bus.emit({
         type: "payment.order_created",
@@ -825,7 +849,7 @@ export async function createApp(options: AppOptions = {}) {
         message: `Agent opened order ${order.order_id} for ₹${chosen.final_price}`,
       });
 
-      if (gateway.requiresCheckout) {
+      if (runGateway.requiresCheckout) {
         step("pay", `Order ${order.order_id} opened — needs a human at Checkout`, {
           order_id: order.order_id,
           amount_paise: order.amount_paise,
@@ -840,7 +864,7 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
-      const paid = await settlePayment(chain, item, keyring, gateway, order, undefined);
+      const paid = await settlePayment(chain, item, keyring, runGateway, order, undefined);
       store.appendMandate(transaction_id, paid.payment);
       chain.payment = paid.payment;
       bus.emit({
@@ -851,19 +875,26 @@ export async function createApp(options: AppOptions = {}) {
         message: `Agent paid ₹${chosen.final_price} to ${chosen.merchant_name}`,
       });
       void confirmSale(item.merchant_id, item.name, chosen.final_price!);
-      step("pay", `Paid ₹${chosen.final_price}`, { order_id: paid.order_id, payment_id: paid.payment_id });
+      step("pay", `Paid ₹${chosen.final_price}`, {
+        order_id: paid.order_id,
+        payment_id: paid.payment_id,
+        rail: useTestRail ? "test rail" : "razorpay",
+        ...(useTestRail
+          ? { note: "settled on the simulated rail so the agent could finish unattended — ids are sim_ prefixed and are not Razorpay's" }
+          : {}),
+      });
 
-      // 4 — and here the agent stops, because it cannot hand goods over
-      if (autoConfirm) {
-        step("wait", "Paid, not delivered", {
-          note: "the agent has no way to confirm a handover — only the shopkeeper's signature closes this",
-          status: "payment_confirmed_awaiting_fulfillment",
-        });
-      }
+      // 4 — and here the agent stops, unconditionally. It can spend money; it
+      // cannot hand goods across a counter, and nothing here will pretend it did.
+      step("wait", "Paid, not delivered", {
+        note: "the agent has no way to confirm a handover — only the shopkeeper's signature closes this",
+        status: "payment_confirmed_awaiting_fulfillment",
+      });
 
       res.status(201).json({
         goal, intent, status: "paid", transaction_id,
         order_id: paid.order_id, payment_id: paid.payment_id,
+        rail: useTestRail ? "test_rail" : "razorpay",
         final_price: chosen.final_price, merchant: chosen.merchant_name,
         item_id: item.item_id, trace, comparison,
       });
@@ -1165,7 +1196,7 @@ export function attachRealtime(httpServer: HttpServer, bus: EventBus): IOServer 
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()!);
 if (isMain) {
-  const port = Number(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT || 3000);
   createApp()
     .then(({ app, gateway, bus, notifier }) => {
       const httpServer = createServer(app);

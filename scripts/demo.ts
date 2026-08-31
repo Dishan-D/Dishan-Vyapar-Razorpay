@@ -18,7 +18,7 @@ const b = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
-const PAUSE = Number(process.env.DEMO_PAUSE_MS ?? 450);
+const PAUSE = Number(process.env.DEMO_PAUSE_MS || 450);
 const beat = (ms = PAUSE) => new Promise((res) => setTimeout(res, ms));
 
 function step(n: number, of: number, title: string): void {

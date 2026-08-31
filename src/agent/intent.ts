@@ -36,8 +36,14 @@ Rules:
  * offered, what gets accepted, what gets paid — is deterministic. The model sets
  * the shopper's ceiling; it never spends against it.
  */
-export async function parseIntent(text: string): Promise<{ intent: ShoppingIntent; parsedBy: "groq" | "claude" | "rules" }> {
+export async function parseIntent(
+  text: string,
+): Promise<{ intent: ShoppingIntent; parsedBy: "groq" | "claude" | "rules"; fallbackReason?: string }> {
   const provider = activeProvider();
+
+  if (provider === "none") {
+    return { intent: parseIntentByRules(text), parsedBy: "rules", fallbackReason: "no model provider configured" };
+  }
 
   try {
     if (provider === "groq") {
@@ -72,11 +78,23 @@ export async function parseIntent(text: string): Promise<{ intent: ShoppingInten
       });
       if (res.parsed_output) return { intent: res.parsed_output, parsedBy: "claude" };
     }
-  } catch {
-    // fall through to rules
+    return {
+      intent: parseIntentByRules(text),
+      parsedBy: "rules",
+      fallbackReason: `${provider} returned nothing parseable`,
+    };
+  } catch (err) {
+    // Never swallow this. A silent fallback here looks exactly like the model
+    // "deciding" to be deterministic, and the actual cause — a 404 from an
+    // empty model name — surfaced three layers away as "the agent stopped
+    // using the model".
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      intent: parseIntentByRules(text),
+      parsedBy: "rules",
+      fallbackReason: `${provider} call failed: ${message.slice(0, 160)}`,
+    };
   }
-
-  return { intent: parseIntentByRules(text), parsedBy: "rules" };
 }
 
 /**

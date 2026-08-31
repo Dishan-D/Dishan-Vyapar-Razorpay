@@ -6,3 +6,4 @@ dist/
 data/catalog.json
 data/vyapar.db*
 data/keys.local.json
+.env.backup

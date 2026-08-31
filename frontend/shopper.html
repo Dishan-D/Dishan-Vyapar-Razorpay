@@ -13,6 +13,15 @@
   .examples { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
   .ex { font-size:12px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:4px 11px; }
   .ex:hover { color:var(--ink); border-color:var(--border-2); }
+  .railtoggle { display:flex; gap:10px; align-items:flex-start; margin-top:14px; padding-top:14px;
+                border-top:1px solid var(--border); cursor:pointer; }
+  .railtoggle input { width:auto; margin-top:2px; accent-color:var(--ink); }
+  .railtoggle b { font-size:13px; font-weight:550; display:block; }
+  .railtoggle .hint { display:block; margin-top:2px; }
+  .rail { font-size:11px; color:var(--ink-3); margin-top:6px; }
+  .warnrow { display:flex; gap:8px; align-items:flex-start; font-size:12px; color:var(--amber);
+             background:var(--amber-2); border:1px solid var(--amber-3); border-radius:var(--r-sm);
+             padding:8px 10px; margin-top:8px; }
 
   .run { display:grid; gap:0; }
   .rstep { display:grid; grid-template-columns:24px 1fr; gap:13px; padding:14px 0; }
@@ -73,6 +82,13 @@
       <button class="ex">murukku, up to ₹120</button>
       <button class="ex">phone cover, max ₹250</button>
     </div>
+    <label class="railtoggle" for="rail">
+      <input type="checkbox" id="rail" checked />
+      <span>
+        <b>Let the agent complete the purchase</b>
+        <span class="hint" id="railnote">Settles on the simulated rail so the run finishes unattended. Uncheck to hand off to Razorpay Checkout instead.</span>
+      </span>
+    </label>
   </section>
 
   <section id="runcard" style="display:none">
@@ -124,7 +140,8 @@ async function run() {
   $("bacard").style.display = "none";
   $("run").innerHTML = stepRow("···", "Thinking…");
 
-  const { status, body } = await api("/agent/run", { method: "POST", body: JSON.stringify({ goal }) });
+  const settle = $("rail").checked ? "test_rail" : "checkout";
+  const { status, body } = await api("/agent/run", { method: "POST", body: JSON.stringify({ goal, settle }) });
 
   if (status >= 500) { $("run").innerHTML = note("bad", esc(body.error ?? "the run failed")); $("go").disabled = false; return; }
 
@@ -134,7 +151,10 @@ async function run() {
       const i = t.intent;
       html.push(stepRow("01", esc(t.headline),
         `<div class="nt">${esc(t.note)}</div>
-         <dl class="kv" style="margin-top:9px"><dt>want</dt><dd>${esc(i.want)}</dd><dt>ceiling</dt><dd>${rupee(i.max_price)}</dd><dt>opens at</dt><dd>${rupee(i.opening_offer)}</dd></dl>`,
+         <dl class="kv" style="margin-top:9px"><dt>want</dt><dd>${esc(i.want)}</dd><dt>ceiling</dt><dd>${rupee(i.max_price)}</dd><dt>opens at</dt><dd>${rupee(i.opening_offer)}</dd></dl>` +
+        (t.fallback_reason
+          ? `<div class="warnrow"><span>⚠</span><span>Model unavailable, so this was read by rules instead — ${esc(t.fallback_reason)}</span></div>`
+          : ""),
         t.decided_by === "model"));
     } else if (t.stage === "shop") {
       html.push(stepRow("02", esc(t.headline),
@@ -147,7 +167,9 @@ async function run() {
       html.push(stepRow("04", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
     } else if (t.stage === "pay") {
       html.push(stepRow("05", esc(t.headline),
-        `<dl class="kv" style="margin-top:8px">${t.order_id ? `<dt>order</dt><dd>${esc(t.order_id)}</dd>` : ""}${t.payment_id ? `<dt>payment</dt><dd>${esc(t.payment_id)}</dd>` : ""}</dl>${t.note ? `<div class="nt">${esc(t.note)}</div>` : ""}`));
+        `<dl class="kv" style="margin-top:8px">${t.order_id ? `<dt>order</dt><dd>${esc(t.order_id)}</dd>` : ""}${t.payment_id ? `<dt>payment</dt><dd>${esc(t.payment_id)}</dd>` : ""}</dl>` +
+        (t.rail ? `<div class="rail">settled on: ${esc(t.rail)}</div>` : "") +
+        (t.note ? `<div class="nt">${esc(t.note)}</div>` : "")));
     } else if (t.stage === "wait") {
       html.push(stepRow("06", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
     } else {
@@ -222,6 +244,14 @@ $("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
 for (const b of document.querySelectorAll(".ex")) b.onclick = () => { $("goal").value = b.textContent; run(); };
 
 config = await boot({});
+
+// The toggle only means anything when a real gateway is configured; without one
+// every run is already unattended.
+if (config.gateway !== "razorpay") {
+  $("rail").checked = true;
+  $("rail").disabled = true;
+  $("railnote").textContent = "No Razorpay keys configured, so every run already settles on the simulated rail.";
+}
 </script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </body>
