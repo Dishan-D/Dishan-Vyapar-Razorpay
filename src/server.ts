@@ -866,7 +866,10 @@ export async function createApp(options: AppOptions = {}) {
         // this step is about. Without it every step looked market-wide and the
         // network view sat still through an entire purchase.
         ...(merchantId ? { merchant_id: merchantId } : {}),
-        data: { run_id: runId, stage, decided_by: decidedBy, elapsed_ms },
+        // The step's own detail travels with it. Without this a watcher got
+        // the headline and nothing else, so a live view could say "checked 3
+        // shops" but could not show which three — the interesting half.
+        data: { run_id: runId, stage, decided_by: decidedBy, elapsed_ms, ...detail },
       });
     };
 

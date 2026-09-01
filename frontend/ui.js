@@ -18,7 +18,8 @@ export async function api(path, options) {
 const NAV = [
   ["/", "Home"],
   ["/onboard.html", "Set up a store"],
-  ["/shop.html", "Shop"],
+  ["/store.html", "Storefront"],
+  ["/shop.html", "Agent log"],
   ["/merchant.html", "Merchant"],
   ["/market.html", "Live market"],
 ];

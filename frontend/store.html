@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vyapar Market</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .storehead { border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:40; }
+  .storehead .in { max-width:1240px; margin:0 auto; padding:14px 24px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .storehead .brand { font-size:17px; font-weight:650; letter-spacing:-.02em; }
+  .storehead .brand span { color:var(--ink-3); font-weight:450; }
+  .storehead input { flex:1; min-width:180px; max-width:420px; font:inherit; font-size:13.5px;
+                     padding:9px 13px; border:1px solid var(--border-2); border-radius:999px; background:var(--surface-2); }
+
+  .pills { max-width:1240px; margin:0 auto; padding:14px 24px 0; display:flex; gap:7px; flex-wrap:wrap; }
+  .pills button { font-size:12px; padding:6px 13px; border-radius:999px; border:1px solid var(--border);
+                  background:var(--surface); color:var(--ink-2); }
+  .pills button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  .shell { max-width:1240px; margin:0 auto; padding:18px 24px 70px; display:grid;
+           grid-template-columns:1fr 340px; gap:22px; align-items:start; }
+  @media (max-width:1000px){ .shell { grid-template-columns:1fr; } .rail { position:static !important; } }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
+  .card { border:1px solid var(--border); border-radius:var(--r); background:var(--surface);
+          overflow:hidden; display:flex; flex-direction:column; transition:opacity .25s, box-shadow .2s, border-color .2s; }
+  .card .shot { aspect-ratio:4/3; background:var(--surface-2); display:grid; place-items:center; overflow:hidden; }
+  .card .shot img { width:100%; height:100%; object-fit:cover; }
+  .card .shot .glyph { font-size:34px; opacity:.5 }
+  .card .meat { padding:11px 12px 12px; display:flex; flex-direction:column; flex:1; gap:5px; }
+  .card .nm { font-size:13px; font-weight:600; line-height:1.35; letter-spacing:-.01em; }
+  .card .mer { font-size:11px; color:var(--ink-3); }
+  .card .pr { font-size:16px; font-weight:650; letter-spacing:-.02em; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .card .pr s { font-size:12px; font-weight:450; color:var(--ink-4); margin-left:6px; }
+  .card .foot { margin-top:auto; padding-top:9px; display:flex; align-items:center; gap:7px; }
+  .tag { font-size:10px; font-weight:650; letter-spacing:.05em; text-transform:uppercase;
+         padding:3px 7px; border-radius:5px; border:1px solid var(--border); color:var(--ink-3); }
+  .tag.ok   { background:var(--green-2); border-color:var(--green-3); color:var(--green); }
+  .tag.held { background:var(--amber-2); border-color:var(--amber-3); color:var(--amber); }
+
+  /* Agent states, painted onto the same cards a human browses. */
+  .card.dim      { opacity:.34; }
+  .card.looked   { opacity:1; border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-2); }
+  .card.passed   { opacity:.46; border-color:var(--border-2); }
+  .card.chosen   { opacity:1; border-color:var(--green); box-shadow:0 0 0 3px var(--green-2); }
+  .agentnote { font-size:11px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--border);
+               color:var(--ink-3); line-height:1.45; }
+  .card.chosen .agentnote { color:var(--green); }
+  .card.passed .agentnote { color:var(--red); }
+
+  .rail { position:sticky; top:74px; border:1px solid var(--border); border-radius:var(--r);
+          background:var(--surface); overflow:hidden; }
+  .rail .rh { padding:13px 15px; border-bottom:1px solid var(--border); background:var(--surface-2);
+              display:flex; align-items:center; gap:9px; }
+  .rail .rh .t { font-size:12px; font-weight:650; text-transform:uppercase; letter-spacing:.07em; flex:1; }
+  .rail .rb { padding:13px 15px; max-height:60vh; overflow-y:auto; }
+  .rail .ask { padding:13px 15px; border-bottom:1px solid var(--border); display:flex; gap:8px; }
+  .rail .ask input { flex:1; font:inherit; font-size:13px; padding:8px 11px;
+                     border:1px solid var(--border-2); border-radius:var(--r-sm); background:var(--surface); }
+
+  .beacon { display:inline-flex; align-items:center; gap:6px; font-size:10.5px; color:var(--ink-4);
+            text-transform:uppercase; letter-spacing:.06em; font-weight:650; }
+  .beacon i { width:6px; height:6px; border-radius:50%; background:var(--ink-4); }
+  .beacon.on i { background:var(--green); animation:bl 1.1s infinite; }
+  @keyframes bl { 0%,100%{opacity:1} 50%{opacity:.18} }
+
+  .st { display:grid; grid-template-columns:16px 1fr; gap:9px; padding:8px 0; font-size:12.5px; }
+  .st + .st { border-top:1px solid var(--border); }
+  .st .ic { color:var(--ink-4); font-size:11px; }
+  .st .hd { font-weight:600; letter-spacing:-.01em; }
+  .st .sb { color:var(--ink-3); margin-top:2px; line-height:1.5; }
+  .st .who { font-family:var(--mono); font-size:10px; color:var(--ink-4); margin-top:3px; }
+
+  .empty2 { color:var(--ink-4); font-size:12.5px; }
+  .exs { display:flex; gap:6px; flex-wrap:wrap; padding:0 15px 13px; }
+  .exs button { font-size:11px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border);
+                border-radius:999px; padding:4px 10px; }
+</style>
+</head>
+<body>
+<div id="nav"></div>
+
+<div class="storehead">
+  <div class="in">
+    <div class="brand">Vyapar Market <span>— every shop here took UPI and nothing else</span></div>
+    <input id="q" placeholder="Search the shelf…" />
+  </div>
+</div>
+
+<div class="pills" id="pills"></div>
+
+<div class="shell">
+  <div>
+    <p class="hint" id="count" style="margin:0 0 12px">Loading the shelf…</p>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <aside class="rail">
+    <div class="rh">
+      <span class="t">AI buyer</span>
+      <span class="beacon" id="beacon"><i></i><span id="bstate">idle</span></span>
+    </div>
+    <div class="ask">
+      <input id="goal" value="a blue cotton saree under ₹1500" />
+      <button class="btn primary" id="send">Send</button>
+    </div>
+    <div class="exs">
+      <button data-g="murukku, up to ₹120">murukku under ₹120</button>
+      <button data-g="phone cover, max ₹250">phone cover ₹250</button>
+      <button data-g="a cotton towel set under ₹500">towel set ₹500</button>
+    </div>
+    <div class="rb" id="rb">
+      <p class="empty2">Send a buyer agent and watch it work the shelf on the left — it marks what it looked at, what it passed on and why, and what it chose.</p>
+    </div>
+  </aside>
+</div>
+
+<script type="module">
+import { boot, api, rupee, esc } from "/ui.js";
+const $ = (id) => document.getElementById(id);
+
+let config = {}, items = [], merchants = {}, cat = "all", runId = null;
+
+const GLYPH = { apparel:"🧵", home:"🏠", mobile:"📱", food:"🍘", stationery:"✏️", other:"📦" };
+const top = (c) => String(c ?? "other").split(".")[0];
+
+/* A card is the same object whether a person or an agent is looking at it. The
+   agent does not get a private view of the shelf — it marks up this one. */
+function cardHTML(i) {
+  const m = merchants[i.merchant_id];
+  const buyable = i.transactable && i.price.value > 0;
+  const shot = i.photo_url
+    ? `<img src="${esc(i.photo_url)}" alt="${esc(i.name)}" loading="lazy" />`
+    : `<span class="glyph">${GLYPH[top(i.category)] ?? "📦"}</span>`;
+  return `<article class="card" data-item="${esc(i.item_id)}">
+    <div class="shot">${shot}</div>
+    <div class="meat">
+      <div class="nm">${esc(i.name)}</div>
+      <div class="mer">${esc(m?.name ?? i.merchant_id)}${m?.city ? " · " + esc(m.city) : ""}</div>
+      <div class="pr">${i.price.value > 0 ? rupee(i.price.value) : "price not set"}</div>
+      <div class="foot">
+        ${buyable
+          ? `<span class="tag ok">agent-ready</span><span class="tag">${i.stock.quantity} in stock</span>`
+          : `<span class="tag held">${esc(i.held_because ? "awaiting shopkeeper" : "not buyable yet")}</span>`}
+      </div>
+      <div class="agentnote" hidden></div>
+    </div>
+  </article>`;
+}
+
+function render() {
+  const q = $("q").value.trim().toLowerCase();
+  const shown = items.filter((i) =>
+    (cat === "all" || top(i.category) === cat) &&
+    (!q || `${i.name} ${i.category} ${merchants[i.merchant_id]?.name ?? ""}`.toLowerCase().includes(q)));
+  $("grid").innerHTML = shown.map(cardHTML).join("") || `<p class="empty2">Nothing on the shelf matches that.</p>`;
+  const ready = shown.filter((i) => i.transactable && i.price.value > 0).length;
+  $("count").textContent =
+    `${shown.length} product${shown.length === 1 ? "" : "s"} across ${new Set(shown.map((i) => i.merchant_id)).size} shops · ${ready} an agent can buy right now`;
+}
+
+const cardOf = (id) => document.querySelector(`[data-item="${CSS.escape(id)}"]`);
+function mark(id, cls, note) {
+  const el = cardOf(id);
+  if (!el) return;
+  el.classList.remove("dim");
+  el.classList.add(cls);
+  if (note) { const n = el.querySelector(".agentnote"); n.hidden = false; n.textContent = note; }
+  if (cls === "chosen") el.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function resetShelf(dim) {
+  for (const el of document.querySelectorAll(".card")) {
+    el.classList.remove("looked", "passed", "chosen");
+    el.classList.toggle("dim", Boolean(dim));
+    const n = el.querySelector(".agentnote");
+    n.hidden = true; n.textContent = "";
+  }
+}
+
+// ── the rail ────────────────────────────────────────────────────────────────
+const stepRow = (icon, head, sub, who) => `
+  <div class="st"><span class="ic">${icon}</span>
+    <div><div class="hd">${esc(head)}</div>
+      ${sub ? `<div class="sb">${sub}</div>` : ""}
+      ${who ? `<div class="who">decided by ${esc(who)}</div>` : ""}</div>
+  </div>`;
+
+function push(html) { $("rb").insertAdjacentHTML("beforeend", html); $("rb").scrollTop = $("rb").scrollHeight; }
+function beacon(on, text) { $("beacon").classList.toggle("on", on); $("bstate").textContent = text; }
+
+const ICON = { start:"◆", shopping:"🔎", shop:"🏪", authorize:"🔐", pay:"₹", refused:"✕", stop:"■", failed:"⚠" };
+
+/**
+ * Live steps, painted onto the shelf.
+ *
+ * The point of running the agent against the same grid a person browses is that
+ * its reasoning becomes checkable without reading a log: a card the agent never
+ * considered stays dim, one it rejected says why on its own face, and the one it
+ * bought is the one that lights up. A separate "agent view" would have been
+ * easier to build and would have proved nothing.
+ */
+function onStep(e) {
+  if (e.type !== "agent.step" || !runId || e.data?.run_id !== runId) return;
+  const d = e.data ?? {};
+  const stage = d.stage ?? "";
+
+  if (stage === "shop" && Array.isArray(d.offers)) {
+    for (const o of d.offers) {
+      if (o.eligible) mark(o.item_id, "looked", `Offered ${rupee(o.final_price)} after ${o.rounds} round(s)`);
+      else mark(o.item_id, "passed", o.note ?? "would not agree a price");
+    }
+  }
+  push(stepRow(ICON[stage] ?? "·", e.message ?? stage, "", d.decided_by));
+}
+
+// ── the run ─────────────────────────────────────────────────────────────────
+async function run(goal) {
+  $("send").disabled = true;
+  runId = `run_${Date.now().toString(36)}`;
+  $("rb").innerHTML = "";
+  resetShelf(true);
+  beacon(true, "working");
+  push(stepRow("◆", `Buyer agent started`, esc(goal)));
+
+  // No Razorpay keys means no Checkout to open, so the run settles on the
+  // simulated rail instead of stranding the shopper at a dead end.
+  const settle = config.gateway === "razorpay" ? "checkout" : "test_rail";
+
+  let status, body;
+  try {
+    ({ status, body } = await api("/agent/run", {
+      method: "POST", body: JSON.stringify({ goal, settle, run_id: runId }),
+    }));
+  } catch (err) {
+    beacon(false, "failed");
+    push(stepRow("⚠", "Couldn't reach the server", esc(err?.message ?? String(err))));
+    $("send").disabled = false; runId = null; return;
+  }
+  runId = null;
+  $("send").disabled = false;
+
+  if (status >= 400 || body.status === "no_match" || body.status === "no_deal") {
+    beacon(false, "stopped");
+    const why = body.reasons?.join("; ") ?? body.note ?? body.error ?? "no shop would sell it on these terms";
+    push(stepRow("■", body.status === "no_match" ? "Nothing on the shelf matches" : "No deal", esc(why)));
+    resetShelf(false);
+    return;
+  }
+
+  // Events can be missed; the trace comes back with the response and cannot be.
+  for (const t of body.trace ?? []) {
+    if (t.stage !== "shop" || !Array.isArray(t.offers)) continue;
+    for (const o of t.offers) {
+      if (cardOf(o.item_id)?.classList.contains("looked")) continue;
+      if (o.eligible) mark(o.item_id, "looked", `Offered ${rupee(o.final_price)} after ${o.rounds} round(s)`);
+      else mark(o.item_id, "passed", o.note ?? "would not agree a price");
+    }
+  }
+
+  const chosen = body.item_id;
+  if (chosen) {
+    // The list price is already on the shelf we rendered; no need to ask for it.
+    const listed = items.find((i) => i.item_id === chosen)?.price?.value;
+    const saved = listed && listed > body.final_price ? ` — ${rupee(listed - body.final_price)} off the shelf price` : "";
+    mark(chosen, "chosen", `Bought at ${rupee(body.final_price)}${saved}`);
+  }
+
+  if (body.status === "paid" || body.status === "settled") {
+    beacon(false, "paid");
+    push(stepRow("₹", `Paid ${rupee(body.final_price)}`, "on the simulated rail — no card was charged"));
+    push(stepRow("■", "Waiting on the shop to confirm handover", "a payment is not a delivery"));
+    return;
+  }
+
+  if (body.status === "awaiting_payment" && body.order_id) {
+    beacon(true, "awaiting you");
+    push(stepRow("🔐", "Order placed — Razorpay Checkout opening", `${esc(body.item_id)} · ${rupee(body.final_price)}`));
+    checkout(body);
+    return;
+  }
+  beacon(false, "done");
+}
+
+function checkout(r) {
+  new window.Razorpay({
+    key: config.razorpay_key_id, order_id: r.order_id, amount: r.amount_paise,
+    currency: "INR", name: "Vyapar Market", description: `${r.item_id} · ${rupee(r.final_price)}`,
+    handler: async (response) => {
+      const { status, body } = await api(`/transactions/${r.transaction_id}/settle-payment`, {
+        method: "POST", body: JSON.stringify(response) });
+      if (status !== 201) {
+        push(stepRow("⚠", "Payment could not be settled", esc((body.reasons ?? [body.error]).join("; "))));
+        return;
+      }
+      beacon(false, "paid");
+      push(stepRow("₹", `Paid — ${esc(body.payment_id)}`, "signed into the mandate chain"));
+      push(stepRow("■", "Waiting on the shop to confirm handover", "nothing here marks itself delivered"));
+    },
+    modal: { ondismiss: () => { beacon(false, "you closed checkout"); push(stepRow("■", "Checkout closed", "the order is still open — send the agent again to retry")); } },
+  }).open();
+}
+
+// ── boot ────────────────────────────────────────────────────────────────────
+const [{ body: cat0 }, { body: mer }] = await Promise.all([api("/catalog"), api("/merchants")]);
+items = Array.isArray(cat0) ? cat0 : cat0.items ?? [];
+for (const m of mer.merchants ?? []) merchants[m.merchant_id] = m;
+
+const cats = ["all", ...new Set(items.map((i) => top(i.category)))];
+$("pills").innerHTML = cats.map((c) =>
+  `<button data-c="${esc(c)}" class="${c === "all" ? "on" : ""}">${c === "all" ? "Everything" : esc(c)}</button>`).join("");
+for (const b of document.querySelectorAll("#pills button")) {
+  b.onclick = () => {
+    cat = b.dataset.c;
+    for (const o of document.querySelectorAll("#pills button")) o.classList.toggle("on", o === b);
+    render();
+  };
+}
+$("q").addEventListener("input", render);
+render();
+
+$("send").onclick = () => { const g = $("goal").value.trim(); if (g) run(g); };
+$("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("send").click(); });
+for (const b of document.querySelectorAll(".exs button")) {
+  b.onclick = () => { $("goal").value = b.dataset.g; run(b.dataset.g); };
+}
+
+config = await boot({ onEvent: onStep });
+if (config.gateway !== "razorpay") {
+  $("rb").innerHTML = `<p class="empty2">No Razorpay keys configured, so runs settle on the simulated rail.</p>`;
+}
+</script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</body>
+</html>
