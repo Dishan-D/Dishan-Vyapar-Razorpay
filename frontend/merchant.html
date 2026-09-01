@@ -173,6 +173,31 @@
   .keys .a::before { color:var(--green); }
   .keys .b::before { color:var(--border-2); }
 
+  .pc { border:1px solid var(--border); border-radius:var(--r); padding:15px; margin-bottom:12px; }
+  .pc h3 { margin:0 0 3px; font-size:14px; font-weight:600; letter-spacing:-.01em; }
+  .pc .meta { font-size:11.5px; color:var(--ink-3); margin-bottom:12px; }
+  .pc .advice2 { font-size:13px; line-height:1.55; color:var(--ink); background:var(--surface-2);
+                 border:1px solid var(--border); border-radius:var(--r-sm); padding:11px 13px; margin-top:12px; }
+  .pc .advice2.none { color:var(--ink-3); }
+  .pc .warn2 { font-size:12px; line-height:1.5; color:var(--amber); background:var(--amber-2);
+               border:1px solid var(--amber-3); border-radius:var(--r-sm); padding:10px 12px; margin-top:9px; }
+  .bars { display:flex; align-items:flex-end; gap:3px; height:104px; }
+  .bars .b2 { flex:1; position:relative; border-radius:4px 4px 0 0; background:var(--blue-2);
+              border:1px solid transparent; min-height:2px; cursor:default; }
+  .bars .b2.now  { background:var(--ink); }
+  .bars .b2.best { background:var(--green); }
+  .bars .b2:hover { outline:2px solid var(--border-2); outline-offset:1px; }
+  .bars .b2 .tip { display:none; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+                   background:var(--ink); color:#fff; font-size:11px; line-height:1.45; padding:6px 9px;
+                   border-radius:7px; white-space:nowrap; z-index:5; }
+  .bars .b2:hover .tip { display:block; }
+  .axis2 { display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-4); margin-top:6px; }
+  .pckeys { display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--ink-3); margin-top:9px; }
+  .pckeys span::before { content:"■"; margin-right:5px; }
+  .pckeys .now::before { color:var(--ink); }
+  .pckeys .best::before { color:var(--green); }
+  .pckeys .oth::before { color:var(--blue-2); }
+
   .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
   .order + .order { border-top:1px solid var(--border); }
   .order .on2 { font-size:14px; font-weight:550; }
@@ -350,6 +375,13 @@
         <img id="qr" alt="QR to this shop's dashboard" />
         <p class="hint" id="qrnote">The same sticker that already takes UPI. Now it opens onto a catalog an agent can read.</p>
       </div>
+    </section>
+
+    <section>
+      <h2>What a different price floor would have earned</h2>
+      <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
+        engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
+      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -941,6 +973,43 @@ $("twinread").onclick = async () => {
   if (cancel) cancel.onclick = () => { $("twinprop").innerHTML = ""; };
 };
 
+// ── price curve ─────────────────────────────────────────────────────────────
+//
+// One measure, one axis: rupees. The bars are a single hue by design — the two
+// that carry meaning (today's floor, and the best one) are the only ones that
+// get a different colour, and both are also labelled, so the reading never
+// depends on telling two colours apart.
+async function loadCurves() {
+  const { body } = await api(`/merchants/${merchantId}/price-curve`);
+  const withCurve = (body.items ?? []).filter((c) => c.curve.length > 0);
+  if (withCurve.length === 0) {
+    $("curves").innerHTML = `<p class="empty">Not enough bargaining yet to say anything useful.</p>`;
+    return;
+  }
+
+  $("curves").innerHTML = withCurve.slice(0, 4).map((c) => {
+    const top = Math.max(...c.curve.map((p) => p.revenue), 1);
+    const bars = c.curve.map((p) => {
+      const cls = p.current ? "now" : (c.best && p.floor_price === c.best.floor_price ? "best" : "");
+      return `<div class="b2 ${cls}" style="height:${Math.max(2, (p.revenue / top) * 100)}%">
+        <span class="tip">Floor ${rupee(p.floor_price)} · ${rupee(p.revenue)}<br>${p.buyers} of ${c.sample} buyers${
+          p.stock_limited ? ` · ${p.would_buy} wanted it, ${c.stock} in stock` : ""}</span>
+      </div>`;
+    }).join("");
+
+    return `<div class="pc">
+      <h3>${esc(c.item_name)}</h3>
+      <div class="meta">Listed ${rupee(c.list_price)} · floor ${rupee(c.current_floor)} · ${c.stock} in stock ·
+        replayed against ${c.sample} buyers who bargained</div>
+      <div class="bars">${bars}</div>
+      <div class="axis2"><span>${rupee(c.curve[0].floor_price)}</span><span>floor price →</span><span>${rupee(c.curve[c.curve.length-1].floor_price)}</span></div>
+      <div class="pckeys"><span class="now">your floor now</span><span class="best">best of those tested</span><span class="oth">other floors</span></div>
+      <div class="advice2 ${c.recommendation ? "" : "none"}">${esc(c.recommendation ?? c.withheld_because ?? "")}</div>
+      ${c.stock_note ? `<div class="warn2">${esc(c.stock_note)}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
 // ── reconciliation ──────────────────────────────────────────────────────────
 //
 // The headline is the share of banked rupees that can be tied to a product. It
@@ -1007,7 +1076,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves()]);
 
 /**
  * A dashboard that cannot reach its server must say so.
@@ -1055,7 +1124,7 @@ await boot({
     if (e.type.startsWith("clarification")) refresh();
     loadSimple();
     if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); loadRecon(); }
-    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); loadGrowth(); }
+    if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); loadGrowth(); loadCurves(); }
   },
 });
 </script>

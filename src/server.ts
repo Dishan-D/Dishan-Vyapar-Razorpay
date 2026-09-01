@@ -47,6 +47,8 @@ import {
 import { converse, shopperText, type Turn } from "./agent/converse.js";
 import { reconcileUpi } from "./finance/upi.js";
 import { buildStatement } from "./finance/statement.js";
+import { buildDemandHistory } from "./revenue/dataset.js";
+import { priceElasticity } from "./revenue/elasticity.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { activeProvider } from "./llm/provider.js";
@@ -147,6 +149,29 @@ export async function createApp(options: AppOptions = {}) {
     }
   }
   restoreOnboarded();
+
+  /**
+   * Give each seeded shop a history of AI-buyer demand.
+   *
+   * The revenue screens are answers to "what did buyers want and what did you
+   * lose"; on an empty database the honest answer is "nothing yet", which is
+   * correct and shows a merchant nothing. So each seed shop starts with a body
+   * of past demand whose outcomes were decided by the production negotiation
+   * engine rather than written down here.
+   *
+   * Only for the shops that ship with the demo. A shop somebody onboards during
+   * a demo gets a real, empty history — inventing customers for a stranger's
+   * shop would be a lie told to the one person able to catch it.
+   */
+  function seedDemandHistory(): void {
+    for (const merchantId of merchants.keys()) {
+      if (demand.forMerchant(merchantId, "1970-01-01").length > 0) continue;
+      for (const event of buildDemandHistory(merchantId, catalogItems, policies)) {
+        demand.record(event);
+      }
+    }
+  }
+  seedDemandHistory();
 
   /** Sanity is always recomputed against the live catalog, never a stale snapshot. */
   const sanityFor = (item: CatalogItem) =>
@@ -2016,6 +2041,41 @@ export async function createApp(options: AppOptions = {}) {
    * sells through a QR code. That is the entire pitch, stated as arithmetic
    * rather than a claim.
    */
+  /**
+   * What a different price floor would actually have earned.
+   *
+   * Not a model of demand — a replay of it. Every buyer who bargained here left
+   * an opening offer and a ceiling, and each candidate floor is scored by
+   * running those buyers back through the same negotiation engine a live
+   * purchase uses. The merchant can check any point on the curve against the
+   * buyers it came from, which is not true of a learned elasticity.
+   */
+  app.get("/merchants/:id/price-curve", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const events = demand.forMerchant(id, "1970-01-01");
+    const mine = catalogItems.filter((i) => i.merchant_id === id && !i.needs_merchant_confirmation);
+
+    const curves = mine
+      .map((item) => {
+        const policy = policies.get(item.item_id);
+        return policy ? priceElasticity(item, policy, events) : null;
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null)
+      // Biggest upside first: this is a to-do list, not a report.
+      .sort((a, b) => b.upside - a.upside);
+
+    res.json({
+      merchant_id: id,
+      basis: "every AI buyer who bargained for this item, replayed through the live negotiation engine",
+      items: curves,
+      total_upside: curves.reduce((sum, c) => sum + c.upside, 0),
+    });
+  });
+
   app.get("/merchants/:id/reconciliation", (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!merchants.has(id)) {

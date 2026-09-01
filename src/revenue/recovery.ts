@@ -164,7 +164,17 @@ export function buildRecoveryCases(
         )
       : undefined;
 
-    const opened = shutOut[shutOut.length - 1]?.at ?? now.toISOString();
+    // The most recent buyer who walked, not the first.
+    //
+    // `lost` arrives newest-first, so taking the last element anchored the case
+    // to the OLDEST walkaway — and with a 24-hour window that meant any item
+    // with one stale loss was permanently expired, however many buyers walked
+    // this morning. A recovery case is live while buyers are still leaving, so
+    // it is the latest one that decides.
+    const opened = shutOut.reduce<string>(
+      (latest, e) => (latest === "" || Date.parse(e.at) > Date.parse(latest) ? e.at : latest),
+      "",
+    ) || now.toISOString();
     const expiresAt = new Date(Date.parse(opened) + RECOVERY_POLICY.window_hours * HOUR).toISOString();
     const expired = now.getTime() > Date.parse(expiresAt);
 
