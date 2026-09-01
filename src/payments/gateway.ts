@@ -145,10 +145,23 @@ export class SimulatedGateway implements PaymentGateway {
   readonly requiresCheckout = false;
   private seq = 0;
 
+  /**
+   * Per-process, so ids cannot repeat across restarts.
+   *
+   * The counter alone did repeat: it resets to zero on every boot while the
+   * database does not, so a store with a dozen payments held `sim_pay_0001`
+   * eight times. A payment id is a reference — the thing a bank statement, a
+   * refund and a dispute are all keyed on — and a repeated one silently makes
+   * every lookup by it ambiguous. Reconciliation found this by reporting four
+   * amount mismatches that did not exist: it had matched sales to the wrong
+   * credits, because eight of them answered to the same name.
+   */
+  private readonly run = Math.random().toString(36).slice(2, 8);
+
   async createOrder(req: OrderRequest): Promise<OrderResult> {
     this.seq++;
     return {
-      order_id: `sim_order_${String(this.seq).padStart(4, "0")}`,
+      order_id: `sim_order_${this.run}${String(this.seq).padStart(4, "0")}`,
       amount_paise: req.amount_paise,
       status: "created",
     };
@@ -156,7 +169,7 @@ export class SimulatedGateway implements PaymentGateway {
 
   async capturePayment(order: OrderResult): Promise<PaymentResult> {
     return {
-      payment_id: `sim_pay_${order.order_id.slice(-4)}`,
+      payment_id: `sim_pay_${order.order_id.replace("sim_order_", "")}`,
       order_id: order.order_id,
       amount_paise: order.amount_paise,
       status: "captured",

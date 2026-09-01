@@ -45,6 +45,8 @@ import {
   WhatsAppNotifier,
 } from "./structuring/whatsapp.js";
 import { converse, shopperText, type Turn } from "./agent/converse.js";
+import { reconcileUpi } from "./finance/upi.js";
+import { buildStatement } from "./finance/statement.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { activeProvider } from "./llm/provider.js";
@@ -1999,6 +2001,50 @@ export async function createApp(options: AppOptions = {}) {
 
     const out = await converse(turns);
     res.json({ ...out, goal: out.ready ? shopperText(turns) : null });
+  });
+
+  /**
+   * Milestone: the bank feed, joined to what was actually sold.
+   *
+   * The merchant this is built for already has exactly one record of their
+   * trade — money landing in a UPI account — and it says nothing about what
+   * was sold. This endpoint is the join, and its headline number is
+   * deliberately the uncomfortable one: what share of the rupees that arrived
+   * can be tied to a product, a buyer and a delivery.
+   *
+   * Before any of this, that share is zero for every merchant in India who
+   * sells through a QR code. That is the entire pitch, stated as arithmetic
+   * rather than a claim.
+   */
+  app.get("/merchants/:id/reconciliation", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const chains = store
+      .listTransactionIdsForMerchant(id)
+      .map((tid) => store.loadChain(tid))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    const credits = buildStatement(id, chains);
+    const result = reconcileUpi(credits, chains, (chain) => {
+      const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
+      return item?.name ?? chain.cart?.item_id ?? null;
+    });
+
+    res.json({
+      merchant_id: id,
+      // Said plainly, on the endpoint as well as the screen. A generated feed
+      // presented as a bank connection would be the one dishonest thing here.
+      statement_source: "simulated UPI settlement feed, generated from this shop's own sales plus counter sales it never recorded",
+      ...result,
+      before: {
+        explained_share: 0,
+        note: "A UPI credit on its own carries an amount, a time and a payer handle. Nothing in it says what was sold.",
+      },
+    });
   });
 
   app.get("/orders", (_req: Request, res: Response) => {

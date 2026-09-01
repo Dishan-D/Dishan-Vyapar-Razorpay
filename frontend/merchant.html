@@ -154,6 +154,25 @@
   .rec.verify { color:var(--amber); background:var(--amber-2); }
   .rec.hold, .rec.block { color:var(--red); background:var(--red-2); }
 
+  .rec2 { display:grid; grid-template-columns:auto 1fr auto; gap:10px 12px; align-items:baseline;
+          padding:10px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
+  .rec2:last-child { border-bottom:0; }
+  .rec2 .kind { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+                padding:3px 7px; border-radius:5px; white-space:nowrap; }
+  .rec2 .kind.matched, .rec2 .kind.matched_on_amount { background:var(--green-2); color:var(--green); }
+  .rec2 .kind.unexplained_credit { background:var(--surface-3); color:var(--ink-3); }
+  .rec2 .kind.amount_mismatch, .rec2 .kind.missing_credit { background:var(--red-2); color:var(--red); }
+  .rec2 .why3 { color:var(--ink-2); line-height:1.5; }
+  .rec2 .why3 b { color:var(--ink); font-weight:600; }
+  .rec2 .amt2 { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  .split { display:flex; height:9px; border-radius:5px; overflow:hidden; background:var(--surface-3); margin:12px 0 6px; }
+  .split i { display:block; }
+  .split i.exp { background:var(--green); }
+  .keys { display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-3); }
+  .keys span::before { content:"■"; margin-right:5px; }
+  .keys .a::before { color:var(--green); }
+  .keys .b::before { color:var(--border-2); }
+
   .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
   .order + .order { border-top:1px solid var(--border); }
   .order .on2 { font-size:14px; font-weight:550; }
@@ -331,6 +350,13 @@
         <img id="qr" alt="QR to this shop's dashboard" />
         <p class="hint" id="qrnote">The same sticker that already takes UPI. Now it opens onto a catalog an agent can read.</p>
       </div>
+    </section>
+
+    <section>
+      <h2>Money in, matched to what you sold</h2>
+      <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
+        what was sold. This is your settlement feed joined to your own sales.</p>
+      <div id="recon" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -915,6 +941,45 @@ $("twinread").onclick = async () => {
   if (cancel) cancel.onclick = () => { $("twinprop").innerHTML = ""; };
 };
 
+// ── reconciliation ──────────────────────────────────────────────────────────
+//
+// The headline is the share of banked rupees that can be tied to a product. It
+// is put next to zero deliberately: zero is what that number is for every shop
+// selling through a QR code, and it is the clearest statement of the problem
+// this whole project exists to fix.
+const RECON_LABEL = {
+  matched: "matched",
+  matched_on_amount: "probable",
+  unexplained_credit: "unexplained",
+  amount_mismatch: "wrong amount",
+  missing_credit: "no credit",
+};
+
+async function loadRecon() {
+  const { body } = await api(`/merchants/${merchantId}/reconciliation`);
+  if (!body.rows || body.rows.length === 0) {
+    $("recon").innerHTML = `<p class="empty">No settlements yet.</p>`;
+    return;
+  }
+  const pct = Math.round(body.explained_share * 100);
+  $("recon").innerHTML = `
+    <div class="growth" style="grid-template-columns:1fr 1fr 1fr; display:grid; gap:12px">
+      <div><div class="k">Money in</div><div class="v">${rupee(body.banked)}</div></div>
+      <div><div class="k">Tied to a product</div><div class="v">${rupee(body.explained)}</div></div>
+      <div><div class="k">Still unexplained</div><div class="v">${rupee(body.unexplained)}</div></div>
+    </div>
+    <div class="split"><i class="exp" style="width:${pct}%"></i></div>
+    <div class="keys"><span class="a">${pct}% explained now</span><span class="b">0% before — a QR code cannot say what it sold</span></div>
+    <p class="hint" style="margin:12px 0 0">${esc(body.statement_source)}.</p>
+    <div style="margin-top:8px">${body.rows.map((r) => `
+      <div class="rec2">
+        <span class="kind ${r.kind}">${RECON_LABEL[r.kind] ?? r.kind}</span>
+        <span class="why3">${r.item_name ? `<b>${esc(r.item_name)}</b> — ` : ""}${esc(r.because)}${
+          r.delivered === false ? " Not handed over yet." : ""}</span>
+        <span class="amt2">${rupee(r.amount_banked ?? r.amount_agreed ?? 0)}</span>
+      </div>`).join("")}</div>`;
+}
+
 // ── performance ─────────────────────────────────────────────────────────────
 async function loadPerf() {
   const { body: p } = await api("/performance");
@@ -942,7 +1007,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon()]);
 
 /**
  * A dashboard that cannot reach its server must say so.
@@ -989,7 +1054,7 @@ await boot({
     // The dashboard reflects server state; it never keeps its own copy.
     if (e.type.startsWith("clarification")) refresh();
     loadSimple();
-    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); }
+    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); loadRecon(); }
     if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); loadGrowth(); }
   },
 });
