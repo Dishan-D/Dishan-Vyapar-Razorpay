@@ -34,12 +34,6 @@
   .resolved .q { color:#0d5c3a; }
 
   /* catalog table */
-  .tbl { width:100%; border-collapse:collapse; font-size:13px; }
-  .tbl th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4); font-weight:650; padding:0 0 9px; }
-  .tbl td { padding:10px 0; border-top:1px solid var(--border); vertical-align:middle; }
-  .tbl td.r { text-align:right; font-variant-numeric:tabular-nums; }
-  .tbl .nm { font-weight:500; }
-
   .scorehead { display:flex; align-items:baseline; gap:9px; margin-bottom:3px; }
   .scorehead .n { font-size:38px; font-weight:600; letter-spacing:-.04em; line-height:1; font-variant-numeric:tabular-nums; }
   .scorehead .d { font-size:13px; color:var(--ink-3); }
@@ -89,11 +83,35 @@
   .opp .delta { display:flex; align-items:baseline; gap:9px; margin:11px 0 0; font-variant-numeric:tabular-nums; }
   .opp .delta .from { color:var(--ink-3); text-decoration:line-through; font-size:14px; }
   .opp .delta .to { font-size:20px; font-weight:600; color:var(--green); }
-  .edit { display:grid; grid-template-columns:1fr 92px 92px auto auto; gap:8px; align-items:center; padding:10px 0; }
+  /* Catalog row: thumbnail, product, price, stock, state, actions.
+     Six columns, and it used to declare five — the thumbnail was added later
+     and silently took the product name's column. Named areas now, so adding a
+     field cannot quietly shift every other one again. */
+  .edit { display:grid; gap:10px; align-items:center; padding:13px 0;
+          grid-template-columns:52px minmax(0,1fr) 96px 92px auto auto; }
   .edit + .edit { border-top:1px solid var(--border); }
-  .edit input { font-size:13px; padding:6px 9px; }
-  .edit .st2 { min-width:82px; }
-  .edit button { padding:6px 11px; font-size:12px; }
+  .edit input { font-size:13px; padding:7px 10px; }
+  .edit .who2 { min-width:0; }
+  .edit .who2 .prov { margin-top:4px; }
+  .edit .st2 { min-width:84px; }
+  .edit .acts { display:flex; gap:6px; }
+  .edit button { padding:7px 11px; font-size:12px; }
+
+  /* At phone width the row becomes a card: thumbnail and name on one line,
+     the two numbers side by side beneath, actions last. Nothing scrolls
+     sideways, which is the rule for the whole merchant view. */
+  @media (max-width:620px) {
+    .edit { grid-template-columns:52px minmax(0,1fr); grid-template-areas:
+            "pic name" "price stock" "state state" "acts acts";
+            row-gap:9px; padding:15px 0; }
+    .edit > .pic { grid-area:pic; }
+    .edit > .who2 { grid-area:name; }
+    .edit > .pf { grid-area:price; }
+    .edit > .sf { grid-area:stock; }
+    .edit > .st2 { grid-area:state; }
+    .edit > .acts { grid-area:acts; }
+    .edit .acts button { flex:1; }
+  }
   @media (max-width:720px){ .edit { grid-template-columns:1fr 1fr; } }
 
   .askbox { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
@@ -128,15 +146,20 @@
   .clear h3 { margin:0; font-size:16px; font-weight:600; color:#0d5c3a; }
   .clear p { margin:3px 0 0; font-size:13px; color:#0d5c3a; opacity:.85; }
 
-  .today { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1px;
-           background:var(--border); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
-  .today > div { background:var(--surface); padding:15px 17px; }
-  .today .k { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; }
-  .today .v { font-size:24px; font-weight:600; letter-spacing:-.03em; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .today { display:grid; grid-template-columns:repeat(auto-fit,minmax(146px,1fr)); gap:12px; }
+  .today > div { background:var(--surface); border:1px solid var(--border);
+                 border-radius:var(--r); padding:16px 18px; }
+  .today .k { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4); font-weight:700; }
+  .today .v { font-size:26px; font-weight:650; letter-spacing:-.03em; margin-top:6px; font-variant-numeric:tabular-nums; line-height:1.1; }
 
   .alert { display:grid; grid-template-columns:10px 1fr auto; gap:14px; align-items:center;
            border:1px solid var(--border); border-radius:var(--r); padding:16px 18px; }
   .alert + .alert { margin-top:11px; }
+  @media (max-width:520px) {
+    .alert { grid-template-columns:6px 1fr; row-gap:12px; }
+    .alert > :last-child { grid-column:2; display:flex; gap:8px; }
+    .alert > :last-child .btn { flex:1; }
+  }
   .alert .bar { width:4px; height:100%; min-height:34px; border-radius:2px; background:var(--ink-4); }
   .alert.high .bar { background:var(--red); }
   .alert.attention .bar { background:var(--amber); }
@@ -199,19 +222,21 @@
   .pckeys .oth::before { color:var(--blue-2); }
 
   /* One subject per screen. The nav is the table of contents the page lacked. */
-  .secnav { position:sticky; top:0; z-index:30; display:flex; gap:4px; overflow-x:auto;
-            padding:10px 26px; margin:0 auto; max-width:1240px;
-            background:var(--bg); border-bottom:1px solid var(--border); scrollbar-width:none; }
+  .secnav { position:sticky; top:0; z-index:30; display:flex; gap:2px; overflow-x:auto;
+            padding:0 var(--gutter); margin:0 auto; max-width:var(--page);
+            background:var(--surface); border-bottom:1px solid var(--border); scrollbar-width:none; }
   .secnav::-webkit-scrollbar { display:none; }
-  .secnav button { display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
-                   background:none; border:1px solid transparent; border-radius:9px;
-                   padding:8px 14px; font-size:13.5px; font-weight:550; color:var(--ink-3); }
-  .secnav button i { font-style:normal; font-size:11px; opacity:.6; }
-  .secnav button:hover { color:var(--ink); background:var(--surface-2); }
-  .secnav button.on { background:var(--surface); border-color:var(--border); color:var(--ink); box-shadow:var(--shadow); }
-  .secnav button.on i { opacity:1; }
+  .secnav button { position:relative; display:inline-flex; align-items:center; gap:8px;
+                   white-space:nowrap; background:none; border:0; border-bottom:2px solid transparent;
+                   padding:14px 15px 12px; font-size:13.5px; font-weight:550; color:var(--ink-3);
+                   transition:color .12s, border-color .12s; }
+  .secnav button i { font-style:normal; font-size:11px; opacity:.55; }
+  .secnav button:hover { color:var(--ink); }
+  .secnav button.on { color:var(--ink); border-bottom-color:var(--blue); font-weight:650; }
+  .secnav button.on i { opacity:1; color:var(--blue); }
   .secnav .badge2 { background:var(--red); color:#fff; border-radius:999px; font-size:10px;
-                    font-weight:700; padding:1px 6px; min-width:16px; text-align:center; }
+                    font-weight:700; padding:1px 6px; min-width:17px; text-align:center;
+                    font-variant-numeric:tabular-nums; }
 
   .secpane { display:none; max-width:1240px; margin:0 auto; padding:20px 26px 70px;
              grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
@@ -522,6 +547,16 @@ async function loadAsks() {
 }
 
 // ── catalog ─────────────────────────────────────────────────────────────────
+/* How this row came to be known. The merchant is entitled to see whether a
+   price was read off a photograph or typed by them, because the two deserve
+   different amounts of trust. */
+const PROV = {
+  photo:          ["read from a photo", "model"],
+  voice_note:     ["heard in your voice note", "model"],
+  payment_page:   ["from your payment page", "model"],
+  merchant_entry: ["you typed this", "merchant"],
+};
+
 async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
@@ -533,11 +568,14 @@ async function loadCatalog() {
         ${i.photo_url ? `<img src="${esc(i.photo_url)}" alt="" />` : "add<br>photo"}
         <input type="file" accept="image/*" data-pic="${i.item_id}" hidden />
       </label>
-      <input value="${esc(i.name)}" data-f="name" />
-      <input type="number" value="${i.price.value || ""}" placeholder="price" data-f="price" />
-      <input type="number" value="${i.stock.confidence > 0 ? i.stock.quantity : ""}" placeholder="stock" data-f="stock" />
+      <span class="who2">
+        <input value="${esc(i.name)}" data-f="name" />
+        <span class="prov ${PROV[i.source?.type]?.[1] ?? "rules"}">${PROV[i.source?.type]?.[0] ?? "extracted"}</span>
+      </span>
+      <input class="pf" type="number" value="${i.price.value || ""}" placeholder="price" data-f="price" />
+      <input class="sf" type="number" value="${i.stock.confidence > 0 ? i.stock.quantity : ""}" placeholder="stock" data-f="stock" />
       <span class="st2"><span class="state ${i.transactable ? "ok" : "held"}"><span class="dot ${i.transactable ? "ok" : "held"}"></span>${i.transactable ? "Live" : "Held"}</span></span>
-      <span class="row">
+      <span class="acts">
         <button class="btn go" data-save="${i.item_id}">Save</button>
         <button class="btn secondary" data-del="${i.item_id}">Delete</button>
       </span>

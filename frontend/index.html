@@ -7,20 +7,29 @@
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  .hero { max-width:1120px; margin:0 auto; padding:64px 26px 40px; }
-  .hero h1 { font-size:44px; line-height:1.08; font-weight:600; letter-spacing:-.035em; margin:0 0 16px; max-width:15ch; }
-  .hero p.lede { font-size:17px; color:var(--ink-2); max-width:60ch; margin:0 0 28px; line-height:1.6; }
+  .hero { max-width:var(--page); margin:0 auto; padding:60px var(--gutter) 36px; }
+  .hero .eyebrow { margin-bottom:16px; display:block; }
+  .hero h1 { font-size:46px; line-height:1.06; font-weight:650; letter-spacing:-.04em; margin:0 0 18px; max-width:16ch; }
+  .hero p.lede { font-size:17px; color:var(--ink-2); max-width:62ch; margin:0 0 28px; line-height:1.6; }
+  @media (max-width:720px){ .hero { padding:36px var(--gutter) 26px; } .hero h1 { font-size:31px; } }
+
+  /* The pipeline, stated once at the top: this is what the product does. */
+  .flow { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin:30px 0 0;
+          padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r); }
+  .flow span { font-size:12px; font-weight:550; color:var(--ink-2); white-space:nowrap; }
+  .flow i { font-style:normal; color:var(--ink-4); font-size:11px; }
+  .flow span:last-child { color:var(--green); }
   .cta-row { display:flex; gap:11px; flex-wrap:wrap; }
 
-  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px;
            background:var(--border); border:1px solid var(--border); border-radius:var(--r);
-           overflow:hidden; margin:44px 0 0; max-width:1120px; }
-  .stat-cell { background:var(--surface); padding:16px 18px; }
+           overflow:hidden; margin:20px 0 0; max-width:var(--page); }
+  .stat-cell { background:var(--surface); padding:18px 20px; }
   .stat-cell .k { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; }
-  .stat-cell .v { font-size:26px; font-weight:600; letter-spacing:-.03em; margin-top:5px; font-variant-numeric:tabular-nums; }
+  .stat-cell .v { font-size:28px; font-weight:650; letter-spacing:-.032em; margin-top:6px; font-variant-numeric:tabular-nums; line-height:1.1; }
   .stat-cell .n { font-size:11.5px; color:var(--ink-3); margin-top:2px; }
 
-  .loop { max-width:1120px; margin:0 auto; padding:16px 26px 40px; }
+  .loop { max-width:var(--page); margin:0 auto; padding:22px var(--gutter) 44px; }
   .loopgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:12px; }
   .lcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:16px; }
   .lcard .step { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
@@ -30,7 +39,7 @@
   .lcard .who b { color:var(--ink-2); font-weight:600; }
 
   .band { border-top:1px solid var(--border); background:var(--surface); }
-  .band .inner { max-width:1120px; margin:0 auto; padding:40px 26px; }
+  .band .inner { max-width:var(--page); margin:0 auto; padding:44px var(--gutter); }
   .band h2 { font-size:19px; font-weight:600; letter-spacing:-.02em; margin:0 0 6px; }
   .band p.sub { color:var(--ink-3); font-size:14px; margin:0 0 22px; max-width:62ch; }
 
@@ -47,7 +56,7 @@
   .acol.can li::before { content:"✓"; color:var(--green); font-weight:600; }
   .acol.cannot li::before { content:"✕"; color:var(--ink-4); }
 
-  .feed { max-width:1120px; margin:0 auto; padding:34px 26px 80px; }
+  .feed { max-width:var(--page); margin:0 auto; padding:36px var(--gutter) 80px; }
   /* Structured vs unstructured — the Stage 1 problem, run live on both sides */
   .cmp-ask { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:0 0 18px; }
   .cmp-ask input { font:inherit; font-size:13.5px; padding:9px 12px; border:1px solid var(--border-2);
@@ -107,7 +116,12 @@
     no catalog, no API. Vyapar turns what they already have into a storefront an AI buyer can
     search, negotiate with, and pay.
   </p>
-  <div class="cta-row">
+  <div class="flow">
+    <span>QR payment</span><i>→</i><span>structured catalog</span><i>→</i><span>AI discovery</span>
+    <i>→</i><span>negotiation</span><i>→</i><span>signed payment</span><i>→</i><span>verified fulfilment</span>
+  </div>
+
+  <div class="cta-row" style="margin-top:26px">
     <a class="btn primary big" href="/onboard.html">Set up my store</a>
     <a class="btn secondary big" href="/store.html">See an AI buyer in action</a>
   </div>
