@@ -1936,6 +1936,78 @@ export async function createApp(options: AppOptions = {}) {
    * and until now there was nowhere for a shopkeeper to say the goods went
    * across the counter, so every purchase in the demo sat there forever.
    */
+  /**
+   * The buyer's side of the same orders the merchant sees.
+   *
+   * Both views read one chain, so they cannot disagree: "delivered" here is
+   * literally the presence of the fulfillment mandate the shopkeeper signed,
+   * not a copy of a status that some other table also keeps. That is the whole
+   * reason a buyer can be shown a delivery state at all — nothing marks itself
+   * handed over, so the buyer's screen changes only when the merchant acts.
+   */
+  app.get("/orders", (_req: Request, res: Response) => {
+    const rows = store
+      .listTransactions()
+      .map((t) => store.loadChain(t.transaction_id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c) && Boolean(c?.cart))
+      .map((chain) => {
+        const cart = chain.cart!;
+        const item = catalogItems.find((i) => i.item_id === cart.item_id);
+        const merchant = item ? merchants.get(item.merchant_id) : undefined;
+        return {
+          transaction_id: chain.transaction_id,
+          item_id: cart.item_id,
+          item_name: item?.name ?? cart.item_id,
+          photo_url: item
+            ? photoUrlFor.get(item.item_id) ??
+              (structuring.photos[item.item_id]?.present && structuring.photos[item.item_id]?.filename
+                ? `/media/${structuring.photos[item.item_id]!.filename}`
+                : null)
+            : null,
+          merchant_id: item?.merchant_id ?? null,
+          merchant_name: merchant?.name ?? item?.merchant_id ?? "unknown shop",
+          amount: cart.final_price.value,
+          ordered_at: cart.issued_at,
+          paid: Boolean(chain.payment),
+          paid_at: chain.payment?.issued_at ?? null,
+          payment_id: chain.payment?.razorpay_payment_id ?? null,
+          delivered: Boolean(chain.fulfillment),
+          delivered_at: chain.fulfillment?.confirmed_at ?? null,
+          status: chain.fulfillment ? "delivered" : chain.payment ? "awaiting_handover" : "awaiting_payment",
+        };
+      })
+      .sort((a, b) => ((a.paid_at ?? a.ordered_at) < (b.paid_at ?? b.ordered_at) ? 1 : -1));
+
+    res.json({
+      orders: rows,
+      awaiting_payment: rows.filter((r) => r.status === "awaiting_payment").length,
+      awaiting_handover: rows.filter((r) => r.status === "awaiting_handover").length,
+      delivered: rows.filter((r) => r.status === "delivered").length,
+    });
+  });
+
+  /** One order, for a buyer reconciling a screen against stored state. */
+  app.get("/orders/:id", (req: Request, res: Response) => {
+    const chain = store.loadChain(String(req.params.id));
+    if (!chain?.cart) {
+      res.status(404).json({ error: `no such order: ${req.params.id}` });
+      return;
+    }
+    const item = catalogItems.find((i) => i.item_id === chain.cart!.item_id);
+    res.json({
+      transaction_id: chain.transaction_id,
+      item_id: chain.cart.item_id,
+      item_name: item?.name ?? chain.cart.item_id,
+      merchant_name: item ? merchants.get(item.merchant_id)?.name ?? item.merchant_id : "unknown shop",
+      amount: chain.cart.final_price.value,
+      paid: Boolean(chain.payment),
+      payment_id: chain.payment?.razorpay_payment_id ?? null,
+      delivered: Boolean(chain.fulfillment),
+      delivered_at: chain.fulfillment?.confirmed_at ?? null,
+      status: chain.fulfillment ? "delivered" : chain.payment ? "awaiting_handover" : "awaiting_payment",
+    });
+  });
+
   app.get("/merchants/:id/orders", (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!merchants.has(id)) {

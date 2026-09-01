@@ -19,7 +19,6 @@ const NAV = [
   ["/", "Home"],
   ["/onboard.html", "Set up a store"],
   ["/store.html", "Storefront"],
-  ["/shop.html", "Agent log"],
   ["/merchant.html", "Merchant"],
   ["/market.html", "Live market"],
 ];

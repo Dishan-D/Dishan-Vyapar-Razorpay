@@ -74,6 +74,23 @@
   .st .who { font-family:var(--mono); font-size:10px; color:var(--ink-4); margin-top:3px; }
 
   .empty2 { color:var(--ink-4); font-size:12.5px; }
+  .ord { display:flex; gap:12px; align-items:center; border:1px solid var(--border);
+         border-radius:var(--r-sm); padding:11px 13px; background:var(--surface); margin-bottom:9px; }
+  .ord .th { width:46px; height:46px; border-radius:8px; background:var(--surface-2); flex:none;
+             display:grid; place-items:center; overflow:hidden; }
+  .ord .th img { width:100%; height:100%; object-fit:cover; }
+  .ord .mid { flex:1; min-width:0; }
+  .ord .mid b { font-size:13px; font-weight:600; display:block; letter-spacing:-.01em; }
+  .ord .mid span { font-size:11.5px; color:var(--ink-3); }
+  .ord .amt { font-size:14px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .pill { font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.05em;
+          padding:4px 9px; border-radius:999px; border:1px solid var(--border); color:var(--ink-3); white-space:nowrap; }
+  .pill.wait { background:var(--amber-2); border-color:var(--amber-3); color:var(--amber); }
+  .pill.done { background:var(--green-2); border-color:var(--green-3); color:var(--green); }
+  .pill.due  { background:var(--surface-2); }
+  .ord.justin { animation:pop .8s ease; }
+  @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
+
   .exs { display:flex; gap:6px; flex-wrap:wrap; padding:0 15px 13px; }
   .exs button { font-size:11px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border);
                 border-radius:999px; padding:4px 10px; }
@@ -95,6 +112,13 @@
   <div>
     <p class="hint" id="count" style="margin:0 0 12px">Loading the shelf…</p>
     <div class="grid" id="grid"></div>
+
+    <section style="margin-top:30px">
+      <h2 style="font-size:16px">Your orders</h2>
+      <p class="hint">Status changes when the shop acts, never on its own. "Delivered" appears
+        the moment the shopkeeper confirms handover — you do not have to reload.</p>
+      <div id="orders" style="margin-top:14px"><p class="empty2">No orders yet.</p></div>
+    </section>
   </div>
 
   <aside class="rail">
@@ -290,19 +314,69 @@ function checkout(r) {
     handler: async (response) => {
       const { status, body } = await api(`/transactions/${r.transaction_id}/settle-payment`, {
         method: "POST", body: JSON.stringify(response) });
-      if (status !== 201) {
+
+      // Two things settle a payment now: this handler and the Razorpay webhook.
+      // Whichever loses the race gets 409 "already paid" — which means the money
+      // did arrive, so reporting it as a failure was simply wrong. Never trust
+      // either racer's local view: ask the server what the order actually is.
+      if (status !== 201 && status !== 409) {
         push(stepRow("⚠", "Payment could not be settled", esc((body.reasons ?? [body.error]).join("; "))));
         return;
       }
+      const { body: o } = await api(`/orders/${r.transaction_id}`);
+      if (!o.paid) {
+        push(stepRow("⚠", "Payment did not complete", "the order is still open"));
+        return;
+      }
       beacon(false, "paid");
-      push(stepRow("₹", `Paid — ${esc(body.payment_id)}`, "signed into the mandate chain"));
+      push(stepRow("₹", `Paid — ${esc(o.payment_id ?? "confirmed")}`,
+        status === 409 ? "settled by the Razorpay webhook before this tab could" : "signed into the mandate chain"));
       push(stepRow("■", "Waiting on the shop to confirm handover", "nothing here marks itself delivered"));
+      loadOrders();
     },
     modal: { ondismiss: () => { beacon(false, "you closed checkout"); push(stepRow("■", "Checkout closed", "the order is still open — send the agent again to retry")); } },
   }).open();
 }
 
 // ── boot ────────────────────────────────────────────────────────────────────
+/**
+ * Orders, as the buyer sees them.
+ *
+ * Deliberately not kept in this page's own state: the buyer's "delivered" is
+ * the merchant's signed fulfillment mandate, read back from the server. A local
+ * copy could drift from what the shopkeeper actually confirmed, and a delivery
+ * status that can disagree with the shop is worth nothing.
+ */
+const PILL = {
+  awaiting_payment:  ["due",  "payment due"],
+  awaiting_handover: ["wait", "paid · awaiting handover"],
+  delivered:         ["done", "delivered"],
+};
+let lastDelivered = new Set();
+
+async function loadOrders() {
+  const { body } = await api("/orders");
+  const rows = body.orders ?? [];
+  if (rows.length === 0) { $("orders").innerHTML = `<p class="empty2">No orders yet.</p>`; return; }
+
+  const nowDelivered = new Set(rows.filter((o) => o.delivered).map((o) => o.transaction_id));
+  $("orders").innerHTML = rows.map((o) => {
+    const [cls, label] = PILL[o.status] ?? ["due", o.status];
+    const fresh = o.delivered && lastDelivered.size > 0 && !lastDelivered.has(o.transaction_id);
+    return `<div class="ord ${fresh ? "justin" : ""}">
+      <div class="th">${o.photo_url ? `<img src="${esc(o.photo_url)}" alt="" />` : "📦"}</div>
+      <div class="mid">
+        <b>${esc(o.item_name)}</b>
+        <span>${esc(o.merchant_name)}${o.payment_id ? ` · ${esc(o.payment_id)}` : ""}${
+          o.delivered_at ? ` · handed over ${new Date(o.delivered_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
+      </div>
+      <div class="amt">${rupee(o.amount)}</div>
+      <span class="pill ${cls}">${esc(label)}</span>
+    </div>`;
+  }).join("");
+  lastDelivered = nowDelivered;
+}
+
 const [{ body: cat0 }, { body: mer }] = await Promise.all([api("/catalog"), api("/merchants")]);
 items = Array.isArray(cat0) ? cat0 : cat0.items ?? [];
 for (const m of mer.merchants ?? []) merchants[m.merchant_id] = m;
@@ -326,7 +400,16 @@ for (const b of document.querySelectorAll(".exs button")) {
   b.onclick = () => { $("goal").value = b.dataset.g; run(b.dataset.g); };
 }
 
-config = await boot({ onEvent: onStep });
+await loadOrders();
+
+config = await boot({
+  onEvent: (e) => {
+    onStep(e);
+    // The merchant confirming handover is the only thing that can mark an order
+    // delivered, so that event is exactly what this page listens for.
+    if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") loadOrders();
+  },
+});
 if (config.gateway !== "razorpay") {
   $("rb").innerHTML = `<p class="empty2">No Razorpay keys configured, so runs settle on the simulated rail.</p>`;
 }
