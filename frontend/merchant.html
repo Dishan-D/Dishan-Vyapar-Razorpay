@@ -93,6 +93,45 @@
   .edit button { padding:6px 11px; font-size:12px; }
   @media (max-width:720px){ .edit { grid-template-columns:1fr 1fr; } }
 
+  .modes { display:inline-flex; gap:3px; padding:3px; background:var(--surface-2);
+           border:1px solid var(--border); border-radius:10px; }
+  .modes button { background:none; border:0; border-radius:7px; padding:7px 15px;
+                  font-size:13px; font-weight:550; color:var(--ink-3); }
+  .modes button.on { background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
+
+  .clear { display:flex; align-items:center; gap:14px; padding:22px; border:1px solid var(--green-3);
+           background:var(--green-2); border-radius:var(--r); }
+  .clear .tick { width:36px; height:36px; border-radius:50%; background:var(--green); color:#fff;
+                 display:grid; place-items:center; font-size:17px; flex:none; }
+  .clear h3 { margin:0; font-size:16px; font-weight:600; color:#0d5c3a; }
+  .clear p { margin:3px 0 0; font-size:13px; color:#0d5c3a; opacity:.85; }
+
+  .today { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1px;
+           background:var(--border); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
+  .today > div { background:var(--surface); padding:15px 17px; }
+  .today .k { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-4); font-weight:650; }
+  .today .v { font-size:24px; font-weight:600; letter-spacing:-.03em; margin-top:4px; font-variant-numeric:tabular-nums; }
+
+  .alert { display:grid; grid-template-columns:10px 1fr auto; gap:14px; align-items:center;
+           border:1px solid var(--border); border-radius:var(--r); padding:16px 18px; }
+  .alert + .alert { margin-top:11px; }
+  .alert .bar { width:4px; height:100%; min-height:34px; border-radius:2px; background:var(--ink-4); }
+  .alert.high .bar { background:var(--red); }
+  .alert.attention .bar { background:var(--amber); }
+  .alert.normal .bar { background:var(--green); }
+  .alert .at { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+  .alert .ad { font-size:13px; color:var(--ink-2); margin-top:3px; line-height:1.5; }
+  .alert .an { font-size:12.5px; color:var(--ink-3); margin-top:5px; }
+  .alert .acts { display:flex; gap:8px; flex-wrap:wrap; }
+  .alert .why { font-size:12px; color:var(--ink-3); margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+  .alert .why b { color:var(--ink-2); font-weight:600; }
+
+  .rec { display:inline-flex; align-items:center; gap:6px; font-size:10.5px; font-weight:700;
+         text-transform:uppercase; letter-spacing:.07em; padding:3px 9px; border-radius:6px; }
+  .rec.allow, .rec.monitor { color:var(--green); background:var(--green-2); }
+  .rec.verify { color:var(--amber); background:var(--amber-2); }
+  .rec.hold, .rec.block { color:var(--red); background:var(--red-2); }
+
   .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
   .order + .order { border-top:1px solid var(--border); }
   .order .on2 { font-size:14px; font-weight:550; }
@@ -458,6 +497,99 @@ async function loadOpportunities() {
   }
 }
 
+// ── simple view ─────────────────────────────────────────────────────────────
+//
+// One question answered: does anything need this shopkeeper right now? Nothing
+// on this screen requires knowing what a mandate, a confidence score or a
+// readiness metric is — those live behind the toggle, for when someone wants
+// to know why rather than what.
+const ACTION_WORD = { allow: "Fine", monitor: "Noted", verify: "Check first", hold: "Hold", block: "Do not settle" };
+
+async function loadSimple() {
+  const { body } = await api(`/merchants/${merchantId}/alerts`);
+
+  const today = `<div class="today">
+      <div><div class="k">Collected today</div><div class="v">${rupee(body.today.collected)}</div></div>
+      <div><div class="k">Payments</div><div class="v">${body.today.payments}</div></div>
+      <div><div class="k">Needs you</div><div class="v">${body.needs_attention}</div></div>
+    </div>`;
+
+  if (body.alerts.length === 0) {
+    $("simple").innerHTML = `
+      <div class="clear"><div class="tick">✓</div>
+        <div><h3>You're all clear</h3><p>Nothing needs your attention.</p></div></div>
+      <div style="margin-top:16px">${today}</div>`;
+    return;
+  }
+
+  const cards = body.alerts.map((a) => {
+    if (a.kind === "confirm_product") {
+      return `<div class="alert attention"><span class="bar"></span>
+        <div>
+          <div class="at">${esc(a.title)}</div>
+          <div class="ad">${esc(a.detail)}</div>
+        </div>
+        <div class="acts">
+          ${(a.options ?? []).map((o) => `<button class="btn go" data-cl="${a.clarification_id}" data-v="${o}">${rupee(o)}</button>`).join("")}
+          ${a.clarification_id ? "" : `<a class="btn secondary" href="#" data-deep="1">Open catalog</a>`}
+        </div></div>`;
+    }
+    if (a.kind === "handover") {
+      return `<div class="alert normal"><span class="bar"></span>
+        <div><div class="at">${esc(a.title)}</div><div class="ad">${esc(a.detail)}</div></div>
+        <div class="acts"><button class="btn go" data-hand2="${a.transaction_id}">Confirm handover</button></div></div>`;
+    }
+    // A payment wanting a decision — the recommendation, and what it rests on.
+    return `<div class="alert ${a.urgency}"><span class="bar"></span>
+      <div>
+        <div class="at">${esc(a.title)} <span class="rec ${a.recommended}">${esc(ACTION_WORD[a.recommended] ?? a.recommended)}</span></div>
+        <div class="ad">${esc(a.detail)}</div>
+        <div class="an">${esc(a.next_step ?? "")}</div>
+        <div class="why">${(a.signals ?? []).filter((s) => s.severity !== "info")
+          .map((s) => `<b>${esc(s.label)}</b> — ${esc(s.evidence)}`).join("<br>") || "No unusual signals."}</div>
+      </div>
+      <div class="acts">
+        <button class="btn secondary" data-hand2="${a.transaction_id}">Hand over anyway</button>
+      </div></div>`;
+  }).join("");
+
+  $("simple").innerHTML = `
+    <section style="padding:0;border:0;background:none;box-shadow:none">
+      <h2 style="font-size:16px">${body.needs_attention} thing${body.needs_attention === 1 ? "" : "s"} need${body.needs_attention === 1 ? "s" : ""} your attention</h2>
+      <p class="hint" style="margin-bottom:16px">What happened, why it matters, and what to do.</p>
+      ${cards}
+      <div style="margin-top:18px">${today}</div>
+    </section>`;
+
+  for (const b of document.querySelectorAll("[data-cl]")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      await api(`/clarifications/${b.dataset.cl}/reply`, { method: "POST", body: JSON.stringify({ reply: Number(b.dataset.v) }) });
+      refresh();
+    };
+  }
+  for (const b of document.querySelectorAll("[data-hand2]")) {
+    b.onclick = async () => {
+      b.disabled = true;
+      await api(`/transactions/${b.dataset.hand2}/confirm-fulfillment`, {
+        method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
+      });
+      refresh();
+    };
+  }
+  for (const b of document.querySelectorAll("[data-deep]")) b.onclick = (e) => { e.preventDefault(); setMode("deep"); };
+}
+
+// ── mode ────────────────────────────────────────────────────────────────────
+function setMode(mode) {
+  $("simplewrap").style.display = mode === "simple" ? "grid" : "none";
+  $("deepwrap").style.display = mode === "deep" ? "grid" : "none";
+  for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === mode);
+  try { localStorage.setItem("vyapar.mode", mode); } catch { /* private window */ }
+  window.scrollTo({ top: 0 });
+}
+for (const b of document.querySelectorAll("#modes button")) b.onclick = () => setMode(b.dataset.mode);
+
 // ── growth ──────────────────────────────────────────────────────────────────
 const GROWTH_ROWS = [
   ["machine_readable_fields", "Machine-readable facts", (n) => n],
@@ -670,9 +802,12 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth()]);
 
 await loadMerchants();
+let saved = "simple";
+try { saved = localStorage.getItem("vyapar.mode") ?? "simple"; } catch { /* private window */ }
+setMode(saved);
 await refresh();
 
 await boot({
@@ -683,6 +818,7 @@ await boot({
     seen.push(e); renderStream();
     // The dashboard reflects server state; it never keeps its own copy.
     if (e.type.startsWith("clarification")) refresh();
+    loadSimple();
     if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") { loadScore(); loadHistory(); loadTrust(); loadOrders(); loadRecovery(); }
     if (e.type.startsWith("negotiation") || e.type === "discovery.queried") { loadOpportunities(); loadRecovery(); loadPerf(); loadGrowth(); }
   },

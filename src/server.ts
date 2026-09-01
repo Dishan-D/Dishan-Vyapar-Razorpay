@@ -11,6 +11,8 @@ import { DemandLog } from "./revenue/demand.js";
 import { findOpportunities } from "./revenue/opportunities.js";
 import { buildRecoveryCases, RecoveryLog, RECOVERY_POLICY } from "./revenue/recovery.js";
 import { reconcile } from "./finance/reconcile.js";
+import { assessSignals } from "./risk/signals.js";
+import { recommend, type Intervention } from "./risk/intervention.js";
 import { extractStorefront } from "./structuring/storefront.js";
 import { transcribe, AUDIO_EXTENSIONS, TRANSCRIBE_MODEL } from "./structuring/transcribe.js";
 import { toCatalogItem, evaluateGate } from "./structuring/extraction.js";
@@ -2193,6 +2195,135 @@ export async function createApp(options: AppOptions = {}) {
         no_match: events.filter((e) => e.outcome === "no_match").length,
       },
       note: "Counted from stored state. Nothing here is projected, sampled or estimated.",
+    });
+  });
+
+  /** The trust assessment for one transaction, computed from stored state. */
+  function trustFor(transactionId: string): (Intervention & { transaction_id: string; amount: number }) | null {
+    const chain = store.loadChain(transactionId);
+    if (!chain?.cart) return null;
+
+    const merchantId = chain.cart.merchant_id;
+    const history = store
+      .listTransactionIdsForMerchant(merchantId)
+      .filter((id) => id !== transactionId)
+      .map((id) => store.loadChain(id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    const item = catalogItems.find((i) => i.item_id === chain.cart!.item_id);
+    const signals = assessSignals({
+      chain,
+      item,
+      policy: policies.get(chain.cart.item_id),
+      history,
+      now: new Date(),
+    });
+
+    const amount = chain.cart.final_price.value;
+    return { ...recommend(signals, amount), transaction_id: transactionId, amount };
+  }
+
+  /**
+   * The buyer-facing trust check, and the merchant-facing one — the same call.
+   *
+   * Two screens showing different verdicts about the same payment would be
+   * worse than showing none, so there is only one assessment and both read it.
+   */
+  app.get("/transactions/:id/trust", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const trust = trustFor(id);
+    if (!trust) {
+      res.status(404).json({ error: `no such transaction, or it has no agreed cart: ${id}` });
+      return;
+    }
+    res.json(trust);
+  });
+
+  /**
+   * Everything wanting a shopkeeper's attention, in one list, worst first.
+   *
+   * Deliberately mixes kinds — a payment to review, a product to confirm, an
+   * order to hand over — because a merchant does not think in subsystems and
+   * should not have to visit three screens to find out whether anything needs
+   * them.
+   */
+  app.get("/merchants/:id/alerts", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+
+    const alerts: Array<Record<string, unknown>> = [];
+
+    // Payments that want a decision.
+    for (const txnId of store.listTransactionIdsForMerchant(id)) {
+      const chain = store.loadChain(txnId);
+      if (!chain?.payment || chain.fulfillment) continue;
+      const trust = trustFor(txnId);
+      if (!trust) continue;
+
+      if (trust.action === "allow" || trust.action === "monitor") {
+        alerts.push({
+          kind: "handover",
+          urgency: "normal",
+          transaction_id: txnId,
+          title: "Ready to hand over",
+          detail: `${catalogItems.find((i) => i.item_id === chain.cart?.item_id)?.name ?? chain.cart?.item_id} — ₹${trust.amount}`,
+          action: "Confirm handover",
+          action_endpoint: `/transactions/${txnId}/confirm-fulfillment`,
+        });
+      } else {
+        alerts.push({
+          kind: "payment_review",
+          urgency: trust.action === "block" ? "high" : "attention",
+          transaction_id: txnId,
+          title: trust.headline,
+          detail: trust.rationale,
+          next_step: trust.next_step,
+          recommended: trust.action,
+          signals: trust.signals,
+          amount: trust.amount,
+        });
+      }
+    }
+
+    // Products an agent cannot sell.
+    for (const item of catalogItems.filter((i) => i.merchant_id === id && i.needs_merchant_confirmation)) {
+      const question = store.openClarificationFor(item.item_id);
+      alerts.push({
+        kind: "confirm_product",
+        urgency: "attention",
+        item_id: item.item_id,
+        title: "Product information needs confirming",
+        detail: question?.question ?? `${item.name} cannot be sold until its details are confirmed.`,
+        options: question?.options ?? [],
+        clarification_id: question?.clarification_id ?? null,
+      });
+    }
+
+    const rank: Record<string, number> = { high: 0, attention: 1, normal: 2 };
+    const urgency = (a: Record<string, unknown>): number => rank[String(a.urgency)] ?? 9;
+    alerts.sort((a, b) => urgency(a) - urgency(b));
+
+    // Today's takings, counted from confirmed sales only.
+    const since = new Date(); since.setHours(0, 0, 0, 0);
+    let collectedToday = 0;
+    let paymentsToday = 0;
+    for (const txnId of store.listTransactionIdsForMerchant(id)) {
+      const chain = store.loadChain(txnId);
+      if (!chain?.payment) continue;
+      if (Date.parse(chain.payment.issued_at) < since.getTime()) continue;
+      paymentsToday++;
+      collectedToday += chain.payment.amount;
+    }
+
+    res.json({
+      merchant_id: id,
+      all_clear: alerts.length === 0,
+      needs_attention: alerts.filter((a) => a.urgency !== "normal").length,
+      today: { collected: collectedToday, payments: paymentsToday },
+      alerts,
     });
   });
 
