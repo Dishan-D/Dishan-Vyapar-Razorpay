@@ -9,6 +9,12 @@ history is the source, not memory.
 
 ---
 
+> **The complete, consolidated answer to "what issues did you face and how did
+> you solve them" now lives in [`CHALLENGES.md`](CHALLENGES.md).** It covers
+> everything in Part 2 below plus every obstacle hit since, organised for
+> reading. Part 1 of this file — what was actually built — remains the reference
+> for the system itself.
+
 # Part 1 — What was built
 
 **39 commits · ~12,200 lines · 59 source files · 39 HTTP endpoints · 11 runnable proof scripts**
