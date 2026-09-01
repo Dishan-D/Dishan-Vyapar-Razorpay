@@ -41,36 +41,36 @@ function product(mid, id, name, category, price, stock, opts = {}) {
 
 // ── 1 · Hazel & Crumb — the bakery every scenario runs through ──────────────
 merchant({
-  merchant_id: "mer_hazel", name: "Hazel & Crumb", city: "Bengaluru",
-  whatsapp: "+919000000101", upi_vpa: "hazelcrumb@okicici", since: "2021",
+  merchant_id: "mer_hazel", name: "Sri Balaji Bakery", city: "Bengaluru",
+  whatsapp: "+919000000101", upi_vpa: "sribalajibakery@okicici", since: "2021",
   qr_note: "Framed QR beside the till", delivers_within_days: 0,
   policy: { negotiation: true, max_discount_pct: 8, cross_sell: true, upsell: true, promotions: true, auto_add: false },
   products: [{ item_id: "itm_hazel_001", sample_id: "hazel_choc", voice_note: "belgian chocolate cake 450 rupees, 500 gram, five in stock, birthday orders ke liye best" }],
 });
-product("mer_hazel", "itm_hazel_001", "Belgian Chocolate Cake (500g)", "food.snack", 450, 5,
+product("mer_hazel", "itm_hazel_001", "Chocolate Cake 500g", "food.snack", 450, 5,
   { floor: 420, attributes: { flavour: "chocolate", weight: "500g", serves: "4-6" },
     raw: "belgian chocolate cake 450 rupees, 500 gram, five in stock",
     extra: { tags: ["cake","birthday","chocolate","dessert"], cost_price: 300,
              complements: ["itm_hazel_008","itm_hazel_009"], substitutes: ["itm_hazel_002","itm_hazel_003"] } });
-product("mer_hazel", "itm_hazel_002", "Belgian Chocolate Cake (1kg)", "food.snack", 750, 4,
+product("mer_hazel", "itm_hazel_002", "Chocolate Cake 1kg", "food.snack", 750, 4,
   { floor: 700, attributes: { flavour: "chocolate", weight: "1kg", serves: "8-10" },
     extra: { tags: ["cake","birthday","chocolate","premium"], cost_price: 480,
              complements: ["itm_hazel_008","itm_hazel_009"] } });
-product("mer_hazel", "itm_hazel_003", "Classic Red Velvet Cake (1kg)", "food.snack", 620, 6,
+product("mer_hazel", "itm_hazel_003", "Red Velvet Cake 1kg", "food.snack", 620, 6,
   { floor: 580, attributes: { flavour: "red velvet", weight: "1kg", serves: "8-10" },
     extra: { tags: ["cake","birthday","premium","red velvet"], cost_price: 370,
              complements: ["itm_hazel_008","itm_hazel_009"] } });
-product("mer_hazel", "itm_hazel_004", "Celebration Cake (1.5kg)", "food.snack", 760, 3,
+product("mer_hazel", "itm_hazel_004", "Celebration Cake 1.5kg", "food.snack", 760, 3,
   { floor: 720, attributes: { weight: "1.5kg", serves: "12-15" },
     extra: { tags: ["cake","birthday","celebration"], cost_price: 470 } });
-product("mer_hazel", "itm_hazel_005", "Butter Croissant", "food.snack", 90, 18,
+product("mer_hazel", "itm_hazel_005", "Butter Puff", "food.snack", 90, 18,
   { floor: 85, extra: { tags: ["breakfast","pastry","tea snack"], cost_price: 42 } });
-product("mer_hazel", "itm_hazel_006", "Chocolate Croissant", "food.snack", 110, 14,
+product("mer_hazel", "itm_hazel_006", "Chocolate Puff", "food.snack", 110, 14,
   { floor: 100, extra: { tags: ["breakfast","pastry","chocolate"], cost_price: 55 } });
 // Scenario D — deliberately overstocked and slow.
 product("mer_hazel", "itm_hazel_007", "Blueberry Muffin", "food.snack", 90, 24,
   { floor: 72, extra: { tags: ["breakfast","tea snack","muffin"], cost_price: 38, slow_moving: true } });
-product("mer_hazel", "itm_hazel_008", "Mini Cupcake Box (6)", "food.snack", 180, 12,
+product("mer_hazel", "itm_hazel_008", "Cupcake Box (6 pcs)", "food.snack", 180, 12,
   { floor: 170, extra: { tags: ["birthday","cupcake","party","dessert"], cost_price: 96 } });
 product("mer_hazel", "itm_hazel_009", "Birthday Candle Set", "general.other", 30, 40,
   { floor: 30, extra: { tags: ["birthday","party","candles"], cost_price: 11 } });
@@ -79,101 +79,101 @@ product("mer_hazel", "itm_hazel_010", "Cinnamon Roll", "food.snack", 120, 16,
 
 // ── 2 · Sweet Atelier — the second bakery, so cakes can be compared ─────────
 merchant({
-  merchant_id: "mer_atelier", name: "Sweet Atelier", city: "Bengaluru",
-  whatsapp: "+919000000102", upi_vpa: "sweetatelier@okaxis", since: "2020",
+  merchant_id: "mer_atelier", name: "New Krishna Sweets", city: "Bengaluru",
+  whatsapp: "+919000000102", upi_vpa: "newkrishnasweets@okaxis", since: "2020",
   qr_note: "QR sticker on the display fridge", delivers_within_days: 1,
   policy: { negotiation: true, max_discount_pct: 7, cross_sell: true, upsell: true, promotions: false, auto_add: false },
   products: [{ item_id: "itm_atelier_001", sample_id: "atelier_choc", voice_note: "chocolate cake 490, eight pieces stock mein hai" }],
 });
-product("mer_atelier", "itm_atelier_001", "Dark Chocolate Cake (500g)", "food.snack", 490, 8,
+product("mer_atelier", "itm_atelier_001", "Chocolate Truffle Cake 500g", "food.snack", 490, 8,
   { floor: 460, attributes: { flavour: "chocolate", weight: "500g", serves: "4-6" },
     raw: "chocolate cake 490, eight pieces stock mein hai",
     extra: { tags: ["cake","birthday","chocolate"], cost_price: 320, complements: ["itm_atelier_003"] } });
-product("mer_atelier", "itm_atelier_002", "Hazelnut Praline Cake (1kg)", "food.snack", 720, 4,
+product("mer_atelier", "itm_atelier_002", "Butterscotch Cake 1kg", "food.snack", 720, 4,
   { floor: 680, attributes: { weight: "1kg", serves: "8-10" },
     extra: { tags: ["cake","premium","birthday"], cost_price: 450 } });
-product("mer_atelier", "itm_atelier_003", "Macaron Box (9)", "food.snack", 320, 9,
+product("mer_atelier", "itm_atelier_003", "Assorted Sweets Box", "food.snack", 320, 9,
   { floor: 300, extra: { tags: ["dessert","gift","party"], cost_price: 175 } });
 
 // ── 3 · The Oven Room — Scenario E: its floor sits above a ₹500 ceiling ─────
 merchant({
-  merchant_id: "mer_ovenroom", name: "The Oven Room", city: "Bengaluru",
-  whatsapp: "+919000000103", upi_vpa: "theovenroom@okhdfcbank", since: "2022",
+  merchant_id: "mer_ovenroom", name: "Anand Bake House", city: "Bengaluru",
+  whatsapp: "+919000000103", upi_vpa: "anandbakehouse@okhdfcbank", since: "2022",
   qr_note: "QR card at the counter", delivers_within_days: 1,
   policy: { negotiation: false, max_discount_pct: 0, cross_sell: true, upsell: false, promotions: false, auto_add: false },
   products: [{ item_id: "itm_oven_001", sample_id: "oven_choc", voice_note: "single origin chocolate cake 620, price fixed hai, teen stock" }],
 });
-product("mer_ovenroom", "itm_oven_001", "Single-Origin Chocolate Cake (500g)", "food.snack", 620, 3,
+product("mer_ovenroom", "itm_oven_001", "Premium Chocolate Cake 500g", "food.snack", 620, 3,
   { floor: 590, attributes: { flavour: "chocolate", weight: "500g", serves: "4-6" },
     raw: "single origin chocolate cake 620, price fixed hai, teen stock",
     extra: { tags: ["cake","premium","chocolate"], cost_price: 410 } });
-product("mer_ovenroom", "itm_oven_002", "Sourdough Loaf", "food.snack", 240, 7,
+product("mer_ovenroom", "itm_oven_002", "Fresh Bread Loaf", "food.snack", 240, 7,
   { floor: 230, extra: { tags: ["bread","breakfast"], cost_price: 120 } });
 
 // ── 4 · Northstar Coffee Co. ───────────────────────────────────────────────
 merchant({
-  merchant_id: "mer_northstar", name: "Northstar Coffee Co.", city: "Bengaluru",
-  whatsapp: "+919000000104", upi_vpa: "northstarcoffee@okicici", since: "2021",
+  merchant_id: "mer_northstar", name: "Ganesh Tea & Coffee", city: "Bengaluru",
+  whatsapp: "+919000000104", upi_vpa: "ganeshtea@okicici", since: "2021",
   qr_note: "QR on the pickup counter", delivers_within_days: 0,
   policy: { negotiation: true, max_discount_pct: 6, cross_sell: true, upsell: true, promotions: true, auto_add: false },
   products: [{ item_id: "itm_north_001", sample_id: "north_coldbrew", voice_note: "signature cold brew 180 ka 250ml, 320 ka 500ml" }],
 });
-product("mer_northstar", "itm_north_001", "Signature Cold Brew (250ml)", "food.snack", 180, 22,
+product("mer_northstar", "itm_north_001", "Cold Coffee 250ml", "food.snack", 180, 22,
   { floor: 170, attributes: { size: "250ml" }, raw: "signature cold brew 180 ka 250ml",
     extra: { tags: ["coffee","cold brew","drink"], cost_price: 74, complements: ["itm_north_005","itm_north_006"], substitutes: ["itm_north_002"] } });
-product("mer_northstar", "itm_north_002", "Signature Cold Brew (500ml)", "food.snack", 320, 15,
+product("mer_northstar", "itm_north_002", "Cold Coffee 500ml", "food.snack", 320, 15,
   { floor: 300, attributes: { size: "500ml" }, extra: { tags: ["coffee","cold brew","drink","premium"], cost_price: 128 } });
-product("mer_northstar", "itm_north_003", "Classic Latte", "food.snack", 190, 30,
+product("mer_northstar", "itm_north_003", "Filter Coffee", "food.snack", 190, 30,
   { floor: 180, extra: { tags: ["coffee","latte","drink"], cost_price: 78, complements: ["itm_north_005"] } });
-product("mer_northstar", "itm_north_004", "Spanish Latte", "food.snack", 240, 20,
+product("mer_northstar", "itm_north_004", "Special Filter Coffee", "food.snack", 240, 20,
   { floor: 225, extra: { tags: ["coffee","latte","premium","drink"], cost_price: 96 } });
-product("mer_northstar", "itm_north_005", "Almond Croissant", "food.snack", 140, 12,
+product("mer_northstar", "itm_north_005", "Butter Bun", "food.snack", 140, 12,
   { floor: 130, extra: { tags: ["breakfast","pastry","tea snack"], cost_price: 64 } });
 product("mer_northstar", "itm_north_006", "Chocolate Cookie", "food.snack", 80, 26,
   { floor: 74, extra: { tags: ["dessert","tea snack","cookie"], cost_price: 30 } });
-product("mer_northstar", "itm_north_007", "Coffee Bean Pack (250g)", "food.snack", 560, 9,
+product("mer_northstar", "itm_north_007", "Coffee Powder 250g", "food.snack", 560, 9,
   { floor: 520, extra: { tags: ["coffee","beans","gift"], cost_price: 300 } });
 
 // ── 5 · Urban Loom ─────────────────────────────────────────────────────────
 merchant({
-  merchant_id: "mer_urbanloom", name: "Urban Loom", city: "Bengaluru",
-  whatsapp: "+919000000105", upi_vpa: "urbanloom@okaxis", since: "2019",
+  merchant_id: "mer_urbanloom", name: "Lakshmi Cloth Store", city: "Bengaluru",
+  whatsapp: "+919000000105", upi_vpa: "lakshmicloth@okaxis", since: "2019",
   qr_note: "QR at the billing desk", delivers_within_days: 2,
   policy: { negotiation: true, max_discount_pct: 10, cross_sell: true, upsell: true, promotions: true, auto_add: false },
   products: [{ item_id: "itm_loom_001", sample_id: "loom_shirt", voice_note: "essential cotton shirt 1299, sab size available" }],
 });
-product("mer_urbanloom", "itm_loom_001", "Essential Cotton Shirt", "apparel.kurta", 1299, 14,
+product("mer_urbanloom", "itm_loom_001", "Cotton Shirt", "apparel.kurta", 1299, 14,
   { floor: 1180, attributes: { material: "cotton", size: "M" }, raw: "essential cotton shirt 1299",
     extra: { tags: ["shirt","cotton","formal"], cost_price: 720, complements: ["itm_loom_004","itm_loom_005"], substitutes: ["itm_loom_002","itm_loom_003"] } });
-product("mer_urbanloom", "itm_loom_002", "Oxford Shirt", "apparel.kurta", 1599, 9,
+product("mer_urbanloom", "itm_loom_002", "Formal Shirt", "apparel.kurta", 1599, 9,
   { floor: 1450, attributes: { material: "cotton", size: "M" }, extra: { tags: ["shirt","oxford","formal","premium"], cost_price: 880 } });
-product("mer_urbanloom", "itm_loom_003", "Premium Linen Shirt", "apparel.kurta", 1999, 6,
+product("mer_urbanloom", "itm_loom_003", "Linen Shirt", "apparel.kurta", 1999, 6,
   { floor: 1820, attributes: { material: "linen", size: "M" }, extra: { tags: ["shirt","linen","premium"], cost_price: 1050 } });
-product("mer_urbanloom", "itm_loom_004", "Everyday Chinos", "apparel.other", 1499, 11,
+product("mer_urbanloom", "itm_loom_004", "Cotton Trousers", "apparel.other", 1499, 11,
   { floor: 1360, extra: { tags: ["chinos","trousers"], cost_price: 810 } });
 product("mer_urbanloom", "itm_loom_005", "Leather Belt", "apparel.other", 899, 18,
   { floor: 820, extra: { tags: ["belt","accessory","leather"], cost_price: 400 } });
-product("mer_urbanloom", "itm_loom_006", "Canvas Tote", "apparel.other", 699, 21,
+product("mer_urbanloom", "itm_loom_006", "Cloth Bag", "apparel.other", 699, 21,
   { floor: 640, extra: { tags: ["tote","bag","accessory"], cost_price: 280, slow_moving: true } });
 
 // ── 6 · Studio Scent ───────────────────────────────────────────────────────
 merchant({
-  merchant_id: "mer_studioscent", name: "Studio Scent", city: "Bengaluru",
-  whatsapp: "+919000000106", upi_vpa: "studioscent@okicici", since: "2022",
+  merchant_id: "mer_studioscent", name: "Deepa Home Needs", city: "Bengaluru",
+  whatsapp: "+919000000106", upi_vpa: "deepahomeneeds@okicici", since: "2022",
   qr_note: "QR on the shelf edge", delivers_within_days: 2,
   policy: { negotiation: true, max_discount_pct: 9, cross_sell: true, upsell: true, promotions: true, auto_add: false },
   products: [{ item_id: "itm_scent_001", sample_id: "scent_cedar", voice_note: "cedarwood candle 890, gift box ke saath bhi de sakte hain" }],
 });
-product("mer_studioscent", "itm_scent_001", "Cedarwood Candle", "home.other", 890, 16,
+product("mer_studioscent", "itm_scent_001", "Scented Candle - Sandalwood", "home.other", 890, 16,
   { floor: 820, attributes: { scent: "cedarwood" }, raw: "cedarwood candle 890",
     extra: { tags: ["candle","gift","home"], cost_price: 400, complements: ["itm_scent_005","itm_scent_006"], substitutes: ["itm_scent_002","itm_scent_003"] } });
-product("mer_studioscent", "itm_scent_002", "Vanilla Candle", "home.other", 790, 20,
+product("mer_studioscent", "itm_scent_002", "Scented Candle - Rose", "home.other", 790, 20,
   { floor: 730, attributes: { scent: "vanilla" }, extra: { tags: ["candle","gift","home"], cost_price: 350 } });
-product("mer_studioscent", "itm_scent_003", "Sandalwood Candle", "home.other", 990, 12,
+product("mer_studioscent", "itm_scent_003", "Scented Candle - Jasmine", "home.other", 990, 12,
   { floor: 910, attributes: { scent: "sandalwood" }, extra: { tags: ["candle","gift","premium"], cost_price: 440 } });
-product("mer_studioscent", "itm_scent_004", "Reed Diffuser", "home.other", 1250, 8,
+product("mer_studioscent", "itm_scent_004", "Room Freshener Set", "home.other", 1250, 8,
   { floor: 1150, extra: { tags: ["diffuser","home","gift","premium"], cost_price: 610 } });
-product("mer_studioscent", "itm_scent_005", "Ceramic Candle Holder", "home.other", 450, 22,
+product("mer_studioscent", "itm_scent_005", "Brass Diya Set", "home.other", 450, 22,
   { floor: 410, extra: { tags: ["holder","home","accessory"], cost_price: 190, slow_moving: true } });
 product("mer_studioscent", "itm_scent_006", "Gift Box", "general.other", 250, 30,
   { floor: 240, extra: { tags: ["gift","packaging","party"], cost_price: 95 } });
@@ -187,7 +187,7 @@ product("mer_studioscent", "itm_scent_006", "Gift Box", "general.other", 250, 30
 // caught — nothing to test either.
 items.push({
   item_id: "itm_hazel_011", merchant_id: "mer_hazel",
-  name: "Seasonal Fruit Tart", category: "food.snack",
+  name: "Fresh Fruit Pastry", category: "food.snack",
   attributes: { flavour: "seasonal fruit" },
   price: { value: 0, currency: "INR", confidence: 0.1 },
   stock: { quantity: 6, confidence: 0.9 },
@@ -198,7 +198,7 @@ items.push({
 });
 items.push({
   item_id: "itm_scent_007", merchant_id: "mer_studioscent",
-  name: "Limited Edition Oud Candle", category: "home.other",
+  name: "Festive Gift Candle", category: "home.other",
   attributes: { scent: "oud" },
   price: { value: 1400, currency: "INR", confidence: 0.9 },
   stock: { quantity: 0, confidence: 0.15 },

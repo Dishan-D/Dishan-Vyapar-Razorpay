@@ -1445,7 +1445,17 @@ export async function createApp(options: AppOptions = {}) {
     upload.array("photos", 12),
     (req: Request, res: Response) => {
       const id = String(req.params.id);
-      const merchant = onboarding.getMerchant(id);
+      /**
+       * Any shop this server knows, not only one created in this session.
+       *
+       * This route was written for the onboarding wizard and checked the
+       * onboarding table alone, which meant a merchant who had finished
+       * setting up — or who shipped with the demo — could edit and delete
+       * products but never add one. A shop that cannot take on a new line is
+       * not a shop, and stocking something new is the most ordinary thing a
+       * kirana does.
+       */
+      const merchant = onboarding.getMerchant(id) ?? merchants.get(id);
       if (!merchant) {
         res.status(404).json({ error: `no such shop: ${id}` });
         return;

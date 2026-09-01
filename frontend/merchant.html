@@ -90,6 +90,14 @@
   .edit { display:grid; gap:14px; align-items:center; padding:13px 0;
           grid-template-columns:52px minmax(220px,1fr) 110px 96px 96px auto; }
   .edit + .edit { border-top:1px solid var(--border); }
+  .addrow { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
+  .afgrid { display:grid; gap:14px; align-items:center;
+            grid-template-columns:52px minmax(220px,1fr) 110px 96px auto; }
+  .afgrid .pic { font-size:9.5px; }
+  @media (max-width:820px){ .afgrid { grid-template-columns:52px minmax(0,1fr); }
+                            .afgrid .acts { grid-column:1 / -1; display:flex; gap:8px; }
+                            .afgrid .acts .btn { flex:1; } }
+
   .edithead { display:grid; gap:14px; align-items:end; padding:14px 0 8px;
               grid-template-columns:52px minmax(220px,1fr) 110px 96px 96px auto;
               border-bottom:1px solid var(--border); }
@@ -456,6 +464,31 @@
         <span></span><span>Product</span><span>Price ₹</span><span>In stock</span><span>Agent status</span><span></span>
       </div>
       <div id="items" style="margin-top:4px"><p class="empty">Loading…</p></div>
+
+      <!-- Stocking something new is the most ordinary thing a shop does, and
+           until now the only way to do it was to set the shop up again. -->
+      <div class="addrow" id="addrow">
+        <button class="btn secondary" id="addopen">+ Add a product</button>
+        <div id="addform" hidden>
+          <div class="afgrid">
+            <label class="pic" title="Photo (optional)">
+              <span id="addpicwrap">add<br>photo</span>
+              <input type="file" accept="image/*" id="addpic" hidden />
+            </label>
+            <input id="addname" placeholder="What is it? e.g. Rusk Packet" />
+            <input id="addprice" type="number" min="0" placeholder="₹ price" />
+            <input id="addstock" type="number" min="0" placeholder="in stock" />
+            <span class="acts">
+              <button class="btn go" id="addsave">Add</button>
+              <button class="btn secondary" id="addcancel">Cancel</button>
+            </span>
+          </div>
+          <p class="hint" style="margin-top:9px">What you type is what an AI buyer sees — nothing is
+            guessed, and nothing is held for confirmation. Leave the price blank and it stays off sale
+            until you set one.</p>
+          <div id="addnote"></div>
+        </div>
+      </div>
     </section>
 
     <section>
@@ -989,6 +1022,57 @@ function say(text) {
   window.speechSynthesis.speak(u);
   speak = false;
 }
+
+// ── adding a product ────────────────────────────────────────────────────────
+//
+// Goes through the same endpoint the onboarding wizard uses, so a product typed
+// here is indistinguishable from one typed during setup: merchant-stated,
+// confidence 1, no clarification queued. The merchant said it; nothing needs
+// to second-guess them.
+let addPhoto = null;
+
+$("addopen").onclick = () => { $("addform").hidden = false; $("addopen").hidden = true; $("addname").focus(); };
+$("addcancel").onclick = () => resetAdd();
+
+function resetAdd() {
+  $("addform").hidden = true;
+  $("addopen").hidden = false;
+  $("addname").value = ""; $("addprice").value = ""; $("addstock").value = "";
+  $("addnote").innerHTML = "";
+  addPhoto = null;
+  $("addpicwrap").innerHTML = "add<br>photo";
+}
+
+$("addpic").onchange = () => {
+  const f = $("addpic").files?.[0];
+  if (!f) return;
+  addPhoto = f;
+  $("addpicwrap").innerHTML = `<img src="${URL.createObjectURL(f)}" alt="" style="width:100%;height:100%;object-fit:cover" />`;
+};
+
+$("addsave").onclick = async () => {
+  const name = $("addname").value.trim();
+  if (!name) { $("addnote").innerHTML = note("bad", "Give it a name first."); return; }
+
+  const form = new FormData();
+  const row = { name, price: Number($("addprice").value) || 0, stock: Number($("addstock").value) || 0 };
+  if (addPhoto) { form.append("photos", addPhoto); row.photo_index = 0; }
+  form.append("items", JSON.stringify([row]));
+
+  $("addsave").disabled = true;
+  const res = await fetch(`/onboarding/merchants/${merchantId}/items`, { method: "POST", body: form });
+  $("addsave").disabled = false;
+  if (!res.ok) {
+    $("addnote").innerHTML = note("bad", esc((await res.json()).error ?? "could not add that"));
+    return;
+  }
+  const body = await res.json();
+  resetAdd();
+  $("items").insertAdjacentHTML("afterend",
+    note("ok", `Added ${esc(body.items[0]?.name ?? name)}.` +
+      (body.items[0]?.sellable ? " An AI buyer can see it now." : " It stays off sale until you set a price.")));
+  refresh();
+};
 
 // ── which screen ────────────────────────────────────────────────────────────
 //
