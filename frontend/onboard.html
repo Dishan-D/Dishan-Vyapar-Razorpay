@@ -348,7 +348,11 @@ $("go2").onclick = async () => {
     // marked off as it returns rather than pretending to tick along on a timer.
     const res = await fetch(`/onboarding/merchants/${merchantId}/structure`, { method: "POST" });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? "structuring failed");
+    if (!res.ok) {
+      const e = new Error(body.error ?? "structuring failed");
+      e.kind = body.kind;
+      throw e;
+    }
     while (stage < STAGES.length) advance();
 
     $("h3").textContent = "Your AI storefront is ready.";
@@ -357,11 +361,18 @@ $("go2").onclick = async () => {
     $("nav3").style.display = "";
     $("back2").onclick = () => showStep(2);
   } catch (err) {
-    $("h3").textContent = "That didn't work";
+    // A spent model quota is not the merchant's fault and not their photos'
+    // fault, so it must not send them back to re-shoot anything. The uploads
+    // are already stored server-side; the only useful action is to try again.
+    const quota = err.kind === "daily_quota" || err.kind === "rate_limit";
+    $("h3").textContent = quota ? "Not right now — try again shortly" : "That didn't work";
     $("l3").textContent = "";
-    $("result").innerHTML = `<div class="note bad">${esc(err.message)}</div>`;
+    $("result").innerHTML =
+      `<div class="note ${quota ? "warn" : "bad"}">${esc(err.message)}</div>` +
+      (quota ? `<button class="btn primary" id="retry" style="margin-top:12px">Try again</button>` : "");
+    if (quota) $("retry").onclick = () => $("go2").onclick();
     $("nav3").style.display = "";
-    $("back2").textContent = "← Try different inputs";
+    $("back2").textContent = quota ? "← Back" : "← Try different inputs";
     $("back2").onclick = () => showStep(2);
   }
 };

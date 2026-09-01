@@ -1494,6 +1494,31 @@ export async function createApp(options: AppOptions = {}) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[onboarding ${id}] structuring failed:`, message);
+
+      // A spent token quota is not a broken app, and saying "could not read the
+      // shop" for it sends the merchant to re-take their photos. Name it, and
+      // say when it comes back — the photos are already stored, so retrying
+      // later costs them nothing.
+      // The governor's own error says only "would need to wait 1890s" — the TPD
+      // wording lives on the upstream 429 it already swallowed. A wait measured
+      // in tens of minutes is the daily ceiling; a per-minute one resets inside
+      // sixty seconds and never asks for more.
+      const waited = Number(/wait (\d+(?:\.\d+)?)s/i.exec(message)?.[1] ?? 0);
+      const daily = /tokens per day|TPD/i.test(message) || waited > 120;
+      const rate = daily || /rate.?limit|budget exhausted|429/i.test(message);
+      if (rate) {
+        const when =
+          /try again in ([0-9hms.]+)/i.exec(message)?.[1] ??
+          (waited > 0 ? `${Math.ceil(waited / 60)} min` : undefined);
+        res.status(429).json({
+          error: daily
+            ? `The vision model's daily token allowance is used up${when ? `, back in ${when}` : ""}. Your photos are saved — press this again once it resets.`
+            : `The vision model is rate limited right now${when ? `, back in ${when}` : ""}. Your photos are saved — press this again in a moment.`,
+          retry_after: when ?? null,
+          kind: daily ? "daily_quota" : "rate_limit",
+        });
+        return;
+      }
       res.status(502).json({ error: `could not read the shop: ${message}` });
     }
   });
