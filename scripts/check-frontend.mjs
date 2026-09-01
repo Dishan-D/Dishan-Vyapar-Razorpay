@@ -46,7 +46,9 @@ for (const page of pages) {
   // Every id the module reaches for must exist in the markup.
   const html = src.slice(0, src.indexOf('<script type="module">'));
   const ids = new Set([...html.matchAll(/id="([\w-]+)"/g)].map((x) => x[1]));
-  const runtime = new Set(["twinapply", "twincancel", "retry", "pay", "paynote", "clearfilter"]);
+  // Created by a render and used immediately after, so they are never in the
+  // static markup. Each is read through a null-guard at its use site.
+  const runtime = new Set(["twinapply", "twincancel", "retry", "pay", "paynote", "clearfilter", "cbgo"]);
   for (const [, id] of js.matchAll(/\$\("([\w-]+)"\)/g)) {
     if (!ids.has(id) && !runtime.has(id)) {
       console.log(`  ✗ ${page}: $("${id}") has no element in the markup`);

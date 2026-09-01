@@ -1,3 +1,9 @@
+$("buycart").onclick = async () => {
+  $("buycart").disabled = true;
+  await checkoutCart(cart);
+  $("buycart").disabled = false;
+};
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -100,6 +106,36 @@
   .autopay input { width:auto; margin-top:2px; flex:none; }
   .autopay b { display:block; font-size:12.5px; font-weight:600; color:var(--ink); }
   .autopay em { display:block; font-style:normal; font-size:11px; color:var(--ink-3); line-height:1.45; margin-top:2px; }
+
+  /* A product inside the conversation. Small, but a real card: photo, price,
+     why it is here, and a control that does something. */
+  .mini { display:flex; gap:10px; align-items:center; border:1px solid var(--border);
+          border-radius:var(--r-sm); padding:9px 10px; margin:7px 0; background:var(--surface); }
+  .mini .mth { width:46px; height:46px; border-radius:8px; background:var(--surface-2); flex:none;
+               display:grid; place-items:center; overflow:hidden; font-size:19px; }
+  .mini .mth img { width:100%; height:100%; object-fit:cover; }
+  .mini .mb { flex:1; min-width:0; }
+  .mini .mn { font-size:12.5px; font-weight:600; letter-spacing:-.01em; line-height:1.3; }
+  .mini .ms { font-size:11px; color:var(--ink-3); margin-top:1px; }
+  .mini .mw { font-size:11px; color:var(--green); margin-top:4px; line-height:1.5; }
+  .mini .mp { font-size:13.5px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:3px; }
+
+  .subhead { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4);
+             font-weight:700; margin:13px 0 4px; }
+
+  .cmp2 { border:1px solid var(--border); border-radius:var(--r-sm); padding:11px; margin:9px 0; background:var(--surface); }
+  .cmp2 table { width:100%; border-collapse:collapse; font-size:11.5px; }
+  .cmp2 th { text-align:left; font-size:10.5px; font-weight:650; padding:0 6px 7px; letter-spacing:-.01em; }
+  .cmp2 td { padding:6px; border-top:1px solid var(--border); font-variant-numeric:tabular-nums; }
+  .cmp2 td.lbl { color:var(--ink-3); text-transform:capitalize; }
+  .cmpact { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+
+  .cartbox { border:1px solid var(--border); border-radius:var(--r-sm); padding:12px; margin:9px 0; background:var(--surface-2); }
+  .cbl { display:flex; justify-content:space-between; gap:10px; font-size:12.5px; padding:4px 0; }
+  .cbl b, .cbt b { font-variant-numeric:tabular-nums; }
+  .cbt { display:flex; justify-content:space-between; gap:10px; font-size:13.5px; font-weight:650;
+         border-top:1px solid var(--border); margin-top:7px; padding:8px 0 10px; }
+  .cline .lt { font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
   .paybox { border:1px solid var(--blue-3); background:var(--blue-2); border-radius:var(--r-sm);
             padding:14px; margin:11px 0; }
@@ -242,6 +278,22 @@ import { boot, api, rupee, esc } from "/ui.js";
 const $ = (id) => document.getElementById(id);
 
 let config = {}, items = [], merchants = {}, cat = "all", runId = null;
+
+/**
+ * One shopper, one cart, across reloads.
+ *
+ * The cart used to live in localStorage, which meant the agent could not see
+ * it — and an agent that says "added to your cart" about a basket it cannot
+ * read is describing something it did not do. The cart is the server's now;
+ * this id is how the browser says which one is theirs.
+ */
+const SESSION = (() => {
+  try {
+    let id = localStorage.getItem("vyapar.session");
+    if (!id) { id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`; localStorage.setItem("vyapar.session", id); }
+    return id;
+  } catch { return `s_${Date.now().toString(36)}`; }
+})();
 
 /**
  * The shelf filter the agent sets, declared here with the rest of the state.
@@ -506,6 +558,124 @@ function highlightMentioned(answer) {
     el.classList.toggle("looked", on);
     el.classList.toggle("dim", !on);
   }
+}
+
+/**
+ * Draw one tool result.
+ *
+ * A search still narrows the shelf — a wide grid beats a 356px column for
+ * comparing six things. Everything else draws in the rail, next to the
+ * sentence it belongs to, because a comparison the shopper has to look away
+ * from is not a comparison.
+ */
+function drawResult(st) {
+  const d = st.data ?? {};
+
+  if (st.tool === "search_shelf" && (d.results ?? []).length > 0) {
+    showOnShelf(d.results);
+    $("rb").insertAdjacentHTML("beforeend", `<div class="tofind">${d.results.length} shown on the shelf →</div>`);
+    return;
+  }
+
+  if (st.render === "products" && (d.results ?? []).length > 0) {
+    $("rb").insertAdjacentHTML("beforeend", d.results.map(miniCard).join(""));
+    wireMiniCards();
+    return;
+  }
+
+  if (st.render === "product" && d.product) {
+    const p = d.product;
+    $("rb").insertAdjacentHTML("beforeend", `
+      ${miniCard(p)}
+      ${(d.other_sizes ?? []).length ? `<div class="subhead">Other sizes</div>${d.other_sizes.map(miniCard).join("")}` : ""}
+      ${(d.goes_with ?? []).length ? `<div class="subhead">Goes with it</div>${d.goes_with.map(miniCard).join("")}` : ""}`);
+    wireMiniCards();
+    return;
+  }
+
+  if (st.render === "comparison" && d.products) {
+    $("rb").insertAdjacentHTML("beforeend", `<div class="cmp2">
+      <table>
+        <tr><th></th>${d.products.map((p) => `<th>${esc(p.name)}</th>`).join("")}</tr>
+        ${d.rows.map((r) => `<tr><td class="lbl">${esc(r.label)}</td>${r.values.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}
+      </table>
+      <div class="cmpact">${d.products.map(
+        (p) => `<button class="btn ${p.item_id === d.cheapest ? "primary" : "secondary"} sm" data-mini="${esc(p.item_id)}">Add ${esc(p.name.split(" ").slice(0, 2).join(" "))}</button>`,
+      ).join("")}</div>
+    </div>`);
+    wireMiniCards();
+    return;
+  }
+
+  if (st.render === "cart") {
+    drawCart(d);
+  }
+}
+
+/** A product, small enough to sit inside a conversation. */
+function miniCard(p) {
+  return `<div class="mini" data-item="${esc(p.item_id)}">
+    <div class="mth">${p.photo_url ? `<img src="${esc(p.photo_url)}" alt="" />` : "📦"}</div>
+    <div class="mb">
+      <div class="mn">${esc(p.name)}</div>
+      <div class="ms">${esc(p.shop ?? "")} · ${p.in_stock} in stock</div>
+      ${(p.why ?? []).length ? `<div class="mw">${p.why.map((w) => `✓ ${esc(w)}`).join("<br>")}</div>` : ""}
+      <div class="mp">${rupee(p.price)}</div>
+    </div>
+    <button class="btn secondary sm" data-mini="${esc(p.item_id)}">Add</button>
+  </div>`;
+}
+
+function wireMiniCards() {
+  for (const b of $("rb").querySelectorAll("[data-mini]")) {
+    if (b.dataset.wired) continue;
+    b.dataset.wired = "1";
+    b.onclick = async () => {
+      b.disabled = true;
+      const { status, body } = await api("/cart/add", {
+        method: "POST", body: JSON.stringify({ session_id: SESSION, item_id: b.dataset.mini, qty: 1 }),
+      });
+      b.textContent = status === 201 ? "Added ✓" : "No stock";
+      if (status === 201) { cart = body; renderCart(); drawCart(body); }
+    };
+  }
+  $("rb").scrollTop = $("rb").scrollHeight;
+}
+
+/** The cart, in the conversation, with the way out of it. */
+function drawCart(v) {
+  if (!v || !v.lines) return;
+  $("rb").insertAdjacentHTML("beforeend", `<div class="cartbox">
+    <div class="subhead" style="margin-top:0">Your cart</div>
+    ${v.lines.length === 0 ? `<div class="hint">Nothing in it yet.</div>` : v.lines.map(
+      (l) => `<div class="cbl"><span>${l.qty} × ${esc(l.name)}</span><b>${rupee(l.price * l.qty)}</b></div>`,
+    ).join("")}
+    ${v.lines.length ? `<div class="cbt"><span>Total</span><b>${rupee(v.total)}</b></div>
+      <button class="btn primary wide" id="cbgo">Check out ${rupee(v.total)}</button>` : ""}
+  </div>`);
+  const go = $("cbgo");
+  if (go) go.onclick = () => checkoutCart(v);
+  $("rb").scrollTop = $("rb").scrollHeight;
+}
+
+/**
+ * Hand the cart to the buying pipeline.
+ *
+ * One run per line, each through the same rules that gate any other purchase —
+ * ceiling, floor, stock, category — so a cart assembled in conversation is not
+ * a way around them.
+ */
+async function checkoutCart(v) {
+  $("cbgo")?.setAttribute("disabled", "1");
+  for (const l of v.lines) {
+    for (let n = 0; n < l.qty; n++) {
+      bubble("user", `${l.name}${l.qty > 1 ? ` (${n + 1} of ${l.qty})` : ""}`);
+      await run(`${l.name} under ₹${l.price}`, l.item_id);
+    }
+    await api("/cart/remove", { method: "POST", body: JSON.stringify({ session_id: SESSION, item_id: l.item_id }) });
+  }
+  const { body } = await api(`/cart?session_id=${encodeURIComponent(SESSION)}`);
+  cart = body; renderCart();
 }
 
 /** Put a pay card into its paid state, whoever settled the payment. */
@@ -820,7 +990,7 @@ async function say(text) {
   $("send").disabled = true;
   let body;
   try {
-    ({ body } = await api("/agent/assist", { method: "POST", body: JSON.stringify({ messages: thread }) }));
+    ({ body } = await api("/agent/assist", { method: "POST", body: JSON.stringify({ session_id: SESSION, messages: thread }) }));
   } catch (err) {
     bubble("assistant", `Couldn't reach the server — ${err?.message ?? err}`);
     $("send").disabled = false;
@@ -834,19 +1004,10 @@ async function say(text) {
     $("rb").insertAdjacentHTML("beforeend",
       `<div class="tool">${st.error ? "⚠" : "🔎"} <b>${esc(st.tool)}</b> ${esc(st.summary ?? st.error ?? "")}</div>`);
 
-    // What the agent found is shown on the shelf, not retyped in the rail.
-    //
-    // Listing results as rows inside a 356px column worked when there were two
-    // of them and became unreadable at six — the shopper scrolled a narrow
-    // strip while a wide grid of the same products sat beside it, greyed out.
-    // The grid is the better surface: bigger photos, a price they can compare,
-    // and the Add and Buy controls already on each card.
-    const rows = st.tool === "search_shelf" ? (st.data?.results ?? []) : [];
-    if (rows.length > 0) {
-      showOnShelf(rows);
-      $("rb").insertAdjacentHTML("beforeend",
-        `<div class="tofind">${rows.length} shown on the shelf →</div>`);
-    }
+    // Each result draws itself according to what it is. A comparison is a
+    // table, a cart is a cart, a search narrows the shelf — the alternative is
+    // every answer arriving as a paragraph the shopper has to decode.
+    drawResult(st);
   }
 
   thread.push({ role: "assistant", content: body.answer });
@@ -886,124 +1047,109 @@ $("send").onclick = () => say($("goal").value.trim());
 $("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("send").click(); });
 for (const b of document.querySelectorAll("#exs button")) b.onclick = () => say(b.dataset.g);
 
-bubble("assistant", "Ask me anything — what's on the shelf, where your order is, or buy something. Nothing is bought without your say-so.");
+/**
+ * Openers drawn from what this marketplace actually stocks.
+ *
+ * "How can I help you?" tells a shopper nothing about what is possible here.
+ * These come from the catalog, so a shop that onboarded tonight gets openers
+ * about its own goods rather than somebody else's cakes.
+ */
+bubble("assistant", "Tell me what you're after and I'll search every shop for it. Nothing is bought without your say-so.");
+api("/agent/openers").then(({ body }) => {
+  const os = body?.openers ?? [];
+  if (os.length === 0) return;
+  $("exs").innerHTML = os.map((o) => `<button data-g="${esc(o)}">${esc(o)}</button>`).join("");
+  for (const b of $("exs").querySelectorAll("button")) b.onclick = () => say(b.dataset.g);
+}).catch(() => {});
 
 // ── cart ───────────────────────────────────────────────────────────────────
 //
 // A shortlist with a ceiling per line, not a checkout. Each line is still bought
 // the way everything else here is bought — the agent goes and negotiates for it —
 // so a cart cannot become a second, quieter way to spend money.
-let cart = [];
-try { cart = JSON.parse(localStorage.getItem("vyapar.cart") ?? "[]"); } catch { cart = []; }
-// Carts saved before quantities existed have no qty. Repair rather than drop.
-cart = cart.filter((c) => c && c.item_id).map((c) => ({ ...c, qty: Math.max(1, Number(c.qty) || 1) }));
-const saveCart = () => { try { localStorage.setItem("vyapar.cart", JSON.stringify(cart)); } catch {} };
+/**
+ * The cart, as the server reports it.
+ *
+ * Not a local array any more. Two carts — one here, one the agent could see —
+ * meant the agent describing a basket the shopper was not looking at, which is
+ * the same class of error as inventing a price.
+ */
+let cart = { lines: [], total: 0, count: 0 };
+
+async function pullCart() {
+  const { body } = await api(`/cart?session_id=${encodeURIComponent(SESSION)}`);
+  cart = body;
+  renderCart();
+}
 
 function renderCart() {
-  // The badge counts units, not lines — two of one thing is two things.
-  const units = cart.reduce((n, c) => n + c.qty, 0);
-  $("cartn").textContent = String(units);
-  $("cartsec").style.display = cart.length ? "" : "none";
+  const lines = cart.lines ?? [];
+  $("cartn").textContent = String(cart.count ?? 0);
+  $("cartsec").style.display = lines.length ? "" : "none";
 
-  const total = cart.reduce((n, c) => n + c.ceiling * c.qty, 0);
-  $("cart").innerHTML = cart.map((c, i) => {
-    const it = items.find((x) => x.item_id === c.item_id);
-    const stock = it?.stock?.quantity ?? c.qty;
+  $("cart").innerHTML = lines.map((l) => {
+    const it = items.find((x) => x.item_id === l.item_id);
+    const stock = it?.stock?.quantity ?? l.qty;
     return `<div class="cline">
       <div class="th">${it?.photo_url ? `<img src="${esc(it.photo_url)}" alt="" />` : "📦"}</div>
-      <div class="nm2">${esc(c.name)}<span>${esc(c.merchant_name)} · listed ${rupee(c.list_price)} · ${stock} in stock</span></div>
+      <div class="nm2">${esc(l.name)}<span>${esc(l.shop ?? "")} · ${stock} in stock</span></div>
       <div class="qty">
-        <button data-less="${i}" title="One fewer"${c.qty <= 1 ? " disabled" : ""}>−</button>
-        <b>${c.qty}</b>
-        <button data-more="${i}" title="One more"${c.qty >= stock ? " disabled" : ""}>+</button>
+        <button data-q="${esc(l.item_id)}:${l.qty - 1}" title="One fewer"${l.qty <= 1 ? " disabled" : ""}>−</button>
+        <b>${l.qty}</b>
+        <button data-q="${esc(l.item_id)}:${l.qty + 1}" title="One more"${l.qty >= stock ? " disabled" : ""}>+</button>
       </div>
-      <label class="ceil"><span>max each</span>
-        <input type="number" min="1" value="${c.ceiling}" data-ceil="${i}" /></label>
-      <button class="x" data-rm="${i}" title="Remove">✕</button>
+      <b class="lt">${rupee(l.price * l.qty)}</b>
+      <button class="x" data-rm="${esc(l.item_id)}" title="Remove">✕</button>
     </div>`;
   }).join("") +
-  `<div class="ctot"><span>${units} item${units === 1 ? "" : "s"} · you'll pay at most</span><b>${rupee(total)}</b></div>`;
+  `<div class="ctot"><span>${cart.count} item${cart.count === 1 ? "" : "s"}</span><b>${rupee(cart.total ?? 0)}</b></div>`;
 
-  // Quantity is capped at real stock, so a cart can never promise more than
-  // the shop has — the agent would refuse it later anyway, and finding that
-  // out after confirming is a worse experience than not being offered it.
-  for (const b of document.querySelectorAll("[data-more]")) {
-    b.onclick = () => {
-      const c = cart[Number(b.dataset.more)];
-      const stock = items.find((x) => x.item_id === c.item_id)?.stock?.quantity ?? 1;
-      if (c.qty < stock) { c.qty++; saveCart(); renderCart(); }
-    };
-  }
-  for (const b of document.querySelectorAll("[data-less]")) {
-    b.onclick = () => {
-      const c = cart[Number(b.dataset.less)];
-      if (c.qty > 1) { c.qty--; saveCart(); renderCart(); }
-    };
-  }
-
-  for (const el of document.querySelectorAll("[data-ceil]")) {
-    el.onchange = () => {
-      const v = Number(el.value);
-      if (v > 0) { cart[Number(el.dataset.ceil)].ceiling = Math.round(v); saveCart(); }
-      renderCart();
+  for (const b of document.querySelectorAll("[data-q]")) {
+    b.onclick = async () => {
+      const [item_id, qty] = b.dataset.q.split(":");
+      const { body } = await api("/cart/qty", { method: "POST", body: JSON.stringify({ session_id: SESSION, item_id, qty: Number(qty) }) });
+      cart = body; renderCart();
     };
   }
   for (const b of document.querySelectorAll("[data-rm]")) {
-    b.onclick = () => { cart.splice(Number(b.dataset.rm), 1); saveCart(); renderCart(); };
+    b.onclick = async () => {
+      const { body } = await api("/cart/remove", { method: "POST", body: JSON.stringify({ session_id: SESSION, item_id: b.dataset.rm }) });
+      cart = body; renderCart();
+    };
   }
 }
 
-/** Adding something already in the cart adds another of it, rather than
-    silently doing nothing — which is what it did before, and which reads as a
-    broken button. */
-function addToCart(itemId) {
-  const it = items.find((x) => x.item_id === itemId);
-  if (!it) return false;
-  const stock = it.stock?.quantity ?? 1;
-
-  const line = cart.find((c) => c.item_id === itemId);
-  if (line) {
-    if (line.qty >= stock) return false;
-    line.qty++;
-  } else {
-    cart.push({
-      item_id: itemId,
-      name: it.name,
-      merchant_name: merchants[it.merchant_id]?.name ?? it.merchant_id,
-      list_price: it.price.value,
-      ceiling: it.price.value,
-      qty: 1,
-    });
-  }
-  saveCart(); renderCart();
-  return true;
+/** Adding from a shelf card. The same cart the agent writes to. */
+async function addToCart(itemId) {
+  const { status, body } = await api("/cart/add", {
+    method: "POST", body: JSON.stringify({ session_id: SESSION, item_id: itemId, qty: 1 }),
+  });
+  if (status === 201) { cart = body; renderCart(); return true; }
+  return false;
 }
 
 $("cartbtn").onclick = () => {
   if (!cart.length) { bubble("assistant", "Your cart is empty — add something from the shelf."); return; }
   $("cartsec").scrollIntoView({ behavior: "smooth", block: "start" });
 };
-$("clearcart").onclick = () => { cart = []; saveCart(); renderCart(); };
+$("clearcart").onclick = async () => {
+  for (const l of [...(cart.lines ?? [])]) {
+    await api("/cart/remove", { method: "POST", body: JSON.stringify({ session_id: SESSION, item_id: l.item_id }) });
+  }
+  await pullCart();
+};
 
 // One run per line, in order. Sequential because each run ends at a payment a
 // person may have to approve, and two Checkouts cannot be open at once.
+// One run per unit, through the same rules as any other purchase. Batching
+// them would hide which unit failed if one did.
 $("buycart").onclick = async () => {
   $("buycart").disabled = true;
-  const lines = [...cart];
-  for (const c of lines) {
-    // One run per unit. Each is its own negotiation, its own order and its own
-    // signed chain — batching them would hide which unit failed if one did.
-    for (let n = 0; n < c.qty; n++) {
-      bubble("user", `${c.name}${c.qty > 1 ? ` (${n + 1} of ${c.qty})` : ""}, up to ${rupee(c.ceiling)}`);
-      await run(`${c.name} under ₹${c.ceiling}`, c.item_id);
-    }
-    cart = cart.filter((x) => x.item_id !== c.item_id);
-    saveCart(); renderCart();
-  }
+  await checkoutCart(cart);
   $("buycart").disabled = false;
 };
 
-renderCart();
+await pullCart();
 await loadOrders();
 
 // Never let the two rails look alike. Real Razorpay ids begin order_/pay_ and

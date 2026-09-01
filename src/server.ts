@@ -2640,6 +2640,91 @@ export async function createApp(options: AppOptions = {}) {
    * act: check an order, look up a shop's delivery record, search the shelf —
    * and prepare a purchase, which still takes a person's press to run.
    */
+  /**
+   * The shopper's cart, server-side.
+   *
+   * One cart, whether the shopper pressed Add on a card or told the agent to
+   * add it. Two carts — one in the browser, one the agent could see — would
+   * mean the agent confidently describing a basket the shopper was not looking
+   * at, which is the same class of error as inventing a price.
+   */
+  function sessionOf(req: Request): string {
+    const id = String(req.body?.session_id ?? req.query.session_id ?? "").trim();
+    return id || `anon_${req.ip ?? "x"}`;
+  }
+
+  app.get("/cart", (req: Request, res: Response) => {
+    res.json(cartView(stateFor(sessionOf(req))));
+  });
+
+  app.post("/cart/add", (req: Request, res: Response) => {
+    const st = stateFor(sessionOf(req));
+    const item = catalogItems.find((i) => i.item_id === String(req.body?.item_id ?? ""));
+    if (!item) {
+      res.status(404).json({ error: "no such product" });
+      return;
+    }
+    const want = Math.max(1, Math.round(Number(req.body?.qty ?? 1)));
+    const line = st.cart.find((l) => l.item_id === item.item_id);
+    const room = item.stock.quantity - (line?.qty ?? 0);
+    if (room <= 0) {
+      res.status(409).json({ error: `only ${item.stock.quantity} in stock, and they are all in your cart`, ...cartView(st) });
+      return;
+    }
+    const added = Math.min(want, room);
+    if (line) line.qty += added;
+    else st.cart.push({ item_id: item.item_id, qty: added, price: item.price.value });
+    st.selected = item.item_id;
+    res.status(201).json({ added, ...cartView(st) });
+  });
+
+  app.post("/cart/remove", (req: Request, res: Response) => {
+    const st = stateFor(sessionOf(req));
+    const id = String(req.body?.item_id ?? "");
+    st.cart = st.cart.filter((l) => l.item_id !== id);
+    res.json(cartView(st));
+  });
+
+  app.post("/cart/qty", (req: Request, res: Response) => {
+    const st = stateFor(sessionOf(req));
+    const id = String(req.body?.item_id ?? "");
+    const item = catalogItems.find((i) => i.item_id === id);
+    const line = st.cart.find((l) => l.item_id === id);
+    if (!item || !line) {
+      res.status(404).json({ error: "not in the cart" });
+      return;
+    }
+    const q = Math.round(Number(req.body?.qty ?? 1));
+    if (q <= 0) st.cart = st.cart.filter((l) => l.item_id !== id);
+    else line.qty = Math.min(q, item.stock.quantity);
+    res.json(cartView(st));
+  });
+
+  /**
+   * Openers drawn from what this marketplace actually sells.
+   *
+   * Written from the catalog rather than hardcoded, so a shop that onboards
+   * tonight gets openers about its own goods instead of somebody else's cakes.
+   */
+  app.get("/agent/openers", (_req: Request, res: Response) => {
+    const live = catalogItems.filter((i) => !i.needs_merchant_confirmation && i.stock.quantity > 0 && i.price.value > 0);
+    const byCat = new Map<string, CatalogItem[]>();
+    for (const i of live) {
+      const k = i.category.split(".")[0]!;
+      byCat.set(k, [...(byCat.get(k) ?? []), i]);
+    }
+    const out: string[] = [];
+    for (const [, group] of [...byCat.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 3)) {
+      const cheapest = group.reduce((a, b) => (b.price.value < a.price.value ? b : a));
+      const round = Math.ceil((cheapest.price.value * 1.4) / 50) * 50;
+      const word = cheapest.name.split(" ").slice(0, 2).join(" ").toLowerCase();
+      out.push(`${word} under ₹${round}`);
+    }
+    const anchor = live.find((i) => ((i as CatalogItem & { complements?: string[] }).complements ?? []).length > 0);
+    if (anchor) out.push(`what goes with a ${anchor.name.split(" ").slice(0, 2).join(" ").toLowerCase()}?`);
+    res.json({ openers: out.slice(0, 4) });
+  });
+
   app.post("/agent/assist", async (req: Request, res: Response) => {
     const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
     const turns: Turn[] = raw
