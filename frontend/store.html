@@ -96,6 +96,15 @@
   .ord.justin { animation:pop .8s ease; }
   @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
 
+  .paybox { border:1px solid var(--blue-3); background:var(--blue-2); border-radius:var(--r-sm);
+            padding:14px; margin:11px 0; }
+  .paybox.done { border-color:var(--green-3); background:var(--green-2); }
+  .ph2 { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--blue-ink); }
+  .paybox.done .ph2 { color:var(--green); }
+  .pamt { font-size:28px; font-weight:650; letter-spacing:-.03em; font-variant-numeric:tabular-nums; margin:6px 0 2px; }
+  .pmeta { font-size:11.5px; color:var(--ink-3); margin-bottom:12px; word-break:break-all; }
+  .pnote { font-size:11px; color:var(--ink-3); margin-top:9px; line-height:1.5; }
+
   .tofind { font-size:11.5px; color:var(--blue-ink); font-weight:600; padding:7px 0; }
 
   .tool { font-size:11.5px; color:var(--ink-3); font-family:var(--mono); padding:5px 0;
@@ -411,14 +420,42 @@ async function run(goal, itemId) {
     thread.push({ role: "assistant", content:
       `An order for "${goal}" is open at ₹${body.final_price}, waiting for the shopper to pay at Checkout.` });
     beacon(true, "awaiting you");
-    push(stepRow("🔐", "Order placed — Razorpay Checkout opening", `${esc(body.item_id)} · ${rupee(body.final_price)}`));
-    checkout(body);
+    push(stepRow("🔐", "Order placed with Razorpay", `${esc(body.order_id)} · ${rupee(body.final_price)}`));
+    // The pay step waits in the rail rather than throwing a modal over the
+    // page. A Checkout window that opens by itself is easy to dismiss by
+    // accident and leaves nothing behind to try again with — and the shopper
+    // has just agreed to a price, so being shown the amount and pressing pay
+    // is the honest shape of the moment.
+    offerPayment(body);
     return;
   }
   beacon(false, "done");
 }
 
-function checkout(r) {
+/**
+ * The pay step, as a card in the conversation.
+ *
+ * Shows what is about to be charged and to whom before anything opens, keeps
+ * the order id visible, and survives a dismissed Checkout — the button is
+ * still there. Nothing about the amount is decided here: it is the price the
+ * rules agreed and the order Razorpay already holds.
+ */
+function offerPayment(r) {
+  const id = `pay_${r.transaction_id}`;
+  $("rb").insertAdjacentHTML("beforeend", `<div class="paybox" id="${id}">
+    <div class="ph2">Ready to pay</div>
+    <div class="pamt">${rupee(r.final_price)}</div>
+    <div class="pmeta">${esc(r.merchant ?? "")}${r.merchant ? " · " : ""}<span class="mono">${esc(r.order_id)}</span></div>
+    <button class="btn primary wide" data-pay="1">Pay ${rupee(r.final_price)} with Razorpay</button>
+    <div class="pnote">Razorpay test mode. Paying is not delivery — the shop still has to confirm handover.</div>
+  </div>`);
+  $("rb").scrollTop = $("rb").scrollHeight;
+
+  const box = document.getElementById(id);
+  box.querySelector("[data-pay]").onclick = () => checkout(r, box);
+}
+
+function checkout(r, box) {
   new window.Razorpay({
     key: config.razorpay_key_id, order_id: r.order_id, amount: r.amount_paise,
     currency: "INR", name: "Vyapar Market", description: `${r.item_id} · ${rupee(r.final_price)}`,
@@ -432,6 +469,7 @@ function checkout(r) {
       // either racer's local view: ask the server what the order actually is.
       if (status !== 201 && status !== 409) {
         push(stepRow("⚠", "Payment could not be settled", esc((body.reasons ?? [body.error]).join("; "))));
+        if (box) box.querySelector(".pnote").textContent = "That did not go through. The order is still open — press pay again.";
         return;
       }
       const { body: o } = await api(`/orders/${r.transaction_id}`);
@@ -440,12 +478,23 @@ function checkout(r) {
         return;
       }
       beacon(false, "paid");
+      if (box) {
+        box.classList.add("done");
+        box.innerHTML = `<div class="ph2">✓ Paid ${rupee(r.final_price)}</div>
+          <div class="pmeta"><span class="mono">${esc(o.payment_id ?? "confirmed")}</span></div>
+          <div class="pnote">Waiting for the shop to confirm handover. Nothing marks itself delivered.</div>`;
+      }
       push(stepRow("₹", `Paid — ${esc(o.payment_id ?? "confirmed")}`,
         status === 409 ? "settled by the Razorpay webhook before this tab could" : "signed into the mandate chain"));
       push(stepRow("■", "Waiting on the shop to confirm handover", "nothing here marks itself delivered"));
       loadOrders();
     },
-    modal: { ondismiss: () => { beacon(false, "you closed checkout"); push(stepRow("■", "Checkout closed", "the order is still open — send the agent again to retry")); } },
+    modal: {
+      ondismiss: () => {
+        beacon(false, "you closed checkout");
+        push(stepRow("■", "Checkout closed", "the order is still open — the pay button above still works"));
+      },
+    },
   }).open();
 }
 
