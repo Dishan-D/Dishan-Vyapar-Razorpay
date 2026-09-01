@@ -16,6 +16,8 @@ export interface DiscoveryQuery {
 export interface DiscoveryMatch {
   item: CatalogItem;
   score: number;
+  /** True when the item matched the noun the shopper actually named. */
+  head_match: boolean;
   matched_terms: string[];
   /** Listed above the buyer's ceiling — still offered, because that is what haggling is for. */
   above_ceiling: boolean;
@@ -49,7 +51,52 @@ const FILLER = new Set([
   "school", "office", "home", "supplies", "supply", "stuff", "items", "item",
   "thing", "things", "product", "products", "good", "goods", "set", "pack",
   "need", "want", "buy", "cheap", "best", "good", "nice", "new",
+  // Words a shopper reaches for when they do not know the product's name.
+  // "some device to listen to music" ends on DEVICE, which names nothing, and
+  // letting it act as the head noun meant the head-noun rule could never fire.
+  "device", "devices", "gadget", "gadgets", "kind", "type", "something",
+  "listen", "listening", "use", "using", "wear",
 ]);
+
+/**
+ * Words a shopper uses for a category, as opposed to the words on the label.
+ *
+ * Written by hand, on purpose. Someone asking for "headphones" is shown nothing
+ * by a shop stocking "Wired Earphones with 3.5mm Jack" and "Techno Bud Pro TWS
+ * Earbuds", because no substring of one appears in the other — and a shopper
+ * who has to guess the merchant's exact noun is back to the problem this
+ * project exists to solve.
+ *
+ * This is a lexicon and not a model or an embedding, for the same reason
+ * everything else here is arithmetic: a merchant can be shown why their product
+ * matched, and a wrong entry can be deleted by anyone reading this file. An
+ * embedding would match more and explain nothing.
+ */
+const CATEGORY_WORDS: Record<string, string[]> = {
+  "mobile.audio": ["earphone", "earphones", "earbud", "earbuds", "headphone", "headphones",
+                   "headset", "airpods", "buds", "tws", "speaker", "speakers", "audio",
+                   "music", "sound", "mp3", "player"],
+  "mobile.case": ["case", "cover", "back", "cases", "covers"],
+  "mobile.charger": ["charger", "chargers", "cable", "cables", "adapter", "powerbank", "power"],
+  "mobile.screenguard": ["screenguard", "screen", "guard", "protector", "tempered", "glass"],
+  "electronics.laptop": ["laptop", "laptops", "notebook", "computer", "pc", "macbook"],
+  "electronics.tv": ["tv", "television", "led", "monitor", "screen"],
+  "electronics.appliance": ["microwave", "oven", "mixer", "grinder", "fan", "iron", "kettle",
+                            "appliance", "appliances", "toaster"],
+  "apparel.saree": ["saree", "sarees", "sari", "saris"],
+  "apparel.kurta": ["kurta", "kurtas", "kurti", "shirt"],
+  "apparel.dupatta": ["dupatta", "dupattas", "stole", "scarf"],
+  "home.bedsheet": ["bedsheet", "bedsheets", "chaadar", "chadar", "bedcover", "sheet", "sheets"],
+  "home.towel": ["towel", "towels"],
+  "food.snack": ["snack", "snacks", "murukku", "chips", "mixture", "sweets", "laddu", "namkeen"],
+  "stationery.pen": ["pen", "pens", "pencil", "pencils", "marker", "markers"],
+  "stationery.paper": ["notebook", "notebooks", "paper", "register", "diary", "file"],
+};
+
+/** Does this query term name the family this item belongs to? */
+function namesCategory(term: string, category: string): boolean {
+  return (CATEGORY_WORDS[category] ?? []).includes(term);
+}
 
 /** Categories that mean "we could not tell", as opposed to naming a family. */
 export const isUncategorised = (category: string): boolean =>
@@ -78,6 +125,30 @@ function haystack(item: CatalogItem): string {
   return [item.name, item.category.replace(/\./g, " "), ...Object.values(item.attributes)]
     .join(" ")
     .toLowerCase();
+}
+
+/**
+ * The item's own words, as words.
+ *
+ * Matching used to be `haystack.includes(term)`, which is substring matching,
+ * and substring matching quietly answers questions nobody asked: a search for a
+ * phone CHARGER returned Wired Earphones, because "phone" is inside
+ * "earphones". Every accidental match of that kind costs a shopper a scroll and
+ * costs the shop credibility.
+ *
+ * Plurals still have to work, so a term matches its own singular or plural —
+ * but as a whole word, never as a fragment of a longer one.
+ */
+function words(item: CatalogItem): Set<string> {
+  return new Set(haystack(item).split(/[^a-z0-9]+/).filter(Boolean));
+}
+
+function hasWord(bag: Set<string>, term: string): boolean {
+  if (bag.has(term)) return true;
+  if (bag.has(`${term}s`)) return true;
+  if (term.endsWith("s") && bag.has(term.slice(0, -1))) return true;
+  // "3.5mm" and the like survive tokenising; a numeric term still matches.
+  return false;
 }
 
 /**
@@ -127,8 +198,11 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
       if (mismatch) continue;
     }
 
-    const hay = haystack(item);
-    const matched = queryTerms.filter((t) => hay.includes(t));
+    const bag = words(item);
+    // A term counts if it is one of the item's own words OR names the family
+    // the item is filed under. The second half is what lets "headphones" find
+    // "Wired Earphones" without either of them containing the other.
+    const matched = queryTerms.filter((t) => hasWord(bag, t) || namesCategory(t, item.category));
     const score = queryTerms.length === 0 ? 0 : matched.length / queryTerms.length;
 
     // Either enough of the phrase matches, or the actual noun does. Coverage
@@ -137,7 +211,7 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
     // "Phone Cover" asked for as a "phone case". Both rules together accept
     // each of those and still keep towels out of a search for a saree.
     const head = headTerm(queryTerms);
-    const headMatches = Boolean(head && hay.includes(head));
+    const headMatches = Boolean(head && (hasWord(bag, head) || namesCategory(head, item.category)));
     if (score < MIN_RELEVANCE && !headMatches) continue;
 
     const gate = gateReasons(item);
@@ -156,14 +230,23 @@ export function discover(catalog: readonly CatalogItem[], query: DiscoveryQuery)
     matches.push({
       item,
       score,
+      head_match: headMatches,
       matched_terms: matched,
       above_ceiling: query.max_price !== undefined && item.price.value > query.max_price,
     });
   }
 
+  // The thing that was actually asked for comes first.
+  //
+  // Coverage alone ties too often: for "phone charger" a screen protector, a
+  // phone cover and an actual charger all match one word of two and score 0.5,
+  // so the charger sorted last on price and the shopper had to hunt for the one
+  // product they named. Matching the head noun now outranks matching some other
+  // word of the phrase.
   matches.sort(
     (a, b) =>
       Number(a.above_ceiling) - Number(b.above_ceiling) ||
+      Number(b.head_match) - Number(a.head_match) ||
       b.score - a.score ||
       a.item.price.value - b.item.price.value,
   );
