@@ -66,6 +66,7 @@ export interface StructuringResult {
 
 async function loadSeed(): Promise<MerchantSeed[]> {
   const doc = JSON.parse(await readFile(MERCHANTS_FILE, "utf8")) as { merchants: MerchantSeed[] };
+
   return doc.merchants;
 }
 
@@ -285,6 +286,26 @@ export async function readCatalog(): Promise<CatalogItem[]> {
  * a catalog written by `milestone-b --live` is reused if present, and fixtures
  * stand in otherwise.
  */
+/**
+ * Demo override for the WhatsApp channel.
+ *
+ * The seed numbers are deliberately fake (+9190000000xx), so a live Twilio send
+ * to them fails with 63015 — the recipient never joined the sandbox and does
+ * not exist. Pointing them at a real phone is what makes the clarification loop
+ * demonstrable.
+ *
+ * The real number belongs in .env, not in data/merchants.json: that file is
+ * tracked in git, and a personal phone number committed for one demo outlives
+ * the demo. Applied here rather than at seed load because a cached catalog.json
+ * is the usual path — overriding the seed alone silently does nothing.
+ */
+function applyDemoWhatsApp(result: StructuringResult): StructuringResult {
+  const demoNumber = process.env.DEMO_WHATSAPP_NUMBER?.trim();
+  if (!demoNumber) return result;
+  console.log(`[whatsapp] demo override — all ${result.merchants.length} merchants route to one phone`);
+  return { ...result, merchants: result.merchants.map((m) => ({ ...m, whatsapp: demoNumber })) };
+}
+
 export async function loadServingCatalog(): Promise<StructuringResult> {
   if (await exists(CATALOG_FILE)) {
     const doc = JSON.parse(await readFile(CATALOG_FILE, "utf8")) as CatalogDoc;
@@ -298,7 +319,7 @@ export async function loadServingCatalog(): Promise<StructuringResult> {
       ) ?? false;
 
     if (doc.items?.length && doc.merchants?.length && currentShape) {
-      return {
+      return applyDemoWhatsApp({
         merchants: doc.merchants,
         items: doc.items,
         records: [],
@@ -311,8 +332,8 @@ export async function loadServingCatalog(): Promise<StructuringResult> {
         failures: [],
         photosUsed: Object.values(doc.photos ?? {}).filter((p) => p.present).length,
         photos: doc.photos ?? {},
-      };
+      });
     }
   }
-  return runStructuring(false);
+  return applyDemoWhatsApp(await runStructuring(false));
 }

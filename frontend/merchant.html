@@ -201,11 +201,49 @@
       <p id="attention">—</p>
     </div>
     <span class="spacer"></span>
+    <div class="modes" id="modes">
+      <button data-mode="simple">Simple</button>
+      <button data-mode="deep">Deep Insight</button>
+    </div>
     <select id="pick"></select>
   </div>
 </div>
 
-<div class="wrap">
+<!--
+  Simple view. What a shopkeeper between customers actually needs: what is
+  waiting on them, and a way to ask in their own words. Everything analytical
+  lives behind Deep Insight — present, but not in the way.
+-->
+<div class="wrap" id="simplewrap">
+  <div class="col">
+    <section class="askbox" style="padding:0">
+      <div style="padding:16px 16px 0">
+        <h2>Ask your shop anything</h2>
+        <p class="hint">It looks things up before answering, and shows you every lookup it made.</p>
+      </div>
+      <div class="askrow2" style="margin-top:14px">
+        <input id="askq" placeholder="What needs my attention?" />
+        <button class="btn secondary" id="askmic" title="Speak instead of typing">🎙</button>
+        <button class="btn primary" id="askgo">Ask</button>
+      </div>
+      <div class="qchips">
+        <button data-q="What needs my attention?">What needs my attention?</button>
+        <button data-q="How much did I collect today?">How much did I collect today?</button>
+        <button data-q="How many sales have I actually delivered?">How many have I delivered?</button>
+        <button data-q="Which products can an AI buyer not buy yet?">What can't agents buy?</button>
+      </div>
+      <div class="askout" id="askout" hidden></div>
+    </section>
+
+    <section>
+      <h2>Today</h2>
+      <p class="hint">Anything here can be settled with one tap.</p>
+      <div id="simple" style="margin-top:14px"><p class="empty">Loading…</p></div>
+    </section>
+  </div>
+</div>
+
+<div class="wrap" id="deepwrap">
   <div class="col">
     <section id="askcard">
       <h2>Needs your attention</h2>
@@ -903,11 +941,41 @@ async function loadTrust() {
 const refresh = () =>
   Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth()]);
 
-await loadMerchants();
+/**
+ * A dashboard that cannot reach its server must say so.
+ *
+ * Every panel here starts life reading "Loading…", so a server that is down
+ * leaves a page that looks like it is still working and never stops. That is
+ * indistinguishable from a hung app, and it sent me hunting for a rendering
+ * bug that did not exist. Fail loudly, and name the fix.
+ */
+function fatal(err) {
+  const bar = document.createElement("div");
+  bar.style.cssText =
+    "position:sticky;top:0;z-index:99;padding:11px 16px;background:var(--red-2);" +
+    "border-bottom:1px solid var(--red-3);color:var(--red);font-size:13px;line-height:1.5";
+  bar.innerHTML =
+    `<b>Can't reach the server.</b> Start it with <span class="mono">npm run serve</span>, ` +
+    `then reload. <span style="opacity:.75">(${esc(String(err?.message ?? err))})</span>`;
+  document.body.prepend(bar);
+  for (const el of document.querySelectorAll(".panel, .card")) {
+    for (const n of el.querySelectorAll("*")) {
+      if (n.children.length === 0 && n.textContent.trim() === "Loading...") n.textContent = "—";
+    }
+  }
+}
+
+try {
+  await loadMerchants();
+} catch (err) {
+  fatal(err);
+  throw err;
+}
+
 let saved = "simple";
 try { saved = localStorage.getItem("vyapar.mode") ?? "simple"; } catch { /* private window */ }
 setMode(saved);
-await refresh();
+await refresh().catch(fatal);
 
 await boot({
   watch: { merchant_id: merchantId },

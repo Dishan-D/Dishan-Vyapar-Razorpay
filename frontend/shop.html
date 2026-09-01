@@ -242,13 +242,16 @@ function authorityBlock(checks, authorized) {
 }
 
 function offerCard(o, won) {
-  const path = o.outcome.log.filter((t) => t.amount !== null);
+  // The server flattens the negotiation outcome onto the offer: `log` and a
+  // numeric `readiness`, not `outcome.log` and `readiness.score`. Reading the
+  // nested shape threw and took the whole panel down after a successful buy.
+  const path = (o.log ?? []).filter((t) => t.amount !== null);
   const chain = path.map((t, i) =>
     `${i ? '<span class="ar">→</span>' : ""}<b class="${i === path.length-1 && o.eligible ? "fin" : ""}">${rupee(t.amount)}</b>`).join("");
   return `<div class="offer ${won ? "win" : ""}">
     <div class="top">
       <div><div class="mn">${esc(o.merchant_name)}</div><div class="rd">${esc(o.item_name)} · list ${rupee(o.list_price)}</div></div>
-      <span class="chip">Readiness ${o.readiness.score}</span>
+      <span class="chip">Readiness ${o.readiness ?? "—"}</span>
     </div>
     <div class="path">${chain || '<span class="rd">no offers exchanged</span>'}</div>
     ${o.eligible

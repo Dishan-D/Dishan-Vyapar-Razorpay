@@ -978,6 +978,7 @@ export async function createApp(options: AppOptions = {}) {
           item_id: o.item_id,
           item_name: o.item_name,
           readiness: o.readiness.score,
+          list_price: o.list_price,
           final_price: o.final_price,
           effective_price: o.effective_price,
           rounds: o.outcome.rounds,
