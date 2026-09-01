@@ -51,6 +51,10 @@ import {
 } from "./structuring/whatsapp.js";
 import { converse, shopperText, type Turn } from "./agent/converse.js";
 import { converseWithTools } from "./agent/buyerloop.js";
+import {
+  stateFor, resolveProduct, rank, complementsOf, alternativesTo, variantsOf,
+  type ShoppingState,
+} from "./agent/shopping.js";
 import type { BuyerToolCall, BuyerToolResult } from "./agent/buyer.js";
 import { reconcileUpi } from "./finance/upi.js";
 import { buildStatement } from "./finance/statement.js";
@@ -2282,11 +2286,44 @@ export async function createApp(options: AppOptions = {}) {
    * would not show. `start_purchase` runs nothing — it returns the sentence the
    * shopper has to agree to before an agent is sent.
    */
+  /** A card as the storefront draws it. One shape for every product surface. */
+  function productCard(i: CatalogItem, reasons: string[] = []) {
+    return {
+      item_id: i.item_id,
+      name: i.name,
+      shop: merchants.get(i.merchant_id)?.name ?? i.merchant_id,
+      merchant_id: i.merchant_id,
+      price: i.price.value,
+      in_stock: i.stock.quantity,
+      attributes: i.attributes ?? {},
+      photo_url: photoUrlFor.get(i.item_id) ?? `/generic/${i.item_id}.jpg`,
+      why: reasons,
+    };
+  }
+
+  const cartTotal = (st: ShoppingState) => st.cart.reduce((n, l) => n + l.price * l.qty, 0);
+
+  function cartView(st: ShoppingState) {
+    return {
+      lines: st.cart.map((l) => {
+        const i = catalogItems.find((x) => x.item_id === l.item_id);
+        return { ...l, name: i?.name ?? l.item_id, shop: merchants.get(i?.merchant_id ?? "")?.name ?? "" };
+      }),
+      total: cartTotal(st),
+      count: st.cart.reduce((n, l) => n + l.qty, 0),
+    };
+  }
+
   async function runBuyerTool(
     call: BuyerToolCall,
     lastSearch: string[],
+    st: ShoppingState,
   ): Promise<BuyerToolResult> {
     const { tool, args } = call;
+
+    /** Everything below resolves what the shopper meant the same way. */
+    const pick = (key = "product") =>
+      resolveProduct(String((args as Record<string, unknown>)[key] ?? ""), st, catalogItems);
     try {
       if (tool === "search_shelf") {
         const want = String(args.want ?? "").trim();
@@ -2325,9 +2362,12 @@ export async function createApp(options: AppOptions = {}) {
           // server-side, which is where the floor belongs.
           in_stock: m.item.stock.quantity,
         }));
-        // What the numbers in this turn's answer refer to.
+        // What the numbers in this turn's answer refer to — for this turn, and
+        // for the next one, when the shopper says "the second one".
         lastSearch.length = 0;
         lastSearch.push(...rows.map((r) => r.item_id));
+        st.shown = rows.map((r) => r.item_id);
+        if (max > 0) st.budget = max;
 
         return {
           tool,
@@ -2364,6 +2404,159 @@ export async function createApp(options: AppOptions = {}) {
           tool,
           summary: `${body.delivered_sales ?? 0} delivered sale(s), ₹${body.verified_value ?? 0} verified.`,
           data: body,
+        };
+      }
+
+      if (tool === "get_product") {
+        const item = pick();
+        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        st.selected = item.item_id;
+        const sizes = variantsOf(item, catalogItems);
+        const goes = complementsOf(item, catalogItems).slice(0, 3);
+        return {
+          tool,
+          render: "product",
+          summary: `${item.name}: ₹${item.price.value}, ${item.stock.quantity} in stock at ${merchants.get(item.merchant_id)?.name}.`,
+          data: {
+            product: productCard(item),
+            other_sizes: sizes.map((v) => productCard(v)),
+            goes_with: goes.map((v) => productCard(v)),
+          },
+        };
+      }
+
+      if (tool === "compare_products") {
+        const raw = Array.isArray((args as Record<string, unknown>).products)
+          ? ((args as Record<string, unknown>).products as unknown[])
+          : [];
+        const picked = raw
+          .map((r) => resolveProduct(String(r), st, catalogItems))
+          .filter((x): x is CatalogItem => Boolean(x));
+        if (picked.length < 2) {
+          return { tool, summary: "I need two products to compare.", error: "fewer than two resolved" };
+        }
+        st.comparing = picked.map((i) => i.item_id);
+        // Only the fields all of them actually have — a comparison row that is
+        // blank for one side tells the shopper nothing and looks like a fault.
+        const keys = [...new Set(picked.flatMap((i) => Object.keys(i.attributes ?? {})))]
+          .filter((k) => picked.every((i) => (i.attributes ?? {})[k]));
+        const cheapest = picked.reduce((a, b) => (b.price.value < a.price.value ? b : a));
+        return {
+          tool,
+          render: "comparison",
+          summary: `Compared ${picked.map((i) => i.name).join(" vs ")}. Cheapest is ${cheapest.name} at ₹${cheapest.price.value}.`,
+          data: {
+            products: picked.map((i) => productCard(i)),
+            rows: [
+              { label: "Price", values: picked.map((i) => `₹${i.price.value.toLocaleString("en-IN")}`) },
+              { label: "In stock", values: picked.map((i) => String(i.stock.quantity)) },
+              { label: "Shop", values: picked.map((i) => merchants.get(i.merchant_id)?.name ?? "") },
+              ...keys.map((k) => ({ label: k, values: picked.map((i) => (i.attributes ?? {})[k] ?? "—") })),
+            ],
+            cheapest: cheapest.item_id,
+          },
+        };
+      }
+
+      if (tool === "find_alternatives") {
+        const item = pick();
+        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        const cap = Number((args as Record<string, unknown>).max_price ?? 0) || null;
+        const alts = alternativesTo(item, catalogItems)
+          .filter((a) => cap === null || a.price.value <= cap)
+          .slice(0, 4);
+        st.shown = alts.map((a) => a.item_id);
+        return {
+          tool,
+          render: "products",
+          summary: alts.length
+            ? `${alts.length} alternative(s) to ${item.name}${cap ? ` under ₹${cap}` : ""}.`
+            : `Nothing else like ${item.name}${cap ? ` under ₹${cap}` : ""}.`,
+          data: {
+            results: alts.map((a, n) =>
+              productCard(a, [
+                a.price.value < item.price.value
+                  ? `₹${item.price.value - a.price.value} cheaper than ${item.name}`
+                  : `same kind of thing as ${item.name}`,
+              ]),
+            ).map((c, n) => ({ ref: n + 1, ...c })),
+          },
+        };
+      }
+
+      if (tool === "find_complements") {
+        const item = pick();
+        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        st.selected = item.item_id;
+        // Never suggest something they already have.
+        const inCart = new Set(st.cart.map((l) => l.item_id));
+        const goes = complementsOf(item, catalogItems).filter((c) => !inCart.has(c.item_id)).slice(0, 3);
+        st.shown = goes.map((g) => g.item_id);
+        return {
+          tool,
+          render: "products",
+          summary: goes.length ? `${goes.length} thing(s) that go with ${item.name}.` : `Nothing listed as going with ${item.name}.`,
+          data: {
+            anchor: productCard(item),
+            results: goes.map((g, n) => ({ ref: n + 1, ...productCard(g, [`goes with ${item.name}`]) })),
+          },
+        };
+      }
+
+      if (tool === "view_cart") {
+        const v = cartView(st);
+        return {
+          tool,
+          render: "cart",
+          summary: v.count === 0 ? "The cart is empty." : `${v.count} item(s), ₹${v.total.toLocaleString("en-IN")}.`,
+          data: v,
+        };
+      }
+
+      if (tool === "add_to_cart") {
+        const item = pick();
+        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        // Stock is checked before the cart changes, not after — a cart that
+        // holds more than the shop has is a promise nobody can keep.
+        const want = Math.max(1, Math.round(Number((args as Record<string, unknown>).qty ?? 1)));
+        const line = st.cart.find((l) => l.item_id === item.item_id);
+        const already = line?.qty ?? 0;
+        const room = item.stock.quantity - already;
+        if (room <= 0) {
+          return {
+            tool,
+            summary: `${item.name}: only ${item.stock.quantity} in stock and they are all in the cart.`,
+            error: "no stock left",
+          };
+        }
+        const added = Math.min(want, room);
+        if (line) line.qty += added;
+        else st.cart.push({ item_id: item.item_id, qty: added, price: item.price.value });
+        st.selected = item.item_id;
+        st.updated_at = new Date().toISOString();
+        const v = cartView(st);
+        return {
+          tool,
+          render: "cart",
+          summary:
+            `Added ${added} × ${item.name} (₹${item.price.value}). Cart is ₹${v.total.toLocaleString("en-IN")}.` +
+            (added < want ? ` Only ${added} could be added — that is all the stock there is.` : ""),
+          data: v,
+        };
+      }
+
+      if (tool === "remove_from_cart") {
+        const item = pick();
+        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        const before = st.cart.length;
+        st.cart = st.cart.filter((l) => l.item_id !== item.item_id);
+        st.updated_at = new Date().toISOString();
+        const v = cartView(st);
+        return {
+          tool,
+          render: "cart",
+          summary: before === st.cart.length ? `${item.name} was not in the cart.` : `Removed ${item.name}. Cart is ₹${v.total.toLocaleString("en-IN")}.`,
+          data: v,
         };
       }
 
@@ -2462,11 +2655,35 @@ export async function createApp(options: AppOptions = {}) {
     }
 
     const started = Date.now();
-    // Scoped to this request: two shoppers searching at once must not be able
-    // to resolve each other's numbers.
+    /**
+     * One shopper's session, carried by the browser.
+     *
+     * The numbered list, what they are looking at, their budget and their cart
+     * all live here between turns. Without it every message started from
+     * nothing and the model filled the gap by guessing, which is where the
+     * invented product ids came from.
+     */
+    const sessionId = String(req.body?.session_id ?? "").trim() || `anon_${req.ip ?? "x"}`;
+    const st = stateFor(sessionId);
+    // Search numbering is per turn; everything else persists.
     const lastSearch: string[] = [];
-    const out = await converseWithTools(turns, (call) => runBuyerTool(call, lastSearch));
-    res.json({ ...out, elapsed_ms: Date.now() - started });
+
+    const out = await converseWithTools(turns, (call) => runBuyerTool(call, lastSearch, st));
+    res.json({
+      ...out,
+      elapsed_ms: Date.now() - started,
+      cart: cartView(st),
+      // Development only: what the agent understood and did, never its
+      // reasoning. A shopper's screen shows none of this.
+      debug: {
+        session: sessionId,
+        selected: st.selected,
+        budget: st.budget,
+        shown: st.shown.length,
+        comparing: st.comparing,
+        tools: out.steps.map((x) => x.tool),
+      },
+    });
   });
 
   app.post("/agent/chat", async (req: Request, res: Response) => {

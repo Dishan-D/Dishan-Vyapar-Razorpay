@@ -69,6 +69,91 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
     spends: false,
   },
   {
+    name: "get_product",
+    description:
+      "Everything known about one product: price, stock, its attributes, other sizes of it, and what goes with it. Use it when the shopper asks about a specific thing — 'does it come smaller', 'what's in it', 'is that one any good'.",
+    parameters: {
+      type: "object",
+      properties: { product: { type: "string", description: "Number from the last list, or the product's name. \"it\" and \"that\" mean whatever they were last looking at." } },
+      required: ["product"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
+    name: "compare_products",
+    description:
+      "Put two or more products side by side on price, size, stock and shop. Use it for 'which is better', 'what's the difference', 'which should I buy'.",
+    parameters: {
+      type: "object",
+      properties: {
+        products: { type: "array", items: { type: "string" }, description: "Numbers from the last list, or product names. Two or more." },
+      },
+      required: ["products"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
+    name: "find_alternatives",
+    description:
+      "Other products that do the same job, nearest in price first. Use it for 'too expensive', 'anything cheaper', 'what else is like this'.",
+    parameters: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product to find alternatives to." },
+        max_price: { type: "number", description: "Ceiling in rupees, or 0 for none." },
+      },
+      required: ["product", "max_price"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
+    name: "find_complements",
+    description:
+      "Things that genuinely go with a product, from the shop's own list. Use it for 'what else do I need', 'anything that goes with this'.",
+    parameters: {
+      type: "object",
+      properties: { product: { type: "string", description: "The product to build around." } },
+      required: ["product"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
+    name: "view_cart",
+    description: "What is in the shopper's cart right now, and what it comes to.",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+    spends: false,
+  },
+  {
+    name: "add_to_cart",
+    description:
+      "Actually put a product in the cart. Only call this when the shopper has asked for it — 'add that', 'I'll take two'. It changes their cart, so never call it to illustrate a suggestion.",
+    parameters: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "Number from the last list, name, or \"it\" for what they were looking at." },
+        qty: { type: "number", description: "How many. 1 unless they said otherwise." },
+      },
+      required: ["product", "qty"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
+    name: "remove_from_cart",
+    description: "Take a product out of the cart. Only when the shopper asks.",
+    parameters: {
+      type: "object",
+      properties: { product: { type: "string", description: "The product to remove." } },
+      required: ["product"],
+      additionalProperties: false,
+    },
+    spends: false,
+  },
+  {
     name: "start_purchase",
     description:
       "Propose buying ONE specific product that search_shelf has already returned. This does NOT buy it — it prepares the purchase and the shopper must confirm before any money moves. Call search_shelf first and pass the NUMBER of the product you want from its numbered results.",
@@ -100,6 +185,14 @@ export interface BuyerToolResult {
   summary: string;
   data?: unknown;
   error?: string;
+  /**
+   * What the interface should draw for this result.
+   *
+   * The frontend renders on this rather than parsing the reply, which is why
+   * a comparison can be a table and a product can be a card instead of every
+   * answer arriving as a paragraph the shopper has to read twice.
+   */
+  render?: "products" | "product" | "comparison" | "cart" | "none";
   /** Present only for tools that spend. Nothing happens until this is pressed. */
   proposal?: {
     label: string;
