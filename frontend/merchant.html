@@ -310,6 +310,37 @@
       <p class="hint">Change anything — what you set here is yours, and stops being second-guessed.</p>
       <div id="items" style="margin-top:12px"><p class="empty">Loading…</p></div>
     </section>
+
+    <section>
+      <h2>Revenue recovery</h2>
+      <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
+      <div id="rectotals" style="margin-top:14px"></div>
+      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
+    </section>
+
+    <section>
+      <h2>Grow revenue</h2>
+      <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
+      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+    </section>
+
+    <section>
+      <h2>Your AI Commerce Twin</h2>
+      <p class="hint">Tell it what to change in your own words. It shows you what that means before anything happens.</p>
+      <div class="twin" style="margin-top:14px">
+        <input id="twinsay" placeholder="Don't go below ₹1,000 for the blue saree" />
+        <button class="btn secondary" id="twinread">Read it</button>
+      </div>
+      <div id="twinprop"></div>
+    </section>
+
+    <section>
+      <h2>This shop is machine-readable</h2>
+      <div class="qr" style="margin-top:14px">
+        <img id="qr" alt="QR to this shop's dashboard" />
+        <p class="hint" id="qrnote">The same sticker that already takes UPI. Now it opens onto a catalog an agent can read.</p>
+      </div>
+    </section>
   </div>
 
   <div class="col">
@@ -329,32 +360,17 @@
     </section>
 
     <section>
-      <h2>Grow revenue</h2>
-      <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
-      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+      <h2>What a different price floor would have earned</h2>
+      <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
+        engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
+      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
-      <h2>Revenue recovery</h2>
-      <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
-      <div id="rectotals" style="margin-top:14px"></div>
-      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
-    </section>
-
-    <section>
-      <h2>Your AI Commerce Twin</h2>
-      <p class="hint">Tell it what to change in your own words. It shows you what that means before anything happens.</p>
-      <div class="twin" style="margin-top:14px">
-        <input id="twinsay" placeholder="Don't go below ₹1,000 for the blue saree" />
-        <button class="btn secondary" id="twinread">Read it</button>
-      </div>
-      <div id="twinprop"></div>
-    </section>
-
-    <section>
-      <h2>System performance</h2>
-      <p class="hint">Counted from stored state. Nothing here is projected or sampled.</p>
-      <div class="perf" id="perf" style="margin-top:14px"></div>
+      <h2>Money in, matched to what you sold</h2>
+      <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
+        what was sold. This is your settlement feed joined to your own sales.</p>
+      <div id="recon" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -370,25 +386,9 @@
     </section>
 
     <section>
-      <h2>This shop is machine-readable</h2>
-      <div class="qr" style="margin-top:14px">
-        <img id="qr" alt="QR to this shop's dashboard" />
-        <p class="hint" id="qrnote">The same sticker that already takes UPI. Now it opens onto a catalog an agent can read.</p>
-      </div>
-    </section>
-
-    <section>
-      <h2>What a different price floor would have earned</h2>
-      <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
-        engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
-      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section>
-      <h2>Money in, matched to what you sold</h2>
-      <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
-        what was sold. This is your settlement feed joined to your own sales.</p>
-      <div id="recon" style="margin-top:14px"><p class="empty">Loading…</p></div>
+      <h2>System performance</h2>
+      <p class="hint">Counted from stored state. Nothing here is projected or sampled.</p>
+      <div class="perf" id="perf" style="margin-top:14px"></div>
     </section>
 
     <section>

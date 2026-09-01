@@ -1392,6 +1392,122 @@ export async function createApp(options: AppOptions = {}) {
     },
   );
 
+  /**
+   * Products the shopkeeper typed out themselves, each with its own photo.
+   *
+   * The photo-and-voice path has one structural weakness: nothing reliably ties
+   * a particular photo to a particular product. A shelf photo may hold six
+   * items; two photos may show one. The extraction pairs them positionally and
+   * the code says outright that this is a display hint, not a fact.
+   *
+   * This path removes the ambiguity instead of modelling it. The merchant says
+   * "this is the thing, this is its picture, this is what it costs" — and a
+   * merchant's own statement is the highest-confidence input in the system, so
+   * nothing here is scored, sanity-checked against a model's guess, or held for
+   * confirmation. They have already confirmed it by typing it.
+   *
+   * It is not a replacement for reading photos. It is what a shopkeeper reaches
+   * for when they have five things to list and want them right.
+   */
+  app.post(
+    "/onboarding/merchants/:id/items",
+    upload.array("photos", 12),
+    (req: Request, res: Response) => {
+      const id = String(req.params.id);
+      const merchant = onboarding.getMerchant(id);
+      if (!merchant) {
+        res.status(404).json({ error: `no such shop: ${id}` });
+        return;
+      }
+
+      let rows: Array<{ name?: unknown; price?: unknown; stock?: unknown; category?: unknown; photo_index?: unknown }>;
+      try {
+        rows = JSON.parse(String(req.body?.items ?? "[]"));
+      } catch {
+        res.status(400).json({ error: "`items` must be a JSON array" });
+        return;
+      }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        res.status(400).json({ error: "send at least one item" });
+        return;
+      }
+
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const now = new Date().toISOString();
+      const existing = onboarding.listItems().filter((r) => r.item.merchant_id === id).length;
+      const saved: CatalogItem[] = [];
+      const rejected: Array<{ index: number; why: string }> = [];
+
+      rows.forEach((row, i) => {
+        const name = String(row.name ?? "").trim();
+        if (!name) {
+          rejected.push({ index: i, why: "no name" });
+          return;
+        }
+        const price = Number(row.price ?? 0);
+        const stock = Number(row.stock ?? 0);
+        if (!Number.isFinite(price) || price < 0 || !Number.isFinite(stock) || stock < 0) {
+          rejected.push({ index: i, why: "price and stock must be zero or more" });
+          return;
+        }
+
+        const item: CatalogItem = {
+          item_id: `itm_${id.slice(4)}_m${String(existing + saved.length + 1).padStart(3, "0")}`,
+          merchant_id: id,
+          name,
+          category: String(row.category ?? "general.other"),
+          attributes: {},
+          // Stated by the person who owns the stock. There is no more reliable
+          // source available to this system, and pretending to be unsure about
+          // it would only generate a question they have already answered.
+          price: { value: Math.round(price), currency: "INR", confidence: 1 },
+          stock: { quantity: Math.round(stock), confidence: 1 },
+          source: { type: "merchant_entry", raw_text: name },
+          // A priced item is sellable immediately; an unpriced one is not, and
+          // that is the merchant's own choice rather than a doubt about them.
+          needs_merchant_confirmation: price <= 0,
+          extracted_at: now,
+        };
+
+        const idx = Number(row.photo_index ?? -1);
+        const file = Number.isInteger(idx) && idx >= 0 ? files[idx] : undefined;
+
+        onboarding.saveItem({
+          item,
+          ...(price > 0
+            ? {
+                policy: {
+                  item_id: item.item_id,
+                  list_price: item.price.value,
+                  floor_price: Math.round(item.price.value * 0.85),
+                  max_rounds: 3,
+                  set_by: "merchant" as const,
+                  set_at: now,
+                },
+              }
+            : {}),
+          ...(file ? { photo_url: `/uploads/${file.filename}` } : {}),
+        });
+        saved.push(item);
+      });
+
+      restoreOnboarded();
+
+      res.status(201).json({
+        merchant_id: id,
+        added: saved.length,
+        rejected,
+        items: saved.map((i) => ({
+          item_id: i.item_id,
+          name: i.name,
+          price: i.price.value,
+          stock: i.stock.quantity,
+          sellable: !i.needs_merchant_confirmation,
+        })),
+      });
+    },
+  );
+
   app.get("/onboarding/merchants/:id/inputs", (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!onboarding.getMerchant(id)) {

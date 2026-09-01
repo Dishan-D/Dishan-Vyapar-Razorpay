@@ -73,6 +73,18 @@
   .bacol ul { margin:0; padding:0; }
   .bacol.before li::before { content:"—"; color:var(--ink-4); }
   .bacol.after li::before { content:"✓"; color:var(--green); }
+  .irow { display:grid; grid-template-columns:64px 1fr 104px 92px 30px; gap:10px; align-items:center;
+           padding:10px; border:1px solid var(--border); border-radius:var(--r-sm); margin-bottom:9px;
+           background:var(--surface); }
+  .irow .shot2 { width:64px; height:64px; border-radius:8px; background:var(--surface-2);
+                 border:1px dashed var(--border-2); display:grid; place-items:center; cursor:pointer;
+                 overflow:hidden; font-size:11px; color:var(--ink-4); text-align:center; }
+  .irow .shot2 img { width:100%; height:100%; object-fit:cover; }
+  .irow input { font:inherit; font-size:13px; padding:8px 10px; border:1px solid var(--border-2);
+                border-radius:7px; background:var(--surface); width:100%; }
+  .irow .rm { background:none; border:0; color:var(--ink-4); font-size:16px; cursor:pointer; }
+  @media (max-width:640px){ .irow { grid-template-columns:56px 1fr 30px; }
+                            .irow input.p, .irow input.s { grid-column:2 / 3; } }
 </style>
 </head>
 <body>
@@ -115,6 +127,7 @@
       <button class="on" data-pane="photos">Photos</button>
       <button data-pane="voice">Voice</button>
       <button data-pane="text">Text</button>
+      <button data-pane="items">One by one</button>
     </div>
 
     <div class="pane on" id="pane-photos">
@@ -143,6 +156,26 @@
 
     <div class="pane" id="pane-text">
       <textarea id="desc" placeholder="I sell sarees, kurtas and dress materials. Most prices are negotiable."></textarea>
+    </div>
+
+    <!--
+      The precise path.
+
+      Every other tab hands the model raw input and asks it to work out what the
+      products are — which is the hard problem this project exists to solve, and
+      which is never perfect. Nothing reliably ties one photo to one product: a
+      shelf photo may hold six, two photos may show one.
+
+      Here the shopkeeper says it directly, one row per thing, each with its own
+      picture. Slower, and exactly right, which is what you want for the five
+      items you actually care about.
+    -->
+    <div class="pane" id="pane-items">
+      <p class="hint" style="margin:0 0 12px">A row per product, with its own photo. Nothing is guessed —
+        what you type is what an AI buyer sees. Leave the price blank if you haven't decided; it stays
+        off sale until you set one.</p>
+      <div id="rows"></div>
+      <button class="btn secondary" id="addrow" style="margin-top:10px">+ Add another</button>
     </div>
 
     <div class="added" id="added"><span>Nothing added yet.</span></div>
@@ -265,10 +298,86 @@ function summarise() {
   if (photos.length) bits.push(`<b>${photos.length}</b> photo${photos.length > 1 ? "s" : ""}`);
   if ($("voice").value.trim()) bits.push("<b>1</b> voice note");
   if ($("desc").value.trim()) bits.push("<b>1</b> description");
+  const named = rows.filter((r) => r.name.trim()).length;
+  if (named) bits.push(`<b>${named}</b> item${named > 1 ? "s" : ""} typed out`);
   $("added").innerHTML = bits.length ? bits.map((b) => `<span>${b}</span>`).join("") : "<span>Nothing added yet.</span>";
 }
 $("voice").oninput = summarise;
 $("desc").oninput = summarise;
+
+// ── one-by-one entry ────────────────────────────────────────────────────────
+//
+// State lives in this array rather than in the DOM, so a re-render never loses
+// a half-typed row and the photo stays attached to the product the shopkeeper
+// attached it to. Reading the values back out of inputs at submit time was the
+// obvious shortcut and would have broken the moment a row was removed.
+let rows = [{ name: "", price: "", stock: "", file: null, url: null }];
+
+function renderRows() {
+  $("rows").innerHTML = rows.map((r, i) => `
+    <div class="irow">
+      <label class="shot2" title="Add a photo of this product">
+        ${r.url ? `<img src="${r.url}" alt="" />` : "photo"}
+        <input type="file" accept="image/*" data-photo="${i}" hidden />
+      </label>
+      <input value="${esc(r.name)}" data-f="name" data-i="${i}" placeholder="What is it? e.g. Blue cotton saree" />
+      <input class="p" value="${esc(r.price)}" data-f="price" data-i="${i}" type="number" min="0" placeholder="₹ price" />
+      <input class="s" value="${esc(r.stock)}" data-f="stock" data-i="${i}" type="number" min="0" placeholder="in stock" />
+      <button class="rm" data-rm="${i}" title="Remove">✕</button>
+    </div>`).join("");
+
+  for (const el of $("rows").querySelectorAll("[data-f]")) {
+    el.oninput = () => { rows[Number(el.dataset.i)][el.dataset.f] = el.value; summarise(); };
+  }
+  for (const el of $("rows").querySelectorAll("[data-photo]")) {
+    el.onchange = () => {
+      const f = el.files?.[0];
+      if (!f) return;
+      const r = rows[Number(el.dataset.photo)];
+      if (r.url) URL.revokeObjectURL(r.url);
+      r.file = f;
+      r.url = URL.createObjectURL(f);
+      renderRows();
+    };
+  }
+  for (const el of $("rows").querySelectorAll("[data-rm]")) {
+    el.onclick = () => {
+      const i = Number(el.dataset.rm);
+      if (rows[i].url) URL.revokeObjectURL(rows[i].url);
+      rows.splice(i, 1);
+      if (rows.length === 0) rows.push({ name: "", price: "", stock: "", file: null, url: null });
+      renderRows(); summarise();
+    };
+  }
+}
+$("addrow").onclick = () => { rows.push({ name: "", price: "", stock: "", file: null, url: null }); renderRows(); };
+renderRows();
+
+/** Send the typed rows. Returns how many the server accepted. */
+async function sendTypedItems() {
+  const usable = rows.filter((r) => r.name.trim());
+  if (usable.length === 0) return 0;
+
+  const form = new FormData();
+  const payload = [];
+  for (const r of usable) {
+    // photo_index points into the files actually appended, so removing a row
+    // cannot leave a product pointing at somebody else's picture.
+    let idx = -1;
+    if (r.file) { idx = form.getAll("photos").length; form.append("photos", r.file); }
+    payload.push({
+      name: r.name.trim(),
+      price: Number(r.price) || 0,
+      stock: Number(r.stock) || 0,
+      ...(idx >= 0 ? { photo_index: idx } : {}),
+    });
+  }
+  form.append("items", JSON.stringify(payload));
+
+  const res = await fetch(`/onboarding/merchants/${merchantId}/items`, { method: "POST", body: form });
+  if (!res.ok) throw new Error((await res.json()).error ?? "could not save your items");
+  return (await res.json()).added ?? 0;
+}
 /**
  * A merchant who mistypes their shop name should not have to start over. The
  * step they are on is the only state here; going back never discards what they
@@ -321,8 +430,9 @@ function renderStages(activeIndex, elapsed) {
 }
 
 $("go2").onclick = async () => {
-  if (!photos.length && !$("voice").value.trim() && !$("desc").value.trim()) {
-    alert("Add a photo, a voice note, or a line of text first.");
+  const typed = rows.filter((r) => r.name.trim()).length;
+  if (!photos.length && !$("voice").value.trim() && !$("desc").value.trim() && typed === 0) {
+    alert("Add a photo, a voice note, a line of text, or type an item in.");
     return;
   }
   furthest = 3;
@@ -342,7 +452,21 @@ $("go2").onclick = async () => {
   try {
     const up = await fetch(`/onboarding/merchants/${merchantId}/inputs`, { method: "POST", body: form });
     if (!up.ok) throw new Error((await up.json()).error ?? "upload failed");
+    const typedIn = await sendTypedItems();
     advance();
+
+    // Rows the merchant typed need no model at all — they said it themselves.
+    // So a shop built only from typed rows skips extraction entirely, which
+    // also means it still works when the vision quota is spent.
+    if (typedIn > 0 && !photos.length && !$("voice").value.trim() && !$("desc").value.trim()) {
+      while (stage < STAGES.length) advance();
+      $("h3").textContent = "Your AI storefront is ready.";
+      $("l3").textContent = `${typedIn} product${typedIn > 1 ? "s" : ""}, exactly as you typed them. Nothing was guessed.`;
+      renderResult({ products: typedIn, held: 0, items: [], store_summary: "" });
+      $("nav3").style.display = "";
+      $("back2").onclick = () => showStep(2);
+      return;
+    }
 
     // The remaining stages all happen inside one server call, so they are
     // marked off as it returns rather than pretending to tick along on a timer.

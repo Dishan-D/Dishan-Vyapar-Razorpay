@@ -29,7 +29,15 @@ export interface CatalogItem {
   attributes: Record<string, string>;
   price: { value: number; currency: Currency; confidence: number };
   stock: { quantity: number; confidence: number };
-  source: { type: "photo" | "voice_note" | "payment_page"; raw_text: string };
+  /**
+   * Where this record came from.
+   *
+   * "merchant_entry" is deliberately a distinct kind rather than being folded
+   * into one of the read-from-input types: a product the shopkeeper typed out
+   * themselves has different standing to one a model read off a photograph, and
+   * every screen that shows provenance should be able to say which it was.
+   */
+  source: { type: "photo" | "voice_note" | "payment_page" | "merchant_entry"; raw_text: string };
   needs_merchant_confirmation: boolean;
   extracted_at: IsoTimestamp;
 }
