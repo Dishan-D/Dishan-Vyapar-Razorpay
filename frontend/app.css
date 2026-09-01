@@ -16,7 +16,7 @@
    .opp, .case, .ord, .pane, .ex and toggle .on/.dim/.looked/.over/.can. They
    are restyled freely below but never renamed.                              */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
   color-scheme: light;
@@ -45,10 +45,17 @@
   --red:       #b3382f;
   --red-2:     #fbefee;
   --red-3:     #ecc7c3;
-  --blue:      #2a78d6;
-  --blue-2:    #eef4fd;
-  --blue-3:    #c3daf6;
-  --blue-ink:  #1f5da8;
+  /* Accent, from the commerce-layer design: a blue that carries into violet.
+     Stated in oklch because that is how the reference defines it, and because
+     the gradient stays perceptually even across the ramp. */
+  --blue:      oklch(0.53 0.21 265);
+  --blue-2:    oklch(0.965 0.018 265);
+  --blue-3:    oklch(0.88 0.055 265);
+  --blue-ink:  oklch(0.45 0.20 265);
+  --violet:    oklch(0.55 0.23 295);
+
+  --gradient-brand: linear-gradient(100deg, var(--blue), var(--violet));
+  --gradient-text:  linear-gradient(100deg, oklch(0.45 0.2 265), oklch(0.52 0.23 300));
 
   /* data series — validated (all-pairs CVD ΔE 9.2, normal 24.0 on white) */
   --s1: #2a78d6;
@@ -56,12 +63,14 @@
   --s3: #1baf7a;
 
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --display: "Space Grotesk", Inter, -apple-system, system-ui, sans-serif;
   --r:    14px;
   --r-sm: 10px;
   --r-xs: 7px;
-  --shadow:    0 1px 2px rgba(22,24,29,.04);
-  --shadow-md: 0 1px 2px rgba(22,24,29,.04), 0 6px 16px -8px rgba(22,24,29,.10);
-  --shadow-pop: 0 8px 28px -10px rgba(22,24,29,.18);
+  --shadow:    0 1px 2px oklch(0.2 0.03 265 / .04);
+  --shadow-md: 0 1px 2px oklch(0.2 0.03 265 / .04), 0 18px 40px -24px oklch(0.3 0.08 265 / .22);
+  --shadow-pop: 0 8px 28px -10px oklch(0.3 0.08 265 / .28);
+  --shadow-glow: 0 0 0 1px oklch(0.53 0.21 265 / .25), 0 18px 60px -20px oklch(0.53 0.21 275 / .4);
 
   /* one place to change the page gutter and the maximum column measure */
   --gutter: 26px;
@@ -103,7 +112,7 @@ header {
 .brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 650; letter-spacing: -.022em; }
 .brand .mark {
   width: 22px; height: 22px; border-radius: 6px;
-  background: linear-gradient(180deg, #2f2f36, var(--ink));
+  background: var(--gradient-brand);
   display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700;
   letter-spacing: 0;
 }
@@ -135,7 +144,45 @@ nav.tabs a.on { background: var(--blue-2); color: var(--blue-ink); font-weight: 
 section, .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r); padding: 20px; min-width: 0;
+  box-shadow: var(--shadow);
 }
+
+/* ══ the decorative layer ═════════════════════════════════════════════════
+   Borrowed from the commerce-layer design and kept to backgrounds only. None
+   of it sits behind a number: a figure over a gradient stops looking like a
+   figure, and every number in this product is meant to be checkable.        */
+.text-gradient { background-image: var(--gradient-text); background-clip: text; color: transparent; }
+.brand-gradient { background-image: var(--gradient-brand); }
+
+.radial-fade { background-image: radial-gradient(60% 55% at 50% 0%, oklch(0.53 0.21 270 / .14), transparent 70%); }
+.line-grid {
+  background-image:
+    linear-gradient(to right, oklch(0.5 0.05 265 / .07) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.5 0.05 265 / .07) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+.dot-grid { background-image: radial-gradient(oklch(0.53 0.21 265 / .16) 1px, transparent 1px); background-size: 22px 22px; }
+
+.panel-glow { box-shadow: var(--shadow-glow); border-color: oklch(0.53 0.21 265 / .35); }
+
+/* A bar with the brand gradient travelling through it — used to show that
+   something is genuinely in flight, never as ambient decoration. */
+.flow-line { position: relative; overflow: hidden; background: oklch(0.53 0.21 265 / .16); }
+.flow-line::after {
+  content: ""; position: absolute; inset: 0;
+  background: var(--gradient-brand); animation: flow 2.6s linear infinite;
+}
+@keyframes flow { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.pulse-soft { animation: pulse-soft 3.4s ease-in-out infinite; }
+@keyframes pulse-soft { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* Fade-up on arrival. Applied by the page, honoured only once. */
+.reveal { opacity: 0; transform: translateY(22px);
+          transition: opacity .8s cubic-bezier(.22,1,.36,1), transform .8s cubic-bezier(.22,1,.36,1); }
+.reveal[data-shown="true"] { opacity: 1; transform: none; }
+
+.stage { font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
+         text-transform: uppercase; color: var(--ink-4); }
 
 /* A card header: title, a quiet line under it, and an optional right-hand
    action. Used everywhere so no two panels invent their own arrangement. */
@@ -145,13 +192,15 @@ section, .card {
 .chead .hint { margin: 0; }
 
 .pagehead { padding: 28px var(--gutter) 6px; max-width: var(--page); margin: 0 auto; }
-.pagehead h1 { font-size: 25px; font-weight: 650; letter-spacing: -.03em; margin: 0 0 4px; }
+.pagehead h1 { font-size: 26px; font-weight: 600; letter-spacing: -.038em; margin: 0 0 4px; }
 .pagehead p { color: var(--ink-3); font-size: 13.5px; margin: 0; }
 
-h2 { font-size: 14px; font-weight: 650; letter-spacing: -.015em; margin: 0 0 3px; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: -.035em; text-wrap: balance; }
+h2 { font-size: 14.5px; font-weight: 600; letter-spacing: -.028em; margin: 0 0 3px; }
 h2 + .hint { margin: 0 0 16px; }
 .hint { color: var(--ink-3); font-size: 12.5px; margin: 0; line-height: 1.5; }
-.eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-4); font-weight: 700; }
+.eyebrow { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+           letter-spacing: .22em; color: var(--ink-3); font-weight: 500; }
 .empty { color: var(--ink-4); font-size: 13px; }
 .mono { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; word-break: break-all; }
 .num { font-variant-numeric: tabular-nums; }
@@ -229,8 +278,8 @@ h2 + .hint { margin: 0 0 16px; }
   border: 1px solid transparent; white-space: nowrap;
   transition: background .12s, border-color .12s, color .12s, opacity .12s;
 }
-.btn.primary { background: var(--blue); color: #fff; }
-.btn.primary:hover:not(:disabled) { background: var(--blue-ink); }
+.btn.primary { background: var(--gradient-brand); color: #fff; border: 0; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn.dark { background: var(--ink); color: #fff; }
 .btn.dark:hover:not(:disabled) { background: #2a2d35; }
 .btn.go { background: var(--green); color: #fff; }
