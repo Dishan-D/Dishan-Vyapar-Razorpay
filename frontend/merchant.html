@@ -453,13 +453,13 @@
     <section id="askcard">
       <h2>Needs your attention</h2>
       <p class="hint">The system asks instead of guessing. One tap is enough.</p>
-      <div id="asks" style="margin-top:16px"><p class="empty">Nothing to confirm.</p></div>
+      <div id="asks" class="scrollbox short" style="margin-top:16px"><p class="empty">Nothing to confirm.</p></div>
     </section>
 
     <section id="ordercard">
       <h2>Orders</h2>
       <p class="hint">A payment is not a delivery. Nothing here marks itself handed over.</p>
-      <div id="orders" style="margin-top:14px"><p class="empty">No orders yet.</p></div>
+      <div id="orders" class="scrollbox short" style="margin-top:14px"><p class="empty">No orders yet.</p></div>
     </section>
   </div>
   <div class="secpane" id="sec-catalog">
@@ -470,7 +470,7 @@
       <div class="edithead" id="edithead" hidden>
         <span></span><span>Product</span><span>Price ₹</span><span>In stock</span><span>Agent status</span><span></span>
       </div>
-      <div id="items" style="margin-top:4px"><p class="empty">Loading…</p></div>
+      <div id="items" class="scrollbox tall" style="margin-top:4px"><p class="empty">Loading…</p></div>
 
       <!-- Stocking something new is the most ordinary thing a shop does, and
            until now the only way to do it was to set the shop up again. -->
@@ -539,27 +539,27 @@
       <p class="hint">Found by the Revenue Agent: relevance from this shop's own declared complements
         and shared tags, urgency from stock arithmetic, demand from counted searches. No model decides
         any of it, and nothing here happens without your approval.</p>
-      <div id="ragent" style="margin-top:14px"><p class="empty">Checking…</p></div>
+      <div id="ragent" class="scrollbox tall" style="margin-top:14px"><p class="empty">Checking…</p></div>
     </section>
 
     <section>
       <h2>Grow revenue</h2>
       <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
-      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+      <div id="opps" class="scrollbox tall" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
     </section>
 
     <section>
       <h2>Revenue recovery</h2>
       <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
       <div id="rectotals" style="margin-top:14px"></div>
-      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
+      <div id="cases" class="scrollbox short" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
     </section>
 
     <section>
       <h2>What a different price floor would have earned</h2>
       <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
         engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
-      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
+      <div id="curves" class="scrollbox tall" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -1093,6 +1093,22 @@ $("addsave").onclick = async () => {
   refresh();
 };
 
+/**
+ * A scroll box that has nothing to scroll should not look like one.
+ *
+ * The bottom fade means "there is more below". On a panel whose four rows
+ * already fit it means nothing, and a fade under the last row reads as a row
+ * cut in half. Measured after every render rather than guessed from a count,
+ * because how much fits depends on the window.
+ */
+function settleScrollboxes() {
+  for (const el of document.querySelectorAll(".scrollbox")) {
+    el.classList.remove("fits");
+    if (el.scrollHeight <= el.clientHeight + 1) el.classList.add("fits");
+  }
+}
+addEventListener("resize", settleScrollboxes);
+
 // ── which screen ────────────────────────────────────────────────────────────
 //
 // Remembered per shop, so a merchant who lives on Orders is not returned to
@@ -1100,6 +1116,9 @@ $("addsave").onclick = async () => {
 function showSection(key) {
   for (const b of document.querySelectorAll("#secnav button")) b.classList.toggle("on", b.dataset.sec === key);
   for (const pane of document.querySelectorAll(".secpane")) pane.classList.toggle("on", pane.id === `sec-${key}`);
+  // A hidden panel measures zero, so the boxes on the screen being revealed
+  // are re-measured now that they have a height.
+  requestAnimationFrame(settleScrollboxes);
   try { localStorage.setItem("vyapar.section", key); } catch { /* private window */ }
 }
 for (const b of document.querySelectorAll("#secnav button")) b.onclick = () => showSection(b.dataset.sec);
@@ -1323,7 +1342,7 @@ async function loadCurves() {
     return;
   }
 
-  $("curves").innerHTML = withCurve.slice(0, 4).map((c) => {
+  $("curves").innerHTML = withCurve.map((c) => {
     const top = Math.max(...c.curve.map((p) => p.revenue), 1);
     const bars = c.curve.map((p) => {
       const cls = p.current ? "now" : (c.best && p.floor_price === c.best.floor_price ? "best" : "");
@@ -1365,7 +1384,7 @@ async function loadRevenueAgent() {
       <span class="big">${rupee(body.total_estimated)}</span>
       <span class="sub">${body.count} opportunit${body.count === 1 ? "y" : "ies"}${anyEstimate ? " · some estimated" : ""}</span>
     </div>` +
-    body.opportunities.slice(0, 5).map((o) => `
+    body.opportunities.map((o) => `
       <div class="opp2">
         <div class="oh">
           <span class="kind">${OPP_KIND[o.kind] ?? o.kind}</span>
@@ -1485,7 +1504,8 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps(), loadRevenueAgent()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps(), loadRevenueAgent()])
+    .then((r) => { settleScrollboxes(); return r; });
 
 /**
  * A dashboard that cannot reach its server must say so.
