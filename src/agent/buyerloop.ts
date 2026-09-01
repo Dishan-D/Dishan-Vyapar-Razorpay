@@ -85,6 +85,66 @@ const MAX_STEPS = 4;
  * confirm" are true and useful; "is confirmed" and "your order is placed" are
  * not, and the difference is tense, not vocabulary.
  */
+/**
+ * Does the reply point at a Confirm button that does not exist?
+ *
+ * The assistant told a shopper "press the confirm button to complete the
+ * purchase" without having called start_purchase, so there was no button on
+ * screen and no way to buy the cake — the conversation dead-ended on an
+ * instruction the interface could not honour. Telling someone to press
+ * something that is not there is its own kind of false statement.
+ */
+/**
+ * Is a price pinned to the wrong product?
+ *
+ * The guard on invented figures asks "does this number exist" and cannot see a
+ * number worn by the wrong thing: "the 1kg red velvet cake at ₹750" passed
+ * because ₹750 is real — it is the Chocolate Cake's price, not Red Velvet's
+ * ₹599. The shelf then highlighted the chocolate cake, because the price was
+ * the only thing either of us had to go on.
+ *
+ * Checked only when the reply names exactly one product from the rows, which
+ * is the case where the pairing is unambiguous. Naming several and quoting
+ * several is normal and is left alone.
+ */
+export function misattributedPrice(
+  answer: string,
+  rows: Array<{ name: string; price: number }>,
+): { name: string; correct: number; quoted: number[] } | null {
+  const said = [...answer.matchAll(/₹\s?([\d,]+)/g)].map((m) => Number(m[1]!.replace(/,/g, "")));
+  if (said.length === 0) return null;
+
+  /**
+   * Word-order-independent, because the model rarely echoes the catalog's
+   * exact string: it wrote "the 1kg red velvet cake" for "Red Velvet Cake
+   * 1kg". Every meaningful token must appear, which is loose enough to match
+   * that and tight enough that "Chocolate Cake 1kg" does not — it has no
+   * "red" or "velvet". If the tokens fit more than one row the reply is
+   * ambiguous and nothing is claimed about it.
+   */
+  const lower = answer.toLowerCase();
+  const named = rows.filter((r) =>
+    r.name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1)
+      .every((t) => lower.includes(t)),
+  );
+  if (named.length !== 1) return null;
+
+  const row = named[0]!;
+  // Its own price is quoted somewhere: fine, whatever else is in the sentence.
+  if (said.includes(row.price)) return null;
+  // Another row's price is quoted instead: that is the mix-up.
+  const others = rows.filter((r) => r.price !== row!.price).map((r) => r.price);
+  const wrong = said.filter((n) => others.includes(n));
+  return wrong.length > 0 ? { name: row.name, correct: row.price, quoted: wrong } : null;
+}
+
+export function pointsAtButton(answer: string): boolean {
+  return /\b(press|tap|click|hit)\b[^.]{0,40}\bconfirm\b|\bconfirm button\b|\bwaiting to be confirmed\b/i.test(answer);
+}
+
 export function claimsPurchaseDone(answer: string): boolean {
   const t = answer.toLowerCase();
   const claims = [
@@ -253,16 +313,44 @@ export async function converseWithTools(
           continue;
         }
 
+        // Pointed at a button nobody rendered. The proposal is what puts one on
+        // screen, so go and make one rather than leave the shopper pressing at
+        // an empty panel.
+        const hasProposal = steps.some((x) => x.tool === "start_purchase" && x.proposal);
+        if (pointsAtButton(said) && !hasProposal && !retried) {
+          retried = true;
+          messages.push({
+            role: "user",
+            content:
+              "Stop. You told the shopper to press a confirm button, but you never called " +
+              "start_purchase, so no button exists and they cannot buy anything. Call " +
+              "start_purchase now with the product they chose and their budget.",
+          });
+          continue;
+        }
+
         // A purchase completes when the shopper presses the button, and this
         // loop never sees that happen — so any claim that one did is false by
         // construction, whatever the model believes.
         const overclaims = claimsPurchaseDone(said);
         const prepared = steps.some((x) => x.tool === "start_purchase" && x.proposal);
 
+        // A price pinned to the wrong product is not a rounding error — the
+        // shopper decides on it, and the shelf highlights on it.
+        const rows = steps.flatMap((x) =>
+          x.tool === "search_shelf"
+            ? ((x.data as { results?: Array<{ name: string; price: number }> })?.results ?? [])
+            : [],
+        );
+        const mixed = misattributedPrice(said, rows);
+
         return {
           answer: stray.length > 0
             ? fromRowsOnly(steps)
-            : overclaims
+            : mixed
+              ? `The ${mixed.name} is ₹${mixed.correct.toLocaleString("en-IN")}. ` +
+                `Tell me your budget and I will get it ready for you to confirm.`
+              : overclaims
               ? prepared
                 ? "It is ready and waiting for you — press Confirm below and I will send the agent."
                 : "Nothing has been bought yet. Tell me what you want and your budget, and I will get it ready for you to confirm."
@@ -272,9 +360,11 @@ export async function converseWithTools(
           answered_by: "model",
           ...(stray.length > 0
             ? { note: `replaced an answer that quoted figures no lookup returned (${stray.map((n) => "₹" + n).join(", ")})` }
-            : overclaims
-              ? { note: "replaced an answer that said a purchase was complete; nothing has been bought" }
-              : {}),
+            : mixed
+              ? { note: `replaced an answer that priced ${mixed.name} at ₹${mixed.quoted.join(", ₹")} when it is ₹${mixed.correct}` }
+              : overclaims
+                ? { note: "replaced an answer that said a purchase was complete; nothing has been bought" }
+                : {}),
         };
       }
 
