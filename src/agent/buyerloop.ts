@@ -19,6 +19,7 @@ You cannot know anything about the shelf, their orders or any shop without looki
 Answer in two or three short sentences, plainly:
 - Rupees as ₹1,200.
 - Never invent a product, a price, a shop or a delivery date. If a tool returned nothing, say nothing was found.
+- Describe a product ONLY with the fields a tool returned: its name, shop, price, stock. You do not know its flavour, texture, ingredients, colour or quality unless a tool said so. "A rich chocolate sponge with cocoa frosting" is invented — the catalog carries no such description, and a shopper cannot tell your guess from the shop's own words.
 - You may only name products that a tool returned in THIS conversation. Not a similar product, not a plausible one, not one you would expect a shop like this to carry. If the shelf has no cake, there is no cake — say so and stop, do not suggest flavours.
 - Quote the LISTED price. The "lowest" figure is a floor the shop might negotiate down to, not what the product costs; never present it as the price.
 
@@ -79,9 +80,18 @@ export function ungroundedFigures(answer: string, allowed: Set<number>): number[
 /** Every number the assistant is entitled to say back. */
 function groundedNumbers(turns: Turn[], steps: BuyerToolResult[]): Set<number> {
   const ok = new Set<number>();
-  // What the shopper said — their own budget is theirs to quote back.
+  /**
+   * Both sides of the conversation so far.
+   *
+   * The shopper's own budget is obviously theirs to quote back. Prior
+   * assistant turns count too, and leaving them out was a bad bug: every
+   * answer is checked against the evidence as it is produced, so a figure the
+   * assistant said last turn was already grounded then. Scanning only user
+   * turns meant "the balaji bakery one" — a reply that simply repeated the
+   * ₹450 it had quoted a moment earlier — was flagged as invented, and the
+   * shopper got the same "let me look that up" sentence on every turn.
+   */
   for (const t of turns) {
-    if (t.role !== "user") continue;
     for (const m of t.content.matchAll(/(\d[\d,]*)/g)) {
       const n = Number(m[1]!.replace(/,/g, ""));
       if (Number.isFinite(n)) ok.add(n);
