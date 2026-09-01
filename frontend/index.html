@@ -48,6 +48,53 @@
   .acol.cannot li::before { content:"✕"; color:var(--ink-4); }
 
   .feed { max-width:1120px; margin:0 auto; padding:34px 26px 80px; }
+  /* Structured vs unstructured — the Stage 1 problem, run live on both sides */
+  .cmp-ask { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:0 0 18px; }
+  .cmp-ask input { font:inherit; font-size:13.5px; padding:9px 12px; border:1px solid var(--border-2);
+                   border-radius:var(--r-sm); background:var(--surface); min-width:230px; flex:1; max-width:340px; }
+  .cmp-ask .chip { font-size:11.5px; padding:5px 10px; border:1px solid var(--border); border-radius:999px;
+                   background:var(--surface); color:var(--ink-2); cursor:pointer; }
+  .cmp-ask .chip:hover { border-color:var(--border-2); background:var(--surface-2); }
+
+  .cmp { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
+  @media (max-width:820px){ .cmp { grid-template-columns:1fr; } }
+  .side { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
+  .side.raw { border-color:var(--red-3); }
+  .side.str { border-color:var(--green-3); }
+  .side > header { padding:13px 15px; border-bottom:1px solid var(--border); }
+  .side.raw > header { background:var(--red-2); }
+  .side.str > header { background:var(--green-2); }
+  .side header .t { font-size:12px; text-transform:uppercase; letter-spacing:.07em; font-weight:650; }
+  .side.raw header .t { color:var(--red); }
+  .side.str header .t { color:var(--green); }
+  .side header .has { font-size:12px; color:var(--ink-2); margin-top:5px; line-height:1.5; }
+  .side .body { padding:13px 15px; }
+
+  /* Capability matrix: identity is the ✓/✕ glyph and the word, never colour alone */
+  .caps { list-style:none; margin:0 0 13px; padding:0; }
+  .caps li { display:flex; align-items:baseline; gap:8px; font-size:12.5px; padding:3.5px 0;
+             color:var(--ink-2); border-bottom:1px dashed var(--border); }
+  .caps li:last-child { border-bottom:0; }
+  .caps li .g { font-weight:700; width:12px; flex:none; font-size:11px; }
+  .caps li.no .g  { color:var(--red); }
+  .caps li.yes .g { color:var(--green); }
+  .caps li.no  { color:var(--ink-3); }
+
+  .rawline { font-family:var(--mono); font-size:11.5px; background:var(--surface-2); border:1px solid var(--border);
+             border-radius:8px; padding:8px 10px; margin:0 0 7px; color:var(--ink-2); line-height:1.5;
+             overflow-x:auto; white-space:pre-wrap; word-break:break-word; }
+  .rawline mark { background:var(--amber-2); color:var(--amber); padding:0 2px; border-radius:3px; font-weight:600; }
+  .rawline .miss { display:block; margin-top:6px; font-family:inherit; color:var(--ink-4); font-size:10.5px; }
+
+  .prod { border:1px solid var(--border); border-radius:8px; padding:9px 11px; margin:0 0 7px; background:var(--surface); }
+  .prod .n { font-size:13px; font-weight:600; letter-spacing:-.01em; }
+  .prod .f { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+  .prod .f span { font-family:var(--mono); font-size:10.5px; background:var(--surface-2);
+                  border:1px solid var(--border); border-radius:5px; padding:2px 6px; color:var(--ink-2); }
+  .verdict { font-size:12.5px; line-height:1.55; margin:11px 0 0; padding-top:11px; border-top:1px solid var(--border); }
+  .side.raw .verdict { color:var(--red); }
+  .side.str .verdict { color:var(--green); }
+
 </style>
 </head>
 <body>
@@ -100,6 +147,44 @@
           <li>Confirm a delivery on the shop's behalf</li>
         </ul>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<div class="band">
+  <div class="inner">
+    <h2>The same question, asked of raw input and of a catalog</h2>
+    <p class="sub">
+      Both sides below search the <b>same eleven merchants</b>. The left side searches what those
+      merchants actually sent — a transcribed voice note, a photo filename. The right searches the
+      catalog the pipeline built from exactly that input. Nothing is mocked: this runs on every
+      keystroke you submit.
+    </p>
+
+    <div class="cmp-ask">
+      <input id="cmpq" value="blue cotton saree" placeholder="what a buyer wants" />
+      <button class="btn primary" id="cmpgo">Ask both</button>
+      <button class="chip" data-q="school notebook">school notebook</button>
+      <button class="chip" data-q="chilli powder">chilli powder</button>
+      <button class="chip" data-q="silk dupatta">silk dupatta</button>
+    </div>
+
+    <div class="cmp">
+      <section class="side raw">
+        <header>
+          <div class="t">Unstructured · what merchants sent</div>
+          <div class="has" id="rawhas">—</div>
+        </header>
+        <div class="body" id="rawbody"><p class="hint" style="margin:0">Ask something.</p></div>
+      </section>
+      <section class="side str">
+        <header>
+          <div class="t">Structured · after the pipeline</div>
+          <div class="has" id="strhas">—</div>
+        </header>
+        <div class="body" id="strbody"><p class="hint" style="margin:0">Ask something.</p></div>
+      </section>
     </div>
   </div>
 </div>
@@ -162,6 +247,68 @@ await boot({
   onBacklog: (events) => { seen.length = 0; seen.push(...events); renderStream(); },
   onEvent: (e) => { seen.push(e); renderStream(); loadStats(); },
 });
+
+// ── Structured vs unstructured ────────────────────────────────────────────
+// The left column is not a styled-down copy of the right. The server runs a
+// literal text search over the merchants' own transcripts, which is all any
+// machine has before Stage 1 — so when it matches a kurta on the word "cotton",
+// that is the real behaviour of raw input, not a staged failure.
+const CAPS = [
+  ["can_filter_by_price",     "Filter by price"],
+  ["can_check_stock",         "Check what is in stock"],
+  ["can_verify_attributes",   "Match colour, size, material"],
+  ["can_negotiate",           "Negotiate within a floor"],
+  ["can_buy",                 "Complete a purchase"],
+];
+const capList = (m) => `<ul class="caps">` + CAPS.map(([k, label]) =>
+  `<li class="${m[k] ? "yes" : "no"}"><span class="g">${m[k] ? "✓" : "✕"}</span>${label}</li>`).join("") + `</ul>`;
+
+const hl = (text, words) => {
+  let out = esc(text);
+  for (const w of [...new Set(words)]) out = out.replace(new RegExp(`(${esc(w)})`, "gi"), "<mark>$1</mark>");
+  return out;
+};
+
+async function compare() {
+  const want = $("cmpq").value.trim();
+  if (!want) return;
+  $("rawbody").innerHTML = $("strbody").innerHTML = `<p class="hint" style="margin:0">Searching…</p>`;
+  const { body } = await api("/discover/compare-modes", { method: "POST", body: JSON.stringify({ want }) });
+  if (!body || body.error) { $("rawbody").innerHTML = `<p class="hint" style="margin:0">${esc(body?.error ?? "failed")}</p>`; return; }
+
+  const u = body.unstructured, s = body.structured;
+  $("rawhas").textContent = `A machine has ${u.what_a_machine_has}.`;
+  $("strhas").textContent = `A machine has ${s.what_a_machine_has}.`;
+
+  $("rawbody").innerHTML = capList(u)
+    + (u.results.length
+        ? u.results.map((r) => `<div class="rawline">${hl(r.raw, r.matched_words)}`
+            + `<span class="miss">${esc(r.missing.join(" · "))}</span></div>`).join("")
+        : `<p class="hint" style="margin:0 0 4px">No transcript even mentions it.</p>`)
+    + `<p class="verdict">${esc(u.verdict)}</p>`;
+
+  $("strbody").innerHTML = capList(s)
+    + (s.results.length
+        ? s.results.map((r) => `<div class="prod"><div class="n">${esc(r.name)}</div><div class="f">`
+            + `<span>${rupee(r.price)}</span><span>${esc(r.category)}</span>`
+            + `<span>${r.stock} in stock</span>`
+            + (r.negotiable_to ? `<span>floor ${rupee(r.negotiable_to)}</span>` : `<span>no floor set</span>`)
+            + Object.entries(r.attributes ?? {}).slice(0, 3).map(([k, v]) => `<span>${esc(k)}: ${esc(v)}</span>`).join("")
+            + `</div></div>`).join("")
+        : `<p class="hint" style="margin:0 0 4px">Structured, but nothing matches.</p>`)
+    + (s.held.length
+        ? `<p class="hint" style="margin:8px 0 0">Held back until the shopkeeper confirms: `
+          + s.held.map((h) => esc(h.name)).join(", ") + `</p>` : "")
+    + `<p class="verdict">${esc(s.verdict)}</p>`;
+}
+
+$("cmpgo").addEventListener("click", compare);
+$("cmpq").addEventListener("keydown", (e) => { if (e.key === "Enter") compare(); });
+for (const chip of document.querySelectorAll(".cmp-ask .chip")) {
+  chip.addEventListener("click", () => { $("cmpq").value = chip.dataset.q; compare(); });
+}
+compare();
+
 </script>
 </body>
 </html>

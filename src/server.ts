@@ -2463,6 +2463,107 @@ export async function createApp(options: AppOptions = {}) {
     res.json({ ...result, elapsed_ms: Date.now() - started });
   });
 
+  /**
+   * The same buyer request, run twice: against the raw input a merchant sent,
+   * and against the catalog the pipeline built from it.
+   *
+   * The "unstructured" side is not a degraded rendering of the structured one.
+   * It searches the merchants' actual voice notes and photo filenames as text,
+   * which is genuinely all a machine has before Stage 1 runs — so its failures
+   * are the real failures: it cannot filter on price because no price has been
+   * parsed, cannot check stock, cannot tell a colour from a shop name, and has
+   * nothing to negotiate against. Faking that comparison would be the one place
+   * in this project where the demo lied about its own premise.
+   */
+  app.post("/discover/compare-modes", (req: Request, res: Response) => {
+    const want = String(req.body?.want ?? "").trim();
+    const maxPrice = Number(req.body?.max_price ?? 0) || undefined;
+    if (!want) {
+      res.status(400).json({ error: "`want` is required" });
+      return;
+    }
+
+    const terms = want.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2);
+
+    // ── Unstructured: the merchant's own words, unparsed ────────────────────
+    const rawHits = catalogItems
+      .map((item) => {
+        const photo = structuring.photos[item.item_id]?.filename ?? "";
+        const blob = `${item.source.raw_text} ${photo}`.toLowerCase();
+        const matched = terms.filter((t) => blob.includes(t));
+        return { item, photo, matched, blob: item.source.raw_text };
+      })
+      .filter((h) => h.matched.length > 0);
+
+    const unstructured = {
+      mode: "unstructured",
+      what_a_machine_has: "the merchant's transcribed voice note and a photo filename",
+      searched: catalogItems.length,
+      text_matches: rawHits.length,
+      // Everything an agent still cannot do with a text match.
+      can_filter_by_price: false,
+      can_check_stock: false,
+      can_verify_attributes: false,
+      can_negotiate: false,
+      can_buy: false,
+      results: rawHits.slice(0, 6).map((h) => ({
+        merchant_id: h.item.merchant_id,
+        raw: h.blob,
+        photo: h.photo || null,
+        matched_words: h.matched,
+        missing: [
+          "no price a machine can compare",
+          "no stock count",
+          "no attributes to match against the request",
+          "no floor to negotiate within",
+        ],
+      })),
+      verdict:
+        rawHits.length === 0
+          ? `Nothing even mentions "${want}". An agent has no way in.`
+          : `${rawHits.length} voice note(s) mention it, and an agent can do nothing with that: there is no price to compare, no stock to check, and nothing to buy against.`,
+    };
+
+    // ── Structured: the catalog Stage 1 produced ───────────────────────────
+    const found = discover(catalogItems, { want, ...(maxPrice ? { max_price: maxPrice } : {}) });
+    const structured = {
+      mode: "structured",
+      what_a_machine_has: "name, category, attributes, price, stock, and a merchant-set price floor",
+      searched: catalogItems.length,
+      offerable: found.matches.length,
+      withheld: found.withheld.length,
+      can_filter_by_price: true,
+      can_check_stock: true,
+      can_verify_attributes: true,
+      can_negotiate: true,
+      can_buy: found.matches.some((m) => policies.has(m.item.item_id)),
+      results: found.matches.slice(0, 6).map((m) => ({
+        item_id: m.item.item_id,
+        merchant_id: m.item.merchant_id,
+        name: m.item.name,
+        category: m.item.category,
+        attributes: m.item.attributes,
+        price: m.item.price.value,
+        stock: m.item.stock.quantity,
+        negotiable_to: policies.get(m.item.item_id)?.floor_price ?? null,
+        checks: ["product found", "attributes matched", "price known", "stock known"],
+      })),
+      // Held items are the honest middle: structured enough to find, not
+      // confirmed enough to sell.
+      held: found.withheld.map((w) => ({ name: w.item.name, reason: w.reason })),
+      // Three outcomes, not two. "Found it, but the merchant never confirmed the
+      // stock" is the honest middle case and must not be reported as "no match".
+      verdict:
+        found.matches.length > 0
+          ? `${found.matches.length} product(s) an agent can filter, compare, haggle over and buy.`
+          : found.withheld.length > 0
+            ? `Found it, and deliberately did not offer it: ${found.withheld[0]?.reason ?? "held pending confirmation"}. The shopkeeper is asked before an agent is allowed to sell it.`
+            : `Structured, but nothing matches "${want}".`,
+    };
+
+    res.json({ want, max_price: maxPrice ?? null, unstructured, structured });
+  });
+
   app.get("/merchants", (_req, res) => {
     res.json({
       merchants: structuring.merchants.map((m) => ({

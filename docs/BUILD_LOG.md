@@ -519,3 +519,52 @@ silent model fallback.
 > a delivery deadline, once a budget ₹170 above what was asked — and each one
 > failed silently. Anything a model returns is now discarded unless it is
 > traceable to the user's own words.
+
+---
+
+## Obstacle 26 — The comparison that would have been easiest to fake
+
+The spec asks for a structured-vs-unstructured demonstration, and warns against the
+obvious shortcut: *"Unstructured mode must demonstrate the actual Stage 1 problem, not
+simply hide the same clean structured database behind a different UI label."*
+
+The shortcut is genuinely tempting, because it is easy and it looks better. Query the
+same catalog twice, render the left column without prices, call it "before". Every
+number on screen would still be real. The comparison would still be a lie, because the
+left column would be a catalog pretending not to be one — and the entire claim of this
+project is that building that catalog is the hard part.
+
+So `POST /discover/compare-modes` runs two different searches. The structured side calls
+the same `discover()` the buyer agent calls. The unstructured side does a literal
+substring match over `item.source.raw_text` — the merchant's actual transcribed voice
+note — plus the photo filename, because that is the complete set of what a machine has
+before Stage 1 runs.
+
+The result is more convincing than the faked version would have been, in ways I did not
+design:
+
+- **It matches the wrong things, on its own.** Asking for a *blue cotton saree* returns
+  Meena's saree and also a *white cotton kurta*, because the word "cotton" is in both
+  transcripts and raw text has no notion of which noun an adjective belongs to. I did
+  not write that failure. It is what substring matching does.
+- **The capability row is derived, not decorative.** `can_filter_by_price`,
+  `can_check_stock`, `can_negotiate`, `can_buy` are `false` on the raw side for a
+  structural reason: there is no field to filter on. The price *is* in the transcript —
+  "800 ka" — and that is exactly the point. A human reads it instantly; an agent cannot
+  act on it until something turns it into `{"price": 800}`.
+- **It surfaced a third outcome I had not accounted for.** Searching *silk dupatta*
+  found a transcript on the raw side, and on the structured side found the product and
+  refused to offer it: the merchant had said *"stock godown mein dekhna padega kitna
+  bacha hai"* — I'll have to check the godown — so stock confidence was 0.00 and the
+  item was withheld pending confirmation.
+
+  My first verdict string had only two branches and reported this as *"Structured, but
+  nothing matches"*, directly contradicting the held-item list rendered beside it. That
+  was a real bug and the interesting one: I had modelled the pipeline as
+  succeed-or-fail, when its most defensible behaviour is the third state — found it,
+  understood it, declined to sell it, asked the shopkeeper. Fixed to three branches.
+
+**What it cost:** roughly forty minutes, most of it spent on the withheld case rather
+than on the feature. **What it bought:** the one screen in the product where the premise
+is checkable rather than asserted, and the discovery that the honest version of a demo
+is not the same shape as the version you planned.
