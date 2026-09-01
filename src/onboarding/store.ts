@@ -43,6 +43,10 @@ export class OnboardingStore {
         policy_json   TEXT,
         photo_url     TEXT
       );
+      CREATE TABLE IF NOT EXISTS deleted_items (
+        item_id TEXT PRIMARY KEY,
+        at      TEXT NOT NULL
+      );
     `);
   }
 
@@ -109,6 +113,30 @@ export class OnboardingStore {
       ...(r.policy_json ? { policy: JSON.parse(r.policy_json) as NegotiationPolicy } : {}),
       ...(r.photo_url ? { photo_url: r.photo_url } : {}),
     }));
+  }
+
+  /**
+   * Remember that a product was deleted.
+   *
+   * Removing the row is not enough for anything that shipped in the seed: it
+   * was never in this table, so the delete is a no-op and the catalog puts it
+   * back on the next boot. A tombstone is the only way to record the absence
+   * of something a file keeps re-asserting.
+   */
+  markDeleted(itemId: string): void {
+    this.db
+      .prepare(`INSERT OR REPLACE INTO deleted_items (item_id, at) VALUES (?, ?)`)
+      .run(itemId, new Date().toISOString());
+  }
+
+  listDeleted(): string[] {
+    return (this.db.prepare(`SELECT item_id FROM deleted_items`).all() as Array<{ item_id: string }>)
+      .map((r) => r.item_id);
+  }
+
+  /** A product deleted and then added again is no longer deleted. */
+  clearDeleted(itemId: string): void {
+    this.db.prepare(`DELETE FROM deleted_items WHERE item_id = ?`).run(itemId);
   }
 
   deleteItem(itemId: string): void {

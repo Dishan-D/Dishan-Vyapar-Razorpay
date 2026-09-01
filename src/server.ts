@@ -149,12 +149,39 @@ export async function createApp(options: AppOptions = {}) {
         structuring.merchants.push(m);
       }
     }
+    /**
+     * A stored row is the merchant's own word and outranks the seed.
+     *
+     * This used to skip any product that already existed in the catalog, which
+     * silently made every edit to a shipped product temporary: a shopkeeper
+     * corrected a price, replaced a photo, changed a stock count, saw it work,
+     * reloaded, and got the seeded values back. The write had gone to the
+     * database each time and been ignored on the way out.
+     *
+     * The seed is a starting point. Once a merchant has touched a row, theirs
+     * is the version that counts.
+     */
+    // Anything the merchant deleted stays deleted, however it got there.
+    const gone = new Set(onboarding.listDeleted());
+    for (let i = catalogItems.length - 1; i >= 0; i--) {
+      const id = catalogItems[i]!.item_id;
+      if (!gone.has(id)) continue;
+      catalogItems.splice(i, 1);
+      policies.delete(id);
+      merchantConfirmed.delete(id);
+    }
+
     for (const row of onboarding.listItems()) {
-      if (!catalogItems.some((i) => i.item_id === row.item.item_id)) {
-        catalogItems.push(row.item);
-        if (row.policy) policies.set(row.policy.item_id, row.policy);
-        if (row.photo_url) photoUrlFor.set(row.item.item_id, row.photo_url);
-      }
+      if (gone.has(row.item.item_id)) continue;
+      const at = catalogItems.findIndex((i) => i.item_id === row.item.item_id);
+      if (at === -1) catalogItems.push(row.item);
+      else catalogItems[at] = row.item;
+
+      if (row.policy) policies.set(row.policy.item_id, row.policy);
+      if (row.photo_url) photoUrlFor.set(row.item.item_id, row.photo_url);
+      // Anything the merchant has edited is confirmed by definition — they
+      // typed it — so it must not come back wearing the seed's held flag.
+      if (!row.item.needs_merchant_confirmation) merchantConfirmed.add(row.item.item_id);
     }
   }
   /** Which products have a fetched stock photo on disk. Read once. */
@@ -1567,6 +1594,7 @@ export async function createApp(options: AppOptions = {}) {
         const idx = Number(row.photo_index ?? -1);
         const file = Number.isInteger(idx) && idx >= 0 ? files[idx] : undefined;
 
+        onboarding.clearDeleted(item.item_id);
         onboarding.saveItem({
           item,
           ...(price > 0
@@ -3099,6 +3127,9 @@ export async function createApp(options: AppOptions = {}) {
     policies.delete(itemId);
     merchantConfirmed.delete(itemId);
     onboarding.deleteItem(itemId);
+    // Seed products were never in the onboarding table, so removing the row
+    // there deletes nothing and the catalog file puts them back on boot.
+    onboarding.markDeleted(itemId);
     photoUrlFor.delete(itemId);
 
     bus.emit({
