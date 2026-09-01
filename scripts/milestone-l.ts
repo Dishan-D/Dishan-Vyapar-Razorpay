@@ -33,6 +33,19 @@ class WebhookGateway implements PaymentGateway {
   private seq = 0;
   private readonly real = new RazorpayGateway("rzp_test_milestonel", "keysecret");
 
+  /** This double exists to exercise webhook verification, not the read. */
+
+  async fetchStatus(orderId: string) {
+
+    return { source: "razorpay" as const, order_id: orderId, order_status: "paid",
+
+      amount_paise: 0, amount_paid_paise: 0, payment_id: null, payment_status: null,
+
+      method: null, error: null, fetched_at: new Date().toISOString() };
+
+  }
+
+
   async createOrder(req: OrderRequest): Promise<OrderResult> {
     this.seq++;
     return {

@@ -44,6 +44,9 @@ class Spy implements PaymentGateway {
   readonly requiresCheckout = false;
   private inner = new SimulatedGateway();
   async createOrder(q: OrderRequest): Promise<OrderResult> { this.calls++; return this.inner.createOrder(q); }
+  /** Test double: the read is not what these spies are testing. */
+  async fetchStatus(orderId: string) { return this.inner.fetchStatus(orderId); }
+
   async capturePayment(o: OrderResult): Promise<PaymentResult> { this.calls++; return this.inner.capturePayment(o); }
 }
 

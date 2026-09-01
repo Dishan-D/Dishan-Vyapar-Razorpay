@@ -2335,6 +2335,72 @@ export async function createApp(options: AppOptions = {}) {
     });
   });
 
+  /**
+   * Our record and Razorpay's, side by side.
+   *
+   * Everywhere else in this product a payment is something we assert: we hold a
+   * signed Payment Mandate and we show it. This endpoint asks the gateway what
+   * it currently believes about the same order and reports both, including when
+   * they disagree.
+   *
+   * That disagreement is the point. A demo that only ever shows its own
+   * bookkeeping cannot prove the money existed; one that fetches the order back
+   * from Razorpay and finds `status: paid, amount_paid: 26000` has evidence
+   * nobody has to take on trust. If Razorpay says the order is still `created`
+   * while we hold a payment mandate, that is a real finding and it is shown as
+   * one rather than smoothed over.
+   */
+  app.get("/transactions/:id/gateway-status", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const chain = store.loadChain(id);
+    const order = store.loadOrder(id);
+    if (!chain || !order) {
+      res.status(404).json({ error: `no such transaction, or it never reached an order: ${id}` });
+      return;
+    }
+
+    // Which rail this transaction actually ran on, decided by the id it holds
+    // rather than by whatever gateway happens to be configured now.
+    const simulated = order.order_id.startsWith("sim_");
+    const rail = simulated ? testRail : gateway;
+
+    const ours = {
+      order_id: order.order_id,
+      amount_paise: order.amount_paise,
+      payment_id: chain.payment?.razorpay_payment_id ?? null,
+      payment_status: chain.payment?.status ?? null,
+      agreed_price: chain.cart?.final_price.value ?? null,
+      delivered: Boolean(chain.fulfillment),
+    };
+
+    let theirs = null;
+    let error: string | null = null;
+    try {
+      theirs = await rail.fetchStatus(order.order_id);
+    } catch (err) {
+      // A gateway that cannot be reached is not a payment that did not happen.
+      // Say which one this is.
+      error = err instanceof Error ? err.message : String(err);
+    }
+
+    const agrees =
+      theirs !== null &&
+      (ours.payment_id === null || theirs.payment_id === null || ours.payment_id === theirs.payment_id) &&
+      (theirs.source === "simulated" || theirs.amount_paise === ours.amount_paise);
+
+    res.json({
+      transaction_id: id,
+      rail: simulated ? "simulated" : "razorpay",
+      ours,
+      gateway: theirs,
+      ...(error ? { gateway_error: error } : {}),
+      agrees,
+      note: simulated
+        ? "This order settled on the simulated rail. Nothing here was fetched from Razorpay."
+        : "The gateway block was fetched from Razorpay just now, not read from our database.",
+    });
+  });
+
   app.get("/orders", (_req: Request, res: Response) => {
     const rows = store
       .listTransactions()

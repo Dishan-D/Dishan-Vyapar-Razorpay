@@ -47,6 +47,9 @@ class SpyGateway implements PaymentGateway {
     this.calls++;
     return this.inner.createOrder(req);
   }
+  /** Test double: the read is not what these spies are testing. */
+  async fetchStatus(orderId: string) { return this.inner.fetchStatus(orderId); }
+
   async capturePayment(order: OrderResult, paymentId?: string): Promise<PaymentResult> {
     this.calls++;
     return this.inner.capturePayment(order, paymentId);
@@ -68,6 +71,15 @@ class CheckoutGateway implements PaymentGateway {
   readonly requiresCheckout = true;
   private seq = 0;
   constructor(private readonly secret: string) {}
+
+  /** This double exists to exercise signature verification, not the read. */
+  async fetchStatus(orderId: string) {
+    return {
+      source: "razorpay" as const, order_id: orderId, order_status: "paid",
+      amount_paise: 0, amount_paid_paise: 0, payment_id: null, payment_status: null,
+      method: null, error: null, fetched_at: new Date().toISOString(),
+    };
+  }
 
   async createOrder(req: OrderRequest): Promise<OrderResult> {
     this.seq++;

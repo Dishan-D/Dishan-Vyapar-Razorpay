@@ -144,6 +144,7 @@
   <div class="in">
     <div class="brand">Vyapar Market <span>— every shop here took UPI and nothing else</span></div>
     <input id="q" placeholder="Search the shelf…" />
+    <span class="chip" id="mode" title="Which payment rail this session is using">Gateway · checking…</span>
     <button class="btn secondary" id="cartbtn">Cart <b id="cartn">0</b></button>
   </div>
 </div>
@@ -438,8 +439,41 @@ async function loadOrders() {
       <p class="hint" style="margin:9px 0 0">${o.delivered
         ? "The shop signed a fulfillment mandate for this. That signature is what changed this line."
         : "This stays unchanged until the shop confirms handover — nothing marks itself delivered."}</p>
+      <button class="btn secondary sm" data-verify="${esc(o.transaction_id)}" style="margin-top:10px">Check with the gateway</button>
+      <div class="gwout"></div>
     </div>`;
   }).join("");
+
+  /**
+   * Ask the gateway, rather than re-reading our own record.
+   *
+   * Everything else on this page is our signed claim that a payment happened.
+   * This button fetches Razorpay's answer about the same order and prints both,
+   * so the shopper can see the money existed somewhere other than our database.
+   */
+  for (const b of document.querySelectorAll("[data-verify]")) {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const out = b.nextElementSibling;
+      out.innerHTML = `<p class="hint" style="margin:9px 0 0">Asking the gateway…</p>`;
+      const { status, body } = await api(`/transactions/${b.dataset.verify}/gateway-status`);
+      if (status !== 200) {
+        out.innerHTML = note("bad", esc(body.error ?? "could not reach the gateway"));
+        return;
+      }
+      const g = body.gateway;
+      out.innerHTML = body.gateway_error
+        ? note("bad", `Gateway could not be reached — ${esc(body.gateway_error)}. This does not mean the payment failed.`)
+        : `<dl class="kv" style="margin-top:10px">
+             <dt>Rail</dt><dd>${esc(body.rail)}</dd>
+             <dt>Order</dt><dd>${esc(g.order_id)}</dd>
+             <dt>Gateway says</dt><dd>${esc(g.order_status)} · ${g.amount_paid_paise} of ${g.amount_paise} paise paid</dd>
+             <dt>Payment</dt><dd>${g.payment_id ? `${esc(g.payment_id)} (${esc(g.payment_status)}${g.method ? ", " + esc(g.method) : ""})` : "none yet"}</dd>
+             ${g.error ? `<dt>Error</dt><dd>${esc(g.error)}</dd>` : ""}
+           </dl>
+           <p class="hint" style="margin:8px 0 0">${esc(body.note)}</p>`;
+    };
+  }
 
   for (const el of document.querySelectorAll(".ord")) {
     el.onclick = () => { const d = el.nextElementSibling; if (d?.classList.contains("odet")) d.hidden = !d.hidden; };
@@ -660,6 +694,22 @@ $("buycart").onclick = async () => {
 renderCart();
 await loadOrders();
 
+// Never let the two rails look alike. Real Razorpay ids begin order_/pay_ and
+// simulated ones begin sim_, and the header says which is in play before a
+// shopper spends anything.
+function showMode() {
+  const el = $("mode");
+  if (config.gateway === "razorpay") {
+    el.className = "chip ok";
+    el.textContent = "Gateway · Razorpay · Checkout";
+    el.title = `Real Razorpay test mode (${config.razorpay_key_id ?? "key configured"}). Orders and payments are created against Razorpay's API.`;
+  } else {
+    el.className = "chip";
+    el.textContent = "Gateway · Simulated";
+    el.title = "No Razorpay keys configured. Runs settle on a simulated rail and every id is sim_ prefixed.";
+  }
+}
+
 config = await boot({
   onEvent: (e) => {
     onStep(e);
@@ -668,6 +718,7 @@ config = await boot({
     if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") loadOrders();
   },
 });
+showMode();
 if (config.gateway !== "razorpay") {
   $("rb").innerHTML = `<p class="empty2">No Razorpay keys configured, so runs settle on the simulated rail.</p>`;
 }
