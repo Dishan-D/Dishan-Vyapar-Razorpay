@@ -18,7 +18,8 @@
     "milestone-h": "tsx --env-file-if-exists=.env scripts/milestone-h.ts",
     "milestone-j": "tsx --env-file-if-exists=.env scripts/milestone-j.ts",
     "milestone-k": "tsx --env-file-if-exists=.env scripts/milestone-k.ts",
-    "milestone-i": "tsx --env-file-if-exists=.env scripts/milestone-i.ts"
+    "milestone-i": "tsx --env-file-if-exists=.env scripts/milestone-i.ts",
+    "audit": "tsx --env-file-if-exists=.env scripts/audit.ts"
   },
   "engines": {
     "node": ">=20"

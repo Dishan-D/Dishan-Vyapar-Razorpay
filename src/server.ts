@@ -217,12 +217,19 @@ export async function createApp(options: AppOptions = {}) {
       const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
       const signature = String(req.header("x-razorpay-signature") ?? "");
 
+      // Anyone can POST here, so nothing below this line runs on a body this
+      // endpoint cannot authenticate. A gateway with no way to check a
+      // signature is the same answer as a bad signature — "I cannot establish
+      // that this is you" — and it is 401, not 503: a service-unavailable reply
+      // invites a retry that will fail identically, and blurs a refusal into an
+      // outage.
       if (!gateway.verifyWebhookSignature) {
-        res.status(503).json({ error: "no webhook verification available on this gateway" });
+        res.status(401).json({
+          error: "this gateway cannot verify webhook signatures, so no webhook is accepted",
+        });
         return;
       }
       if (!signature || !gateway.verifyWebhookSignature(raw, signature)) {
-        // Anyone can POST here. Nothing below this line runs on an unsigned body.
         res.status(401).json({ error: "webhook signature did not verify" });
         return;
       }
