@@ -359,6 +359,12 @@ async function run(goal, itemId) {
     beacon(false, "stopped");
     const why = body.reasons?.join("; ") ?? body.note ?? body.error ?? "no shop would sell it on these terms";
     push(stepRow("■", body.status === "no_match" ? "Nothing on the shelf matches" : "No deal", esc(why)));
+    // The run's outcome belongs in the conversation, not only in the trail.
+    // Without this the assistant has no idea a purchase was even attempted, so
+    // a follow-up like "my budget is 2000" arrives with nothing to attach to
+    // and the reply is about the wrong thing entirely.
+    thread.push({ role: "assistant", content:
+      `I tried to buy "${goal}" and it did not go through: ${why}. The shopper may now change the budget or the product.` });
     resetShelf(false);
     return;
   }
@@ -382,6 +388,8 @@ async function run(goal, itemId) {
   }
 
   if (body.status === "paid" || body.status === "settled") {
+    thread.push({ role: "assistant", content:
+      `Bought "${goal}" for ₹${body.final_price}. It is paid and waiting for the shop to hand it over.` });
     beacon(false, "paid");
     push(stepRow("₹", `Paid ${rupee(body.final_price)}`, "on the simulated rail — no card was charged"));
     push(stepRow("■", "Waiting on the shop to confirm handover", "a payment is not a delivery"));
@@ -389,6 +397,8 @@ async function run(goal, itemId) {
   }
 
   if (body.status === "awaiting_payment" && body.order_id) {
+    thread.push({ role: "assistant", content:
+      `An order for "${goal}" is open at ₹${body.final_price}, waiting for the shopper to pay at Checkout.` });
     beacon(true, "awaiting you");
     push(stepRow("🔐", "Order placed — Razorpay Checkout opening", `${esc(body.item_id)} · ${rupee(body.final_price)}`));
     checkout(body);

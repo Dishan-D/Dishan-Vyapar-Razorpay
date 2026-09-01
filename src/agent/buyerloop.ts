@@ -97,17 +97,36 @@ function groundedNumbers(turns: Turn[], steps: BuyerToolResult[]): Set<number> {
   return ok;
 }
 
-/** A reply built only from rows, for when the model's own cannot be trusted. */
-function fromRowsOnly(steps: BuyerToolResult[]): string {
-  const rows = steps.flatMap((s) =>
-    s.tool === "search_shelf" ? ((s.data as { results?: Array<{ name: string; shop: string; price: number }> })?.results ?? []) : [],
+/**
+ * A reply built only from rows, for when the model's own cannot be trusted.
+ *
+ * The empty case has to be handled carefully, and the first version was not.
+ * It answered "I could not find anything on the shelf for that" whenever there
+ * were no rows — including when no search had been run at all. A shopper who
+ * had just raised their budget to ₹2,000 was told the shelf was empty of cakes
+ * that were sitting on it at ₹450, ₹620 and ₹750.
+ *
+ * That is the same fabrication this guard exists to stop, committed by the
+ * guard. So the three cases are now distinguished: rows found, a search that
+ * genuinely returned nothing, and no search at all — where the only honest
+ * thing to say is that nothing was looked up.
+ */
+export function fromRowsOnly(steps: BuyerToolResult[]): string {
+  const searched = steps.filter((s) => s.tool === "search_shelf");
+  const rows = searched.flatMap(
+    (s) => (s.data as { results?: Array<{ name: string; shop: string; price: number }> })?.results ?? [],
   );
-  if (rows.length === 0) return "I could not find anything on the shelf for that.";
-  const cheapest = rows.reduce((a, b) => (b.price < a.price ? b : a));
-  return (
-    `${rows.length} on the shelf. The cheapest is ${cheapest.name} at ${cheapest.shop} ` +
-    `for ₹${cheapest.price.toLocaleString("en-IN")}. They are listed below — which would you like?`
-  );
+
+  if (rows.length > 0) {
+    const cheapest = rows.reduce((a, b) => (b.price < a.price ? b : a));
+    return (
+      `${rows.length} on the shelf. The cheapest is ${cheapest.name} at ${cheapest.shop} ` +
+      `for ₹${cheapest.price.toLocaleString("en-IN")}. They are listed below — which would you like?`
+    );
+  }
+  if (searched.length > 0) return "Nothing on the shelf matched that.";
+  // Nothing was looked up, so nothing may be claimed about the shelf.
+  return "Let me look that up properly — ask me again and I'll search the shelf.";
 }
 
 /**
