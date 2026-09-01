@@ -339,6 +339,13 @@
          cursor:pointer; font-size:9.5px; color:var(--ink-4); text-align:center; flex:none; }
   .pic img { width:100%; height:100%; object-fit:cover; }
   .pic:hover { border-color:var(--ink-3); }
+  /* A drawing, and it has to look like one. The dashed edge and the camera
+     badge say "no photo yet" without the merchant having to compare it to a
+     row that does have one. */
+  .pic.ph { border-style:dashed; position:relative; }
+  .pic.ph::after { content:"＋"; position:absolute; right:-3px; bottom:-3px; width:16px; height:16px;
+                   border-radius:50%; background:var(--ink); color:#fff; font-size:10px;
+                   display:grid; place-items:center; border:2px solid var(--surface); }
 
   .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
   .order + .order { border-top:1px solid var(--border); }
@@ -697,12 +704,20 @@ async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
   $("edithead").hidden = mine.length === 0;
+  const noPhoto = mine.filter((i) => i.photo_is_placeholder).length;
+  const hint = $("items").closest("section")?.querySelector(".hint:nth-of-type(2)");
+  if (hint) {
+    hint.textContent = noPhoto > 0
+      ? `${noPhoto} product${noPhoto > 1 ? "s have" : " has"} no photo yet — the grey tiles are placeholders. Tap one to add a picture of your own stock.`
+      : "Change anything — what you set here is yours, and stops being second-guessed.";
+  }
   if (mine.length === 0) { $("items").innerHTML = `<p class="empty">No items.</p>`; return; }
 
   $("items").innerHTML = mine.map((i) => `
     <div class="edit" data-row="${i.item_id}">
-      <label class="pic" title="Change this product's photo">
-        ${i.photo_url ? `<img src="${esc(i.photo_url)}" alt="" />` : "add<br>photo"}
+      <label class="pic ${i.photo_is_placeholder ? "ph" : ""}"
+             title="${i.photo_is_placeholder ? "No photo yet — click to add one of your own stock" : "Change this product's photo"}">
+        <img src="${esc(i.photo_url)}" alt="" />
         <input type="file" accept="image/*" data-pic="${i.item_id}" hidden />
       </label>
       <span class="who2">

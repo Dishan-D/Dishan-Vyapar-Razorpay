@@ -56,6 +56,7 @@ import { buildStatement } from "./finance/statement.js";
 import { buildDemandHistory } from "./revenue/dataset.js";
 import { priceElasticity } from "./revenue/elasticity.js";
 import { crossSell, upsell, deadStock, type Opportunity } from "./revenue/agent.js";
+import { productTile } from "./catalog/tile.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { activeProvider } from "./llm/provider.js";
@@ -393,6 +394,25 @@ export async function createApp(options: AppOptions = {}) {
   });
 
   /** The agent-readable catalog. Held items are listed but marked, never hidden. */
+  /**
+   * A generated tile for a product with no photograph.
+   *
+   * Rendered on request rather than written to disk: it is derived entirely
+   * from the product's id, name and category, so there is nothing to keep in
+   * sync and nothing to clean up when a real photo replaces it.
+   */
+  app.get("/media/tile/:itemId.svg", (req: Request, res: Response) => {
+    const id = String(req.params.itemId);
+    const item = catalogItems.find((i) => i.item_id === id);
+    if (!item) {
+      res.status(404).type("text/plain").send("no such product");
+      return;
+    }
+    res.type("image/svg+xml");
+    res.setHeader("cache-control", "public, max-age=3600");
+    res.send(productTile(item.item_id, item.name, item.category));
+  });
+
   app.get("/catalog", (_req, res) => {
     res.json({
       provider: structuring.provider,
@@ -405,9 +425,16 @@ export async function createApp(options: AppOptions = {}) {
           held_because: gateReasons(item, sanity),
           sanity,
           audit: structuring.audits[item.item_id] ?? null,
+          // A real photo if there is one; otherwise a generated tile, flagged
+          // as such. The flag is the point — a screen that cannot tell the two
+          // apart would be presenting a drawing as evidence of stock.
           photo_url:
             photoUrlFor.get(item.item_id) ??
-            (photo?.present && photo.filename ? `/media/${photo.filename}` : null),
+            (photo?.present && photo.filename
+              ? `/media/${photo.filename}`
+              : `/media/tile/${item.item_id}.svg`),
+          photo_is_placeholder:
+            !photoUrlFor.get(item.item_id) && !(photo?.present && photo.filename),
           photo_filename: photo?.filename ?? null,
         };
       }),
