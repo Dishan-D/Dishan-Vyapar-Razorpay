@@ -87,20 +87,27 @@
      Six columns, and it used to declare five — the thumbnail was added later
      and silently took the product name's column. Named areas now, so adding a
      field cannot quietly shift every other one again. */
-  .edit { display:grid; gap:10px; align-items:center; padding:13px 0;
-          grid-template-columns:52px minmax(0,1fr) 96px 92px auto auto; }
+  .edit { display:grid; gap:14px; align-items:center; padding:13px 0;
+          grid-template-columns:52px minmax(220px,1fr) 110px 96px 96px auto; }
   .edit + .edit { border-top:1px solid var(--border); }
+  .edithead { display:grid; gap:14px; align-items:end; padding:14px 0 8px;
+              grid-template-columns:52px minmax(220px,1fr) 110px 96px 96px auto;
+              border-bottom:1px solid var(--border); }
+  .edithead span { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
+                   color:var(--ink-4); font-weight:700; }
+  @media (max-width:820px){ .edithead { display:none; } }
   .edit input { font-size:13px; padding:7px 10px; }
   .edit .who2 { min-width:0; }
-  .edit .who2 .prov { margin-top:4px; }
-  .edit .st2 { min-width:84px; }
+  .edit .who2 .prov { margin-top:4px; white-space:nowrap; }
+  .edit .who2 input { width:100%; }
+  .edit .st2 { min-width:84px; justify-self:start; }
   .edit .acts { display:flex; gap:6px; }
   .edit button { padding:7px 11px; font-size:12px; }
 
   /* At phone width the row becomes a card: thumbnail and name on one line,
      the two numbers side by side beneath, actions last. Nothing scrolls
      sideways, which is the rule for the whole merchant view. */
-  @media (max-width:620px) {
+  @media (max-width:820px) {
     .edit { grid-template-columns:52px minmax(0,1fr); grid-template-areas:
             "pic name" "price stock" "state state" "acts acts";
             row-gap:9px; padding:15px 0; }
@@ -275,6 +282,12 @@
     .secnav .badge2 { margin-left:0; }
   }
 
+  /* Catalog is the one screen that is genuinely a table: it needs the full
+     measure, not half of it. At half width the product name field showed four
+     characters and the provenance line wrapped three deep. */
+  #sec-catalog.on { grid-template-columns:minmax(0,1fr); }
+  #sec-catalog > section:last-child { max-width:520px; }
+
   .secpane { display:none; grid-column:2; padding:22px var(--gutter) 72px;
              grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
   .secpane.on { display:grid; }
@@ -410,7 +423,10 @@
       <h2>Your catalog</h2>
       <p class="hint">What an AI buyer can see right now.</p>
       <p class="hint">Change anything — what you set here is yours, and stops being second-guessed.</p>
-      <div id="items" style="margin-top:12px"><p class="empty">Loading…</p></div>
+      <div class="edithead" id="edithead" hidden>
+        <span></span><span>Product</span><span>Price ₹</span><span>In stock</span><span>Agent status</span><span></span>
+      </div>
+      <div id="items" style="margin-top:4px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -610,6 +626,7 @@ const PROV = {
 async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
+  $("edithead").hidden = mine.length === 0;
   if (mine.length === 0) { $("items").innerHTML = `<p class="empty">No items.</p>`; return; }
 
   $("items").innerHTML = mine.map((i) => `
