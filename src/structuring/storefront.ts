@@ -12,7 +12,7 @@ import {
   strictJsonSchema,
 } from "../llm/provider.js";
 import { sharedGroqGovernor } from "../llm/ratelimit.js";
-import { ExtractionWireSchema, fromWire, type Extraction } from "./extraction.js";
+import { CATEGORIES, ExtractionWireSchema, fromWire, type Extraction } from "./extraction.js";
 import { readPhotos, isUseful, type PhotoText } from "./ocr.js";
 
 /**
@@ -67,7 +67,7 @@ CONFIDENCE
 The shop's own trade is your strongest hint about category. A phone shop is not selling snacks.
 
 Categories are a fixed list; pick the closest and use *.other rather than inventing one:
-apparel.saree, apparel.kurta, apparel.dupatta, apparel.other, home.bedsheet, home.towel, home.other, mobile.case, mobile.charger, mobile.audio, mobile.screenguard, mobile.other, food.snack, stationery.pen, stationery.paper, stationery.other, general.other, other`;
+${CATEGORIES.join(", ")}`;
 
 /**
  * The prompt for the no-vision path.
@@ -89,6 +89,14 @@ Build the catalog from that text. It is real evidence, not a hint: a line readin
 - Same for stock: a printed count is a count; otherwise null.
 - Name the product as a shopper would search for it, using the words that were actually printed.
 - In notes, say that the photograph itself was not seen and the record came from printed text.
+
+WHOSE PRODUCTS THESE ARE
+The shop's name will often NOT appear in the photos, and other companies' names usually will. That is normal and it is never a reason to withhold a product:
+- Packaging and price tags carry the MANUFACTURER's brand — Samsung, Nandini, Parle. A shop selling them is not claiming to be them.
+- Shopkeepers photograph supplier flyers, distributor rate lists, and brand posters as the quickest way to say "I stock these".
+- A flyer headed with some other business's name, phone number or logo is still a photograph of goods this shop is telling you about.
+Never refuse to list a product because the brand, letterhead or contact details differ from the shop's name. You are not being asked who owns the goods; you are being asked what is for sale.
+The shop's trade is a plausibility check only — a phone shop is unlikely to be selling sarees — never an ownership test.
 
 Returning an empty list when there IS legible product text is the one wrong answer. If the text genuinely describes no product, return an empty list and say why in store_summary.
 

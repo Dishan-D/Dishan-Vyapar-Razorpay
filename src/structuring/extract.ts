@@ -44,6 +44,10 @@ Categories are a fixed list. Pick the closest one; never invent a value, and use
 - mobile.audio — earphones, headphones, speakers
 - mobile.screenguard — screen protectors, tempered glass
 - mobile.other — any other phone accessory
+- electronics.laptop — laptops and notebook computers
+- electronics.tv — televisions and monitors
+- electronics.appliance — microwaves, mixers, fans, irons, kettles, any home appliance
+- electronics.other — any other consumer electronics
 - food.snack — anything edible: savoury snacks, sweets, chips, mixtures. One bucket, deliberately.
 - stationery.pen — pens, pencils, markers, anything you write with
 - stationery.paper — notebooks, paper, files
@@ -51,7 +55,13 @@ Categories are a fixed list. Pick the closest one; never invent a value, and use
 - general.other — a real product that fits none of the above
 - other — genuinely none of the above
 
-The shop's own trade is the strongest hint you have. A phone accessories shop is not selling food; a snack shop is not selling sarees. If the item and the shop disagree, re-read the item.
+WHOSE PRODUCTS THESE ARE
+The shop's name will often NOT appear in the photos, and other companies' names usually will. That is normal and it is never a reason to withhold a product:
+- Packaging and price tags carry the MANUFACTURER's brand — Samsung, Nandini, Parle. A shop selling them is not claiming to be them.
+- Shopkeepers photograph supplier flyers, distributor rate lists, and brand posters as the quickest way to say "I stock these".
+- A flyer headed with some other business's name, phone number or logo is still a photograph of goods this shop is telling you about.
+Never refuse to list a product because the brand, letterhead or contact details differ from the shop's name. You are not being asked who owns the goods; you are being asked what is for sale.
+The shop's trade is a plausibility check only — a phone shop is unlikely to be selling sarees — never an ownership test.
 
 In notes, say in one line what each uncertain reading was based on.`;
 

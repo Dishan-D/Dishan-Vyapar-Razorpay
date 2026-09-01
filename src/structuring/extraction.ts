@@ -28,6 +28,14 @@ export const CATEGORIES = [
   "mobile.audio",
   "mobile.screenguard",
   "mobile.other",
+  // Electronics and appliances. Added because an electronics shop's flyer put a
+  // laptop and a 43-inch television into "mobile.other" — the enum simply had
+  // nowhere better, and a category that wrong makes an item unfindable by the
+  // one search term a buyer would actually use.
+  "electronics.laptop",
+  "electronics.tv",
+  "electronics.appliance",
+  "electronics.other",
   "food.snack",
   "stationery.pen",
   "stationery.paper",
