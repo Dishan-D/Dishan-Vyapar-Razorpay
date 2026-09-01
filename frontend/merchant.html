@@ -198,6 +198,36 @@
   .pckeys .best::before { color:var(--green); }
   .pckeys .oth::before { color:var(--blue-2); }
 
+  /* One subject per screen. The nav is the table of contents the page lacked. */
+  .secnav { position:sticky; top:0; z-index:30; display:flex; gap:4px; overflow-x:auto;
+            padding:10px 26px; margin:0 auto; max-width:1240px;
+            background:var(--bg); border-bottom:1px solid var(--border); scrollbar-width:none; }
+  .secnav::-webkit-scrollbar { display:none; }
+  .secnav button { display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+                   background:none; border:1px solid transparent; border-radius:9px;
+                   padding:8px 14px; font-size:13.5px; font-weight:550; color:var(--ink-3); }
+  .secnav button i { font-style:normal; font-size:11px; opacity:.6; }
+  .secnav button:hover { color:var(--ink); background:var(--surface-2); }
+  .secnav button.on { background:var(--surface); border-color:var(--border); color:var(--ink); box-shadow:var(--shadow); }
+  .secnav button.on i { opacity:1; }
+  .secnav .badge2 { background:var(--red); color:#fff; border-radius:999px; font-size:10px;
+                    font-weight:700; padding:1px 6px; min-width:16px; text-align:center; }
+
+  .secpane { display:none; max-width:1240px; margin:0 auto; padding:20px 26px 70px;
+             grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+  .secpane.on { display:grid; }
+  @media (max-width:900px){ .secpane.on { grid-template-columns:1fr; } }
+  /* A single panel should not be squeezed into half the page. */
+  .secpane > section:only-child { grid-column:1 / -1; }
+
+  /* catalog: photo beside the fields */
+  .edit { align-items:center; }
+  .pic { width:52px; height:52px; border-radius:8px; background:var(--surface-2);
+         border:1px dashed var(--border-2); display:grid; place-items:center; overflow:hidden;
+         cursor:pointer; font-size:9.5px; color:var(--ink-4); text-align:center; flex:none; }
+  .pic img { width:100%; height:100%; object-fit:cover; }
+  .pic:hover { border-color:var(--ink-3); }
+
   .order { display:grid; grid-template-columns:1fr auto auto; gap:14px; align-items:center; padding:13px 0; }
   .order + .order { border-top:1px solid var(--border); }
   .order .on2 { font-size:14px; font-weight:550; }
@@ -290,8 +320,17 @@
   </div>
 </div>
 
-<div class="wrap" id="deepwrap">
-  <div class="col">
+<div id="deepwrap">
+  <nav class="secnav" id="secnav">
+    <button data-sec="today" class="on"><i>⬤</i>Today</button>
+    <button data-sec="catalog"><i>▦</i>Catalog</button>
+    <button data-sec="money"><i>₹</i>Money</button>
+    <button data-sec="grow"><i>↗</i>Grow</button>
+    <button data-sec="trust"><i>✓</i>Trust</button>
+    <button data-sec="setup"><i>✧</i>Assistant</button>
+  </nav>
+
+  <div class="secpane on" id="sec-today">
     <section id="askcard">
       <h2>Needs your attention</h2>
       <p class="hint">The system asks instead of guessing. One tap is enough.</p>
@@ -303,35 +342,13 @@
       <p class="hint">A payment is not a delivery. Nothing here marks itself handed over.</p>
       <div id="orders" style="margin-top:14px"><p class="empty">No orders yet.</p></div>
     </section>
-
+  </div>
+  <div class="secpane" id="sec-catalog">
     <section>
       <h2>Your catalog</h2>
       <p class="hint">What an AI buyer can see right now.</p>
       <p class="hint">Change anything — what you set here is yours, and stops being second-guessed.</p>
       <div id="items" style="margin-top:12px"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section>
-      <h2>Revenue recovery</h2>
-      <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
-      <div id="rectotals" style="margin-top:14px"></div>
-      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
-    </section>
-
-    <section>
-      <h2>Grow revenue</h2>
-      <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
-      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
-    </section>
-
-    <section>
-      <h2>Your AI Commerce Twin</h2>
-      <p class="hint">Tell it what to change in your own words. It shows you what that means before anything happens.</p>
-      <div class="twin" style="margin-top:14px">
-        <input id="twinsay" placeholder="Don't go below ₹1,000 for the blue saree" />
-        <button class="btn secondary" id="twinread">Read it</button>
-      </div>
-      <div id="twinprop"></div>
     </section>
 
     <section>
@@ -342,11 +359,39 @@
       </div>
     </section>
   </div>
-
-  <div class="col">
+  <div class="secpane" id="sec-money">
     <section>
-      <h2>Agent Readiness</h2>
-      <div id="score" style="margin-top:12px"><p class="empty">Loading…</p></div>
+      <h2>Money in, matched to what you sold</h2>
+      <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
+        what was sold. This is your settlement feed joined to your own sales.</p>
+      <div id="recon" style="margin-top:14px"><p class="empty">Loading…</p></div>
+    </section>
+
+    <section>
+      <h2>Verified Commerce History</h2>
+      <p class="hint">Signed. Hand it to anyone — they can check it without trusting us.</p>
+      <div id="history" style="margin-top:14px"><p class="empty">Loading…</p></div>
+    </section>
+  </div>
+  <div class="secpane" id="sec-grow">
+    <section>
+      <h2>Grow revenue</h2>
+      <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
+      <div id="opps" style="margin-top:14px"><p class="empty">No buyer activity yet.</p></div>
+    </section>
+
+    <section>
+      <h2>Revenue recovery</h2>
+      <p class="hint">Money that did not arrive, and whether anything can still be done. Recovered only counts once a sale actually closes.</p>
+      <div id="rectotals" style="margin-top:14px"></div>
+      <div id="cases" style="margin-top:12px"><p class="empty">Nothing at risk.</p></div>
+    </section>
+
+    <section>
+      <h2>What a different price floor would have earned</h2>
+      <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
+        engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
+      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -358,19 +403,11 @@
       <p class="hint">Every AI buyer whose request reached this shop, and how far they got.</p>
       <div class="funnel" id="funnel" style="margin-top:14px"></div>
     </section>
-
+  </div>
+  <div class="secpane" id="sec-trust">
     <section>
-      <h2>What a different price floor would have earned</h2>
-      <p class="hint">Not a forecast. Every buyer who bargained here is replayed through the same
-        engine that runs a live sale, at each price. You can check any bar against the buyers behind it.</p>
-      <div id="curves" style="margin-top:14px"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section>
-      <h2>Money in, matched to what you sold</h2>
-      <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
-        what was sold. This is your settlement feed joined to your own sales.</p>
-      <div id="recon" style="margin-top:14px"><p class="empty">Loading…</p></div>
+      <h2>Agent Readiness</h2>
+      <div id="score" style="margin-top:12px"><p class="empty">Loading…</p></div>
     </section>
 
     <section>
@@ -380,15 +417,20 @@
     </section>
 
     <section>
-      <h2>Verified Commerce History</h2>
-      <p class="hint">Signed. Hand it to anyone — they can check it without trusting us.</p>
-      <div id="history" style="margin-top:14px"><p class="empty">Loading…</p></div>
-    </section>
-
-    <section>
       <h2>System performance</h2>
       <p class="hint">Counted from stored state. Nothing here is projected or sampled.</p>
       <div class="perf" id="perf" style="margin-top:14px"></div>
+    </section>
+  </div>
+  <div class="secpane" id="sec-setup">
+    <section>
+      <h2>Your AI Commerce Twin</h2>
+      <p class="hint">Tell it what to change in your own words. It shows you what that means before anything happens.</p>
+      <div class="twin" style="margin-top:14px">
+        <input id="twinsay" placeholder="Don't go below ₹1,000 for the blue saree" />
+        <button class="btn secondary" id="twinread">Read it</button>
+      </div>
+      <div id="twinprop"></div>
     </section>
 
     <section>
@@ -487,6 +529,10 @@ async function loadCatalog() {
 
   $("items").innerHTML = mine.map((i) => `
     <div class="edit" data-row="${i.item_id}">
+      <label class="pic" title="Change this product's photo">
+        ${i.photo_url ? `<img src="${esc(i.photo_url)}" alt="" />` : "add<br>photo"}
+        <input type="file" accept="image/*" data-pic="${i.item_id}" hidden />
+      </label>
       <input value="${esc(i.name)}" data-f="name" />
       <input type="number" value="${i.price.value || ""}" placeholder="price" data-f="price" />
       <input type="number" value="${i.stock.confidence > 0 ? i.stock.quantity : ""}" placeholder="stock" data-f="stock" />
@@ -496,6 +542,28 @@ async function loadCatalog() {
         <button class="btn secondary" data-del="${i.item_id}">Delete</button>
       </span>
     </div>`).join("");
+
+  // The photo saves on pick rather than on Save: it is the one field where the
+  // merchant can see immediately whether they got it right, and making them
+  // press Save afterwards only invites them to forget.
+  for (const el of document.querySelectorAll("[data-pic]")) {
+    el.onchange = async () => {
+      const file = el.files?.[0];
+      if (!file) return;
+      const row = el.closest(".edit");
+      const form = new FormData();
+      form.append("photo", file);
+      const res = await fetch(`/merchants/${merchantId}/items/${el.dataset.pic}/photo`, { method: "POST", body: form });
+      if (!res.ok) {
+        row.insertAdjacentHTML("afterend", note("bad", esc((await res.json()).error ?? "could not save that photo")));
+        return;
+      }
+      const { photo_url } = await res.json();
+      el.closest(".pic").innerHTML = `<img src="${photo_url}" alt="" />` + el.outerHTML;
+      // Rebind: the input above was replaced by that innerHTML write.
+      loadCatalog();
+    };
+  }
 
   for (const b of document.querySelectorAll("[data-save]")) {
     b.onclick = async () => {
@@ -625,6 +693,8 @@ const ACTION_WORD = { allow: "Fine", monitor: "Noted", verify: "Check first", ho
 
 async function loadSimple() {
   const { body } = await api(`/merchants/${merchantId}/alerts`);
+
+  markAttention(body.needs_attention ?? 0);
 
   const today = `<div class="today">
       <div><div class="k">Collected today</div><div class="v">${rupee(body.today.collected)}</div></div>
@@ -778,10 +848,29 @@ function say(text) {
   speak = false;
 }
 
+// ── which screen ────────────────────────────────────────────────────────────
+//
+// Remembered per shop, so a merchant who lives on Orders is not returned to
+// Today every time the page reloads.
+function showSection(key) {
+  for (const b of document.querySelectorAll("#secnav button")) b.classList.toggle("on", b.dataset.sec === key);
+  for (const pane of document.querySelectorAll(".secpane")) pane.classList.toggle("on", pane.id === `sec-${key}`);
+  try { localStorage.setItem("vyapar.section", key); } catch { /* private window */ }
+}
+for (const b of document.querySelectorAll("#secnav button")) b.onclick = () => showSection(b.dataset.sec);
+
+/** A count on the Today tab, so nothing waiting is hidden behind a menu. */
+function markAttention(n) {
+  const btn = document.querySelector('#secnav button[data-sec="today"]');
+  if (!btn) return;
+  btn.querySelector(".badge2")?.remove();
+  if (n > 0) btn.insertAdjacentHTML("beforeend", `<span class="badge2">${n}</span>`);
+}
+
 // ── mode ────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   $("simplewrap").style.display = mode === "simple" ? "grid" : "none";
-  $("deepwrap").style.display = mode === "deep" ? "grid" : "none";
+  $("deepwrap").style.display = mode === "deep" ? "block" : "none";
   for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === mode);
   try { localStorage.setItem("vyapar.mode", mode); } catch { /* private window */ }
   window.scrollTo({ top: 0 });
@@ -1112,6 +1201,9 @@ try {
 let saved = "simple";
 try { saved = localStorage.getItem("vyapar.mode") ?? "simple"; } catch { /* private window */ }
 setMode(saved);
+let savedSection = "today";
+try { savedSection = localStorage.getItem("vyapar.section") ?? "today"; } catch { /* private window */ }
+if (document.getElementById(`sec-${savedSection}`)) showSection(savedSection);
 await refresh().catch(fatal);
 
 await boot({

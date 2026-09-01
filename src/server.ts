@@ -2443,6 +2443,50 @@ export async function createApp(options: AppOptions = {}) {
    * sanity check, because they have now said it directly rather than been heard
    * saying it.
    */
+  /**
+   * Replace a product's photo.
+   *
+   * A picture read out of a shelf photo is frequently the wrong one — the
+   * extraction pairs photos to products positionally and says outright that
+   * this is a display hint, not a fact. Until now a merchant who spotted the
+   * mismatch had no way to correct it, which made the catalog screen the one
+   * place in the product where they could see a mistake and not fix it.
+   *
+   * Seed items live in a file rather than the onboarding table, so this promotes
+   * the item into that table on first edit — the same thing the price and stock
+   * editor already does.
+   */
+  app.post(
+    "/merchants/:id/items/:itemId/photo",
+    upload.single("photo"),
+    (req: Request, res: Response) => {
+      const id = String(req.params.id);
+      const itemId = String(req.params.itemId);
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file) {
+        res.status(400).json({ error: "attach a photo" });
+        return;
+      }
+
+      const item = catalogItems.find((i) => i.item_id === itemId && i.merchant_id === id);
+      if (!item) {
+        res.status(404).json({ error: `no such product for this shop: ${itemId}` });
+        return;
+      }
+
+      const photoUrl = `/uploads/${file.filename}`;
+      const existing = onboarding.listItems().find((r) => r.item.item_id === itemId);
+      onboarding.saveItem({
+        item,
+        ...(existing?.policy ?? policies.get(itemId) ? { policy: existing?.policy ?? policies.get(itemId)! } : {}),
+        photo_url: photoUrl,
+      });
+      photoUrlFor.set(itemId, photoUrl);
+
+      res.status(201).json({ item_id: itemId, photo_url: photoUrl });
+    },
+  );
+
   app.patch("/merchants/:id/items/:itemId", (req: Request, res: Response) => {
     const id = String(req.params.id);
     const itemId = String(req.params.itemId);
