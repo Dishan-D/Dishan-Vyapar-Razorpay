@@ -473,6 +473,41 @@ function offerPayment(r) {
   box.querySelector("[data-pay]").onclick = () => checkout(r, box);
 }
 
+/**
+ * Highlight the products the answer is actually about.
+ *
+ * The search returns six and the assistant then narrows to two — "the 500g
+ * Chocolate Cake at ₹450 and the Truffle at ₹490" — but the shelf kept showing
+ * all six as equals, so the shopper had to map a sentence onto a grid
+ * themselves.
+ *
+ * Matched on price rather than name. Name tokens are ambiguous here in a way
+ * that matters: every significant word of "Chocolate Cake 500g" also appears in
+ * "500g Chocolate Truffle Cake", so a token match would light both when the
+ * assistant meant one. The prices in this catalog are distinct, and the
+ * assistant quotes them. Where it quotes none, nothing is highlighted — an
+ * empty highlight is better than a confident wrong one.
+ */
+function highlightMentioned(answer) {
+  if (!agentFilter) return;
+  const said = new Set(
+    [...String(answer).matchAll(/₹\s?([\d,]+)/g)].map((m) => Number(m[1].replace(/,/g, ""))),
+  );
+  if (said.size === 0) return;
+
+  const hits = items.filter((i) => agentFilter.ids.has(i.item_id) && said.has(i.price.value));
+  // If it named everything, or nothing on the shelf, there is nothing to
+  // narrow and dimming would only be noise.
+  if (hits.length === 0 || hits.length === agentFilter.ids.size) return;
+
+  const hitIds = new Set(hits.map((i) => i.item_id));
+  for (const el of document.querySelectorAll(".card[data-item]")) {
+    const on = hitIds.has(el.dataset.item);
+    el.classList.toggle("looked", on);
+    el.classList.toggle("dim", !on);
+  }
+}
+
 /** Put a pay card into its paid state, whoever settled the payment. */
 function markPaid(transactionId, paymentId) {
   const box = document.getElementById(`pay_${transactionId}`);
@@ -737,6 +772,8 @@ async function offerBasket(prop) {
 function showOnShelf(rows) {
   agentFilter = { ids: new Set(rows.map((r) => r.item_id)), n: rows.length };
   render();
+  // render() rebuilds the cards, so any highlight from the previous answer is
+  // gone with them — nothing to clear by hand.
   document.querySelector(".shell")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -786,6 +823,7 @@ async function say(text) {
 
   thread.push({ role: "assistant", content: body.answer });
   bubble("assistant", body.answer);
+  highlightMentioned(body.answer);
   $("send").disabled = false;
 
   // Nothing has been bought. A proposal is a sentence the shopper has to agree

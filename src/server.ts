@@ -2310,7 +2310,19 @@ export async function createApp(options: AppOptions = {}) {
           shop: merchants.get(m.item.merchant_id)?.name ?? m.item.merchant_id,
           merchant_id: m.item.merchant_id,
           price: m.item.price.value,
-          lowest: policies.get(m.item.item_id)?.floor_price ?? null,
+          // The floor is deliberately not here.
+          //
+          // It is the merchant's private limit — the least they will accept —
+          // and the buyer's assistant has no business holding it. Two things
+          // went wrong while it did. It quoted one product's floor as another
+          // product's price ("the Chocolate Cake 500g is ₹580", when ₹580 was
+          // Red Velvet's floor and the cake is ₹450), and the grounding guard
+          // could not catch it because the number really was in the tool data,
+          // just attached to something else. And a shopper's agent that knows
+          // exactly how far a shop will drop is not negotiating with it.
+          //
+          // Negotiation still happens against the floor — in the rules layer,
+          // server-side, which is where the floor belongs.
           in_stock: m.item.stock.quantity,
         }));
         // What the numbers in this turn's answer refer to.

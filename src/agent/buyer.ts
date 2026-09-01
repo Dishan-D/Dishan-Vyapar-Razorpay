@@ -25,7 +25,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "search_shelf",
     description:
-      "Search every shop's catalog for something. Returns products an AI buyer can actually buy right now, with price, stock, shop name and the lowest price each shop will go to.",
+      "Search every shop's catalog for something. Returns products an AI buyer can buy right now: name, shop, listed price and stock. Prices here are the listed prices — the shop may still be haggled down, but by how much is theirs to know, not yours to quote.",
     parameters: {
       type: "object",
       properties: {
