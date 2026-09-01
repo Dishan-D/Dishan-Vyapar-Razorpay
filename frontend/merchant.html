@@ -177,6 +177,23 @@
   .rec.verify { color:var(--amber); background:var(--amber-2); }
   .rec.hold, .rec.block { color:var(--red); background:var(--red-2); }
 
+  .cap { display:grid; grid-template-columns:20px 1fr auto; gap:11px; align-items:baseline;
+         padding:11px 0; border-bottom:1px solid var(--border); }
+  .cap:last-child { border-bottom:0; }
+  .cap .g { font-size:12px; }
+  .cap .cn { font-size:13px; font-weight:600; letter-spacing:-.01em; }
+  .cap .cr { font-size:12px; color:var(--ink-3); margin-top:2px; line-height:1.5; }
+  .cap .cd { font-family:var(--mono); font-size:10.5px; color:var(--ink-4); margin-top:4px; word-break:break-word; }
+
+  /* The distinction the whole story rests on: rail versus commerce layer. */
+  .split2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
+  @media (max-width:620px){ .split2 { grid-template-columns:1fr; } }
+  .split2 > div { border:1px solid var(--border); border-radius:var(--r-sm); padding:13px 14px; background:var(--surface-2); }
+  .split2 > div:last-child { border-color:var(--green-3); background:var(--green-2); }
+  .split2 b { display:block; font-size:12px; }
+  .split2 span { display:block; font-size:12px; color:var(--ink-3); margin-top:4px; line-height:1.5; }
+  .split2 > div:last-child span { color:#0d5c3a; }
+
   .rec2 { display:grid; grid-template-columns:auto 1fr auto; gap:10px 12px; align-items:baseline;
           padding:10px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
   .rec2:last-child { border-bottom:0; }
@@ -405,6 +422,19 @@
     </section>
   </div>
   <div class="secpane" id="sec-money">
+    <section>
+      <h2>Razorpay infrastructure</h2>
+      <p class="hint">Vyapar makes this shop discoverable and transactable by AI agents.
+        Razorpay moves the money underneath. Each line below was probed against this account just now —
+        anything not enabled says so rather than pretending.</p>
+      <div id="caps" style="margin-top:14px"><p class="empty">Checking…</p></div>
+      <div class="split2">
+        <div><b>Razorpay QR</b><span>Payment rail. Collects money at the counter.</span></div>
+        <div><b>Vyapar</b><span>Commerce layer. Products, prices, stock, policies, negotiation, fulfilment —
+          the things an AI buyer needs and a QR code cannot carry.</span></div>
+      </div>
+    </section>
+
     <section>
       <h2>Money in, matched to what you sold</h2>
       <p class="hint">A UPI credit tells you an amount, a time and a payer handle. It does not tell you
@@ -1159,6 +1189,31 @@ async function loadCurves() {
   }).join("");
 }
 
+// ── Razorpay capabilities ───────────────────────────────────────────────────
+//
+// Probed, never asserted. A product that is not enabled on this account shows
+// the call and the status code that proved it, because "we integrated five
+// Razorpay APIs" is worth nothing if one of them is a mock.
+const CAP_MARK = { real: ["✅","ok"], unavailable: ["⛔","bad"], unknown: ["⚠️","warn"], simulated: ["○",""] };
+
+async function loadCaps() {
+  const { body } = await api("/razorpay/capabilities");
+  if (body.mode === "simulated") {
+    $("caps").innerHTML = note("warn", esc(body.note));
+    return;
+  }
+  $("caps").innerHTML = body.capabilities.map((c) => {
+    const [g, cls] = CAP_MARK[c.status] ?? ["·",""];
+    return `<div class="cap">
+      <span class="g">${g}</span>
+      <div><div class="cn">${esc(c.label)}</div><div class="cr">${esc(c.role)}</div>
+        <div class="cd">${esc(c.detail)}</div></div>
+      <span class="chip ${cls}">${esc(c.status)}</span>
+    </div>`;
+  }).join("") +
+  `<p class="hint" style="margin-top:12px">Test mode · ${esc(body.key_id)} · probed ${clock(body.probed_at)}</p>`;
+}
+
 // ── reconciliation ──────────────────────────────────────────────────────────
 //
 // The headline is the share of banked rupees that can be tied to a product. It
@@ -1225,7 +1280,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps()]);
 
 /**
  * A dashboard that cannot reach its server must say so.

@@ -98,6 +98,11 @@ export class RazorpayGateway implements PaymentGateway {
    * Payment Mandate is evidence, and signing one from an unverified browser
    * callback would put the platform's signature on a claim it never confirmed.
    */
+  /** Server-side only. Never serialised, never sent to a browser. */
+  secretForServerUse(): string {
+    return this.keySecret;
+  }
+
   verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean {
     return validatePaymentVerification(
       { order_id: orderId, payment_id: paymentId },
@@ -267,4 +272,20 @@ export function gatewayFromEnv(): PaymentGateway {
 /** The Key ID is publishable — Checkout needs it in the browser. The secret never is. */
 export function publishableKeyId(gateway: PaymentGateway): string | null {
   return gateway instanceof RazorpayGateway ? gateway.keyId : null;
+}
+
+/**
+ * Credentials for the extra Razorpay surfaces (links, invoices, capability
+ * probes), handed out only for a real gateway and only inside the server.
+ *
+ * Kept as one narrow accessor rather than exporting the secret: there is
+ * exactly one place to audit, and a simulated gateway simply has nothing to
+ * give — so no caller can accidentally reach the live API on a simulated run.
+ */
+export function razorpayCredentials(
+  gateway: PaymentGateway,
+): { keyId: string; keySecret: string } | null {
+  return gateway instanceof RazorpayGateway
+    ? { keyId: gateway.keyId, keySecret: gateway.secretForServerUse() }
+    : null;
 }

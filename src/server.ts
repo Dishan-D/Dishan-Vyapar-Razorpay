@@ -33,7 +33,11 @@ import type { CatalogItem, NegotiationPolicy } from "./mandates/schema.js";
 import { negotiate } from "./negotiation/engine.js";
 import { phraseTurns, templateLine } from "./negotiation/phrasing.js";
 import { indexPolicies } from "./negotiation/policies.js";
-import { gatewayFromEnv, publishableKeyId, SimulatedGateway, type PaymentGateway } from "./payments/gateway.js";
+import { gatewayFromEnv, publishableKeyId, razorpayCredentials, SimulatedGateway, type PaymentGateway } from "./payments/gateway.js";
+import {
+  probeCapabilities, createPaymentLink, fetchPaymentLink, cancelPaymentLink, createInvoice,
+  type Capability,
+} from "./payments/razorpay-extras.js";
 import { authorizeCart, settlePayment, PaymentRefused, authorizationFor } from "./payments/pay.js";
 import { gateReasons } from "./structuring/extraction.js";
 import { applyResolution, draftClarification, parseReply } from "./structuring/clarify.js";
@@ -2350,6 +2354,188 @@ export async function createApp(options: AppOptions = {}) {
    * while we hold a payment mandate, that is a real finding and it is shown as
    * one rather than smoothed over.
    */
+  /**
+   * What this Razorpay account can actually do, asked rather than asserted.
+   *
+   * Cached for ten minutes because it is five HTTP calls and the answer changes
+   * roughly never — but it is a real probe, and an unavailable product says
+   * which call returned what. On this account QR Codes and Virtual Accounts
+   * answer 400: they are not enabled, and the screen says so instead of
+   * showing a mock and calling it an integration.
+   */
+  let capCache: { at: number; caps: Capability[] } | null = null;
+  app.get("/razorpay/capabilities", async (_req: Request, res: Response) => {
+    const creds = razorpayCredentials(gateway);
+    if (!creds) {
+      res.json({
+        mode: "simulated",
+        note: "No Razorpay keys configured, so nothing here was probed. Every id in this session is sim_ prefixed.",
+        capabilities: [],
+      });
+      return;
+    }
+    if (!capCache || Date.now() - capCache.at > 10 * 60_000) {
+      capCache = { at: Date.now(), caps: await probeCapabilities(creds.keyId, creds.keySecret) };
+    }
+    res.json({
+      mode: "razorpay_test",
+      key_id: creds.keyId,
+      probed_at: new Date(capCache.at).toISOString(),
+      capabilities: capCache.caps,
+    });
+  });
+
+  /**
+   * A Payment Link for a cart the rules have already cleared.
+   *
+   * The order matters and is the whole point: this endpoint refuses anything
+   * without an authorized order, so a link can only ever exist for a price that
+   * passed the buyer's ceiling, the merchant's floor, stock and category. It is
+   * a second way to pay for a decision already made — never a way around
+   * making it.
+   */
+  app.post("/transactions/:id/payment-link", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const creds = razorpayCredentials(gateway);
+    if (!creds) {
+      res.status(409).json({ error: "payment links need real Razorpay keys; this session is on the simulated rail" });
+      return;
+    }
+    const chain = store.loadChain(id);
+    const order = store.loadOrder(id);
+    if (!chain?.cart || !order) {
+      res.status(404).json({ error: `no authorized cart for ${id} — the rules layer has not cleared a price` });
+      return;
+    }
+    // The rail this transaction actually ran on, not the one configured now.
+    // Without this a run settled on the simulated rail could be handed a real
+    // Razorpay resource, which is exactly the mixing of real and simulated
+    // identifiers the whole two-mode design exists to prevent.
+    if (order.order_id.startsWith("sim_")) {
+      res.status(409).json({
+        error: "this transaction settled on the simulated rail; a real Razorpay resource would mix the two",
+      });
+      return;
+    }
+
+    if (chain.payment) {
+      res.status(409).json({ error: "this transaction is already paid" });
+      return;
+    }
+
+    const item = catalogItems.find((i) => i.item_id === chain.cart!.item_id);
+    try {
+      const link = await createPaymentLink(creds.keyId, creds.keySecret, {
+        amount_paise: order.amount_paise,
+        description: `${item?.name ?? chain.cart.item_id} · Vyapar`,
+        reference_id: id,
+        notes: {
+          transaction_id: id,
+          item_id: chain.cart.item_id,
+          merchant_id: chain.cart.merchant_id,
+          agreed_price: String(chain.cart.final_price.value),
+        },
+        expire_minutes: 30,
+      });
+      store.savePaymentLink(id, link.id, link.short_url, link.status);
+      res.status(201).json({
+        transaction_id: id, ...link,
+        note: "The link exists. Nothing has been paid until Razorpay says a payment was captured against it.",
+      });
+    } catch (err) {
+      // A refused link is a refused link. It must never read as a payment.
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** Razorpay's current word on a link. `created` is not `paid`. */
+  app.get("/transactions/:id/payment-link", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const creds = razorpayCredentials(gateway);
+    const saved = store.loadPaymentLink(id);
+    if (!creds || !saved) {
+      res.status(404).json({ error: `no payment link for ${id}` });
+      return;
+    }
+    try {
+      const live = await fetchPaymentLink(creds.keyId, creds.keySecret, saved.link_id);
+      res.json({
+        transaction_id: id, ...live,
+        paid: live.status === "paid" && Boolean(live.payment_id),
+        note: live.status === "paid"
+          ? "Razorpay reports this link paid. The transaction still needs its payment verified and the shop to confirm handover."
+          : `Razorpay reports this link as "${live.status}". No money has moved.`,
+      });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/transactions/:id/payment-link/cancel", async (req: Request, res: Response) => {
+    const creds = razorpayCredentials(gateway);
+    const saved = store.loadPaymentLink(String(req.params.id));
+    if (!creds || !saved) {
+      res.status(404).json({ error: "no payment link to cancel" });
+      return;
+    }
+    try {
+      const status = await cancelPaymentLink(creds.keyId, creds.keySecret, saved.link_id);
+      store.savePaymentLink(String(req.params.id), saved.link_id, saved.short_url, status);
+      res.json({ link_id: saved.link_id, status });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /**
+   * An invoice, issued only for a sale that actually finished.
+   *
+   * Gated on the fulfillment mandate rather than on payment: an invoice for
+   * goods that never moved is precisely the paperwork this product exists to
+   * stop producing.
+   */
+  app.post("/transactions/:id/invoice", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const creds = razorpayCredentials(gateway);
+    if (!creds) {
+      res.status(409).json({ error: "invoices need real Razorpay keys; this session is on the simulated rail" });
+      return;
+    }
+    const chain = store.loadChain(id);
+    if (!chain?.cart || !chain.payment) {
+      res.status(409).json({ error: "nothing to invoice: this transaction has no verified payment" });
+      return;
+    }
+    if (!chain.fulfillment) {
+      res.status(409).json({
+        error: "the shop has not confirmed handover yet — an invoice for goods that have not moved is not a record, it is a fiction",
+      });
+      return;
+    }
+    const invOrder = store.loadOrder(id);
+    if (!invOrder || invOrder.order_id.startsWith("sim_")) {
+      res.status(409).json({
+        error: "this sale settled on the simulated rail; invoicing it through Razorpay would present simulated money as real",
+      });
+      return;
+    }
+    const item = catalogItems.find((i) => i.item_id === chain.cart!.item_id);
+    try {
+      const inv = await createInvoice(creds.keyId, creds.keySecret, {
+        amount_paise: Math.round(chain.cart.final_price.value * 100),
+        description: `${item?.name ?? chain.cart.item_id} — delivered ${chain.fulfillment.confirmed_at}`,
+        receipt: id,
+        customer_name: "Vyapar buyer agent",
+        line_item: item?.name ?? chain.cart.item_id,
+        notes: { transaction_id: id, payment_id: chain.payment.razorpay_payment_id },
+      });
+      store.saveInvoice(id, inv.id, inv.short_url, inv.status);
+      res.status(201).json({ transaction_id: id, ...inv });
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.get("/transactions/:id/gateway-status", async (req: Request, res: Response) => {
     const id = String(req.params.id);
     const chain = store.loadChain(id);

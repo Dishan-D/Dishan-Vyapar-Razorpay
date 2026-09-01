@@ -46,6 +46,20 @@ export class Store {
         created_at     TEXT NOT NULL,
         FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
       );
+      CREATE TABLE IF NOT EXISTS razorpay_links (
+        transaction_id TEXT PRIMARY KEY,
+        link_id        TEXT NOT NULL,
+        short_url      TEXT NOT NULL,
+        status         TEXT NOT NULL,
+        at             TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS razorpay_invoices (
+        transaction_id TEXT PRIMARY KEY,
+        invoice_id     TEXT NOT NULL,
+        short_url      TEXT,
+        status         TEXT NOT NULL,
+        at             TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS mandates (
         transaction_id TEXT NOT NULL,
         mandate_type   TEXT NOT NULL,
@@ -108,6 +122,42 @@ export class Store {
    * open orders for one cart, and a later settle could not say which of them the
    * buyer actually paid.
    */
+  /**
+   * Razorpay resources that hang off a transaction but are not the payment
+   * itself — a link that may never be paid, an invoice issued after delivery.
+   * Kept apart from the mandate chain on purpose: the chain is signed evidence
+   * of what happened, and a created-but-unpaid link is not evidence of anything.
+   */
+  savePaymentLink(transactionId: string, linkId: string, shortUrl: string, status: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO razorpay_links (transaction_id, link_id, short_url, status, at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(transactionId, linkId, shortUrl, status, new Date().toISOString());
+  }
+
+  loadPaymentLink(transactionId: string): { link_id: string; short_url: string; status: string } | undefined {
+    return this.db
+      .prepare(`SELECT link_id, short_url, status FROM razorpay_links WHERE transaction_id = ?`)
+      .get(transactionId) as { link_id: string; short_url: string; status: string } | undefined;
+  }
+
+  saveInvoice(transactionId: string, invoiceId: string, shortUrl: string | null, status: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO razorpay_invoices (transaction_id, invoice_id, short_url, status, at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(transactionId, invoiceId, shortUrl, status, new Date().toISOString());
+  }
+
+  loadInvoice(transactionId: string): { invoice_id: string; short_url: string | null; status: string } | undefined {
+    return this.db
+      .prepare(`SELECT invoice_id, short_url, status FROM razorpay_invoices WHERE transaction_id = ?`)
+      .get(transactionId) as { invoice_id: string; short_url: string | null; status: string } | undefined;
+  }
+
   saveOrder(transactionId: string, order: { order_id: string; amount_paise: number; status: string }): void {
     this.db
       .prepare(
