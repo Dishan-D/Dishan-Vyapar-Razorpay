@@ -218,6 +218,18 @@ const $ = (id) => document.getElementById(id);
 
 let config = {}, items = [], merchants = {}, cat = "all", runId = null;
 
+/**
+ * The shelf filter the agent sets, declared here with the rest of the state.
+ *
+ * It lived beside showOnShelf(), three hundred lines below the boot code that
+ * calls render() — and render() reads it. `let` is hoisted but not
+ * initialised, so that read threw a ReferenceError before the page had
+ * finished starting: no products, no navigation, no greeting, and a gateway
+ * badge stuck on "checking…". A module that dies at boot takes everything
+ * after it, which is why the whole page looked empty rather than one panel.
+ */
+let agentFilter = null;
+
 const GLYPH = { apparel:"🧵", home:"🏠", mobile:"📱", food:"🍘", stationery:"✏️", other:"📦" };
 const top = (c) => String(c ?? "other").split(".")[0];
 
@@ -650,8 +662,6 @@ async function offerBasket(prop) {
  * who cannot tell a filtered shelf from an empty shop will assume the shop is
  * empty.
  */
-let agentFilter = null;
-
 function showOnShelf(rows) {
   agentFilter = { ids: new Set(rows.map((r) => r.item_id)), n: rows.length };
   render();
