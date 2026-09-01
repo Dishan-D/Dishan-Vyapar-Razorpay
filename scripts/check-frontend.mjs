@@ -14,6 +14,26 @@ let problems = 0;
 
 for (const page of pages) {
   const src = readFileSync(`frontend/${page}`, "utf8");
+
+  /**
+   * The document has to start where a document starts.
+   *
+   * Twice now a scripted edit has prepended a block of JavaScript above
+   * `<!doctype html>` instead of replacing it in place. The browser then
+   * renders the code as text at the top of the page — which looks like a
+   * styling fault, not a broken edit — and every other check passes, because
+   * the script block it extracts still parses perfectly.
+   */
+  if (!src.startsWith("<!doctype html>")) {
+    const stray = src.slice(0, src.indexOf("<!doctype html>")).trim().split("\n")[0] ?? "";
+    console.log(`  ✗ ${page}: content before <!doctype html> — it will render as text`);
+    console.log(`      ${stray.slice(0, 74)}`);
+    problems++;
+  }
+  if (src.split("</body>").length - 1 !== 1) {
+    console.log(`  ✗ ${page}: expected exactly one </body>, found ${src.split("</body>").length - 1}`);
+    problems++;
+  }
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(src);
   if (!m) continue;
   const js = m[1];
