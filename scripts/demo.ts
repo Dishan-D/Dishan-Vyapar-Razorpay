@@ -66,10 +66,29 @@ async function main(): Promise<void> {
 
     // 2 ──────────────────────────────────────────────────────────────────────
     step(2, 6, "A buyer-agent goes shopping");
-    console.log(`     ${dim('"Find a blue cotton saree under ₹1500"')}`);
+    /**
+     * The product is taken from the running catalog, not named here.
+     *
+     * The script used to ask for a "blue cotton saree", which was true of one
+     * seed and false the moment the demo data changed — the walkthrough then
+     * died three steps in on an empty result. A demo that only runs against
+     * one fixture is a demo of that fixture.
+     */
+    const { body: shelf } = await api("/catalog");
+    const pick = (shelf.items ?? [])
+      .filter((i: any) => i.transactable && i.stock?.quantity > 0 && i.price?.value > 0)
+      .sort((a: any, b: any) => b.stock.quantity - a.stock.quantity)[0];
+    if (!pick) throw new Error("nothing buyable in the catalog to demo with");
+    const WANT: string = pick.name;
+    const CEIL = Math.round(pick.price.value * 1.3);
+    const OPEN = Math.round(pick.price.value * 0.92);
+    // A ceiling deliberately under every floor, for the refusal near the end.
+    const TOO_LOW = Math.max(1, Math.round(pick.price.value * 0.4));
+
+    console.log(`     ${dim(`"Find ${WANT} under ₹${CEIL}"`)}`);
     const { body: found } = await api("/discover", {
       method: "POST",
-      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500 }),
+      body: JSON.stringify({ want: WANT, max_price: CEIL }),
     });
     for (const m of found.matches) {
       console.log(`     ${g("→")} ${m.item.name} ${dim(`₹${m.item.price.value} · ${(m.score * 100).toFixed(0)}% of the query matched`)}`);
@@ -81,7 +100,7 @@ async function main(): Promise<void> {
     step(3, 6, "They haggle — the part no agent protocol does");
     const { body: deal } = await api("/transactions", {
       method: "POST",
-      body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 1100 }),
+      body: JSON.stringify({ want: WANT, max_price: CEIL, opening_offer: OPEN }),
     });
     for (const t of deal.log) {
       const who = t.actor === "buyer" ? b("buyer   ") : y("merchant");
@@ -142,7 +161,7 @@ async function main(): Promise<void> {
     console.log(`\n  ${bold("A buyer that can't reach the floor")}`);
     const { body: noDeal } = await api("/transactions", {
       method: "POST",
-      body: JSON.stringify({ want: "blue cotton saree", max_price: 900, opening_offer: 800 }),
+      body: JSON.stringify({ want: WANT, max_price: TOO_LOW, opening_offer: Math.round(TOO_LOW * 0.9) }),
     });
     for (const t of noDeal.log) {
       const who = t.actor === "buyer" ? b("buyer   ") : y("merchant");
