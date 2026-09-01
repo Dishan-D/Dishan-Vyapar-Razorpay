@@ -167,6 +167,7 @@ export async function converseWithTools(
     ...turns.map((t) => ({ role: t.role, content: t.content })),
   ];
   const steps: BuyerToolResult[] = [];
+  let retried = false;
 
   try {
     for (let i = 0; i < MAX_STEPS; i++) {
@@ -194,6 +195,32 @@ export async function converseWithTools(
       if (calls.length === 0) {
         const said = choice.content?.trim() || "I could not work that out.";
         const stray = ungroundedFigures(said, groundedNumbers(turns, steps));
+
+        /**
+         * A fabricated figure means go and look, not apologise.
+         *
+         * The model answered a budget question with "₹550" — a price that is
+         * in no message and no lookup — and the guard correctly refused it.
+         * But with no search run this turn there was nothing to answer from,
+         * so the shopper got "ask me again and I'll search the shelf" and,
+         * reasonably, asked again, and got it again.
+         *
+         * The right move is the one the shopper would want: send it back with
+         * an instruction to actually search. Once only — a second failure is
+         * a real one, and looping here would spend a shopper's turn twice.
+         */
+        if (stray.length > 0 && !steps.some((x) => x.tool === "search_shelf") && !retried) {
+          retried = true;
+          messages.push({
+            role: "user",
+            content:
+              "Stop. You quoted a price that no lookup returned, which means you guessed it. " +
+              "Call search_shelf now with what the shopper asked for and their budget, then answer " +
+              "only from what it returns.",
+          });
+          continue;
+        }
+
         return {
           answer: stray.length > 0 ? fromRowsOnly(steps) : said,
           steps,

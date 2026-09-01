@@ -96,17 +96,7 @@
   .ord.justin { animation:pop .8s ease; }
   @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
 
-  .hit { display:flex; gap:10px; align-items:center; padding:9px 10px; margin:7px 0;
-         border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface); }
-  .hit:hover { border-color:var(--border-2); }
-  .hit .th2 { width:42px; height:42px; border-radius:8px; background:var(--surface-2); flex:none;
-              display:grid; place-items:center; overflow:hidden; font-size:19px; }
-  .hit .th2 img { width:100%; height:100%; object-fit:cover; }
-  .hit .hb { flex:1; min-width:0; }
-  .hit .hn { font-size:12.5px; font-weight:600; letter-spacing:-.01em; line-height:1.3; }
-  .hit .hs { font-size:11px; color:var(--ink-3); margin-top:1px; }
-  .hit .hp { font-size:13px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:3px; }
-  .hit .dn { font-size:11px; font-weight:450; color:var(--green); margin-left:5px; }
+  .tofind { font-size:11.5px; color:var(--blue-ink); font-weight:600; padding:7px 0; }
 
   .tool { font-size:11.5px; color:var(--ink-3); font-family:var(--mono); padding:5px 0;
           border-bottom:1px dashed var(--border); line-height:1.45; }
@@ -259,6 +249,7 @@ function cardHTML(i) {
 function render() {
   const q = $("q").value.trim().toLowerCase();
   const shown = items.filter((i) =>
+    (!agentFilter || agentFilter.ids.has(i.item_id)) &&
     (cat === "all" || top(i.category) === cat) &&
     (!q || `${i.name} ${i.category} ${merchants[i.merchant_id]?.name ?? ""}`.toLowerCase().includes(q)));
   $("grid").innerHTML = shown.map(cardHTML).join("") || `<p class="empty2">Nothing on the shelf matches that.</p>`;
@@ -271,8 +262,16 @@ function render() {
     };
   }
   const ready = shown.filter((i) => i.transactable && i.price.value > 0).length;
-  $("count").textContent =
-    `${shown.length} product${shown.length === 1 ? "" : "s"} across ${new Set(shown.map((i) => i.merchant_id)).size} shops · ${ready} an agent can buy right now`;
+  if (agentFilter) {
+    $("count").innerHTML =
+      `<b>Showing the ${shown.length} the agent found.</b> ` +
+      `<button class="btn ghost sm" id="clearfilter">Show the whole shelf</button>`;
+    const b = $("clearfilter");
+    if (b) b.onclick = clearShelfFilter;
+  } else {
+    $("count").textContent =
+      `${shown.length} product${shown.length === 1 ? "" : "s"} across ${new Set(shown.map((i) => i.merchant_id)).size} shops · ${ready} an agent can buy right now`;
+  }
 }
 
 const cardOf = (id) => document.querySelector(`[data-item="${CSS.escape(id)}"]`);
@@ -539,7 +538,7 @@ for (const b of document.querySelectorAll("#pills button")) {
     render();
   };
 }
-$("q").addEventListener("input", render);
+$("q").addEventListener("input", () => { agentFilter = null; render(); });
 render();
 
 /**
@@ -642,29 +641,26 @@ async function offerBasket(prop) {
   });
 }
 
-/** One search hit, as a row the shopper can act on. */
-function hitRow(r) {
-  const it = items.find((x) => x.item_id === r.item_id);
-  const floor = r.lowest && r.lowest < r.price ? `<span class="dn">down to ${rupee(r.lowest)}</span>` : "";
-  return `<div class="hit" data-hit="${esc(r.item_id)}">
-    <div class="th2">${it?.photo_url ? `<img src="${esc(it.photo_url)}" alt="" />` : (GLYPH[top(it?.category ?? "other")] ?? "📦")}</div>
-    <div class="hb">
-      <div class="hn">${esc(r.name)}</div>
-      <div class="hs">${esc(r.shop)} · ${r.in_stock} in stock</div>
-      <div class="hp">${rupee(r.price)} ${floor}</div>
-    </div>
-    <button class="btn secondary sm" data-hitbuy="${esc(r.item_id)}">Buy</button>
-  </div>`;
+/**
+ * Narrow the shelf to what the agent found.
+ *
+ * A filter rather than a re-render: the cards keep their own Add and Buy
+ * controls, and clearing it puts the whole shelf back. The count line above
+ * the grid says what is being shown and offers the way out, because a shopper
+ * who cannot tell a filtered shelf from an empty shop will assume the shop is
+ * empty.
+ */
+let agentFilter = null;
+
+function showOnShelf(rows) {
+  agentFilter = { ids: new Set(rows.map((r) => r.item_id)), n: rows.length };
+  render();
+  document.querySelector(".shell")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/** Clicking Buy asks for this exact product at its listed price. */
-function wireHits() {
-  for (const b of $("rb").querySelectorAll("[data-hitbuy]")) {
-    b.onclick = () => {
-      const r = items.find((x) => x.item_id === b.dataset.hitbuy);
-      if (r) say(`buy ${r.name} (${r.item_id}) for up to ₹${r.price.value}`);
-    };
-  }
+function clearShelfFilter() {
+  agentFilter = null;
+  render();
 }
 
 async function say(text) {
@@ -691,15 +687,19 @@ async function say(text) {
     $("rb").insertAdjacentHTML("beforeend",
       `<div class="tool">${st.error ? "⚠" : "🔎"} <b>${esc(st.tool)}</b> ${esc(st.summary ?? st.error ?? "")}</div>`);
 
-    // Products are shown, not described.
+    // What the agent found is shown on the shelf, not retyped in the rail.
     //
-    // The model was re-typing every result into a paragraph — name, list
-    // price, floor, stock, four times over — which is slower to read than a
-    // list, drops the photo, and gives the shopper nothing to click. The rows
-    // below are the tool's own data, so they cannot drift from what the shelf
-    // actually holds, and each one buys directly.
+    // Listing results as rows inside a 356px column worked when there were two
+    // of them and became unreadable at six — the shopper scrolled a narrow
+    // strip while a wide grid of the same products sat beside it, greyed out.
+    // The grid is the better surface: bigger photos, a price they can compare,
+    // and the Add and Buy controls already on each card.
     const rows = st.tool === "search_shelf" ? (st.data?.results ?? []) : [];
-    if (rows.length > 0) $("rb").insertAdjacentHTML("beforeend", rows.map(hitRow).join(""));
+    if (rows.length > 0) {
+      showOnShelf(rows);
+      $("rb").insertAdjacentHTML("beforeend",
+        `<div class="tofind">${rows.length} shown on the shelf →</div>`);
+    }
   }
 
   thread.push({ role: "assistant", content: body.answer });
@@ -714,7 +714,6 @@ async function say(text) {
         <button class="btn go" data-buy="${i}">Confirm</button>
         <button class="btn secondary" data-nobuy="${i}">No</button></div>`);
   }
-  wireHits();
   $("rb").scrollTop = $("rb").scrollHeight;
 
   for (const b of $("rb").querySelectorAll("[data-buy]")) {
