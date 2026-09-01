@@ -184,6 +184,35 @@
   .rec.verify { color:var(--amber); background:var(--amber-2); }
   .rec.hold, .rec.block { color:var(--red); background:var(--red-2); }
 
+  .rasum { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; padding-bottom:14px;
+           margin-bottom:6px; border-bottom:1px solid var(--border); }
+  .rasum .big { font-size:30px; font-weight:650; letter-spacing:-.035em; font-variant-numeric:tabular-nums; }
+  .rasum .sub { font-size:12.5px; color:var(--ink-3); }
+
+  .opp2 { border:1px solid var(--border); border-radius:var(--r); padding:15px; margin-top:11px; }
+  .opp2 .oh { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .opp2 .kind { font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-4); }
+  .opp2 .plus { font-size:19px; font-weight:650; letter-spacing:-.02em; font-variant-numeric:tabular-nums; color:var(--green); }
+  .opp2 .est { font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.06em;
+               color:var(--amber); background:var(--amber-2); border:1px solid var(--amber-3);
+               border-radius:999px; padding:2px 8px; }
+  .opp2 h3 { margin:8px 0 0; font-size:14px; font-weight:600; letter-spacing:-.02em; }
+  .opp2 .sug { display:flex; justify-content:space-between; gap:12px; font-size:12.5px;
+               padding:7px 0; border-bottom:1px dashed var(--border); }
+  .opp2 .sug:last-of-type { border-bottom:0; }
+  .opp2 .sug b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .opp2 .sug span { color:var(--ink-3); }
+  .opp2 .baskets { font-size:12.5px; color:var(--ink-2); margin-top:9px; font-variant-numeric:tabular-nums; }
+  .opp2 .why2 { margin-top:12px; padding-top:11px; border-top:1px solid var(--border); }
+  .opp2 .why2 div { font-size:12px; display:flex; gap:8px; padding:3px 0; line-height:1.5; }
+  .opp2 .why2 .g { flex:none; font-weight:700; }
+  .opp2 .why2 .ok .g { color:var(--green); }
+  .opp2 .why2 .no { color:var(--ink-3); }
+  .opp2 .why2 .no .g { color:var(--ink-4); }
+  .opp2 .score { display:flex; align-items:center; gap:9px; margin-top:12px; }
+  .opp2 .score .track { flex:1; }
+  .opp2 .score b { font-size:12.5px; font-variant-numeric:tabular-nums; }
+
   .cap { display:grid; grid-template-columns:20px 1fr auto; gap:11px; align-items:baseline;
          padding:11px 0; border-bottom:1px solid var(--border); }
   .cap:last-child { border-bottom:0; }
@@ -465,6 +494,14 @@
     </section>
   </div>
   <div class="secpane" id="sec-grow">
+    <section>
+      <h2>Today's opportunity</h2>
+      <p class="hint">Found by the Revenue Agent: relevance from this shop's own declared complements
+        and shared tags, urgency from stock arithmetic, demand from counted searches. No model decides
+        any of it, and nothing here happens without your approval.</p>
+      <div id="ragent" style="margin-top:14px"><p class="empty">Checking…</p></div>
+    </section>
+
     <section>
       <h2>Grow revenue</h2>
       <p class="hint">What AI buyers wanted from you, and what it cost to say no. Nothing changes unless you approve it.</p>
@@ -1206,6 +1243,54 @@ async function loadCurves() {
   }).join("");
 }
 
+// ── revenue agent ───────────────────────────────────────────────────────────
+//
+// Every card shows its own reasoning, including the factors that failed. An
+// opportunity a merchant cannot interrogate is one they have to take on faith,
+// and this product does not ask anyone to do that.
+const OPP_KIND = { cross_sell: "Cross-sell", upsell: "Upsell", dead_stock: "Dead stock recovery" };
+
+async function loadRevenueAgent() {
+  const { body } = await api(`/merchants/${merchantId}/revenue-agent`);
+  if (!body.opportunities || body.opportunities.length === 0) {
+    $("ragent").innerHTML = `<p class="empty">Nothing worth suggesting right now.</p>`;
+    return;
+  }
+  const anyEstimate = body.opportunities.some((o) => o.estimate);
+  $("ragent").innerHTML = `
+    <div class="rasum">
+      <span class="big">${rupee(body.total_estimated)}</span>
+      <span class="sub">${body.count} opportunit${body.count === 1 ? "y" : "ies"}${anyEstimate ? " · some estimated" : ""}</span>
+    </div>` +
+    body.opportunities.slice(0, 5).map((o) => `
+      <div class="opp2">
+        <div class="oh">
+          <span class="kind">${OPP_KIND[o.kind] ?? o.kind}</span>
+          <span class="plus">+${rupee(o.incremental_revenue)}</span>
+          ${o.estimate ? `<span class="est">estimate</span>` : ""}
+        </div>
+        <h3>${esc(o.headline)}</h3>
+        <div style="margin-top:10px">
+          ${o.suggestions.map((s) => `<div class="sug">
+            <span><b style="color:var(--ink)">${esc(s.name)}</b><br><span>${esc(s.why)}</span></span>
+            <b>${rupee(s.price)}</b></div>`).join("")}
+        </div>
+        ${o.kind === "dead_stock"
+          ? `<div class="baskets">Was ${rupee(o.basket_before)} · offer ${rupee(o.basket_after)}</div>`
+          : `<div class="baskets">Basket ${rupee(o.basket_before)} → ${rupee(o.basket_after)}${
+              o.buyer_ceiling ? ` · buyer ceiling ${rupee(o.buyer_ceiling)}` : ""}</div>`}
+        <div class="score">
+          <b>${o.score}/100</b>
+          <span class="track"><span class="fill ${o.score >= 70 ? "" : o.score >= 45 ? "mid" : "low"}" style="width:${o.score}%"></span></span>
+        </div>
+        <div class="why2">
+          ${o.factors.map((f) => `<div class="${f.ok ? "ok" : "no"}"><span class="g">${f.ok ? "✓" : "○"}</span>
+            <span><b style="font-weight:600">${esc(f.label)}</b> — ${esc(f.detail)}</span></div>`).join("")}
+          <div class="hint" style="margin-top:9px">Decided by ${esc(o.decided_by)}. Nothing changes until you approve it.</div>
+        </div>
+      </div>`).join("");
+}
+
 // ── Razorpay capabilities ───────────────────────────────────────────────────
 //
 // Probed, never asserted. A product that is not enabled on this account shows
@@ -1297,7 +1382,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps()]);
+  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps(), loadRevenueAgent()]);
 
 /**
  * A dashboard that cannot reach its server must say so.

@@ -148,16 +148,35 @@ async function main(): Promise<void> {
     heading("Stage 3→5 — a failed negotiation cannot reach payment");
     const callsBefore = spy.calls;
     const nd = await api("/transactions", {
-      method: "POST", body: JSON.stringify({ want: "blue cotton saree", max_price: 200, opening_offer: 100 }),
+      method: "POST", body: JSON.stringify({ want: "a product priced far above this", max_price: 5, opening_offer: 2 }),
     });
     check("gate", "no_deal returns without an order", nd.body.status === "no_deal" || nd.status === 404 || nd.body.status === "no_match",
       nd.body.status ?? nd.status);
     check("gate", "no gateway call was made for a failed negotiation", spy.calls === callsBefore, `${spy.calls - callsBefore} calls`);
 
+    /**
+     * The product these checks run against is taken from the live catalog
+     * rather than named here.
+     *
+     * This used to say "blue cotton saree", which was true of one particular
+     * seed and became false the moment the demo data changed — four claims
+     * failed for want of a product, not for want of a working pipeline. An
+     * audit that breaks when the fixtures change is testing the fixtures.
+     */
+    const shelf = await api("/catalog");
+    const buyable = (shelf.body.items ?? []).filter(
+      (i: any) => i.transactable && i.stock?.quantity > 0 && i.price?.value > 0,
+    );
+    const subject = buyable.sort((a: any, b: any) => b.stock.quantity - a.stock.quantity)[0];
+    if (!subject) throw new Error("no buyable product in the catalog to audit against");
+    const want = subject.name;
+    const ceiling = Math.round(subject.price.value * 1.25);
+    const opening = Math.round(subject.price.value * 0.95);
+
     // ── Consent chain + payment gate ───────────────────────────────────────
     heading("Stages 4–5 — mandates, and the gate in front of the money");
     const sale = await api("/transactions", {
-      method: "POST", body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 1150 }),
+      method: "POST", body: JSON.stringify({ want, max_price: ceiling, opening_offer: opening }),
     });
     const txn = sale.body.transaction_id;
     check("consent", "a successful negotiation produces a transaction", Boolean(txn), txn ?? sale.body.status);
@@ -220,7 +239,7 @@ async function main(): Promise<void> {
     const seen: string[] = [];
     bus.on((e) => seen.push(e.type));
     const t2 = await api("/transactions", {
-      method: "POST", body: JSON.stringify({ want: "blue cotton saree", max_price: 1500, opening_offer: 1150 }),
+      method: "POST", body: JSON.stringify({ want, max_price: ceiling, opening_offer: opening }),
     });
     if (t2.body.transaction_id) {
       await api(`/transactions/${t2.body.transaction_id}/confirm-fulfillment`, { method: "POST", body: JSON.stringify({}) });

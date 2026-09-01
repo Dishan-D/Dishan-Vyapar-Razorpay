@@ -1,200 +1,370 @@
 {
-  "_note": "Three merchant personas. Each has exactly one piece of existing digital infrastructure — a UPI VPA and the QR sticker that goes with it. That QR moves money and carries no information: an agent that scans it learns nothing about what is for sale. Everything else here (the catalog, the floors, the mandates) is what this project adds on top of that one asset. Photos exist only for Meena's; Rafiq and Amma are voice-note only, which is the realistic case.",
   "merchants": [
     {
-      "merchant_id": "mer_meena",
-      "name": "Meena's Sarees",
-      "city": "Jaipur",
-      "whatsapp": "+919000000001",
-      "products": [
-        {
-          "item_id": "itm_meena_001",
-          "sample_id": "saree_blue",
-          "photo_filename": "IMG_20260812_saree.jpg",
-          "voice_note": "yeh saree 1200 ka hai, cotton, blue, ek hi piece bacha hai"
-        },
-        {
-          "item_id": "itm_meena_002",
-          "sample_id": "kurta_white",
-          "photo_filename": "IMG_20260812_kurta.jpg",
-          "voice_note": "white cotton kurta, size L, 650 rupaye, chaar piece hain stock mein",
-          "payment_page_description": "Cotton kurta - Rs 650"
-        },
-        {
-          "item_id": "itm_meena_003",
-          "sample_id": "bedsheet_double",
-          "photo_filename": "IMG_20260813_chaadar.jpg",
-          "voice_note": "double bed ki chaadar hai, printed, rate abhi fix nahi kiya hai, dekh ke bataunga, do teen piece honge shayad"
-        },
-        {
-          "item_id": "itm_meena_004",
-          "sample_id": "dupatta_silk",
-          "photo_filename": "IMG_20260813_dupatta.jpg",
-          "voice_note": "silk dupatta, maroon colour, 800 ka, stock godown mein dekhna padega kitna bacha hai"
-        },
-        {
-          "item_id": "itm_meena_005",
-          "sample_id": "towel_set",
-          "photo_filename": "IMG_20260814_towel.jpg",
-          "voice_note": "towel ka set, teen towel, 450 rupaye set ka, cotton hai, das set pade hain"
-        }
-      ],
-      "policies": [
-        {
-          "item_id": "itm_meena_001",
-          "list_price": 1200,
-          "floor_price": 1050,
-          "max_rounds": 3
-        },
-        {
-          "item_id": "itm_meena_002",
-          "list_price": 650,
-          "floor_price": 570,
-          "max_rounds": 3
-        },
-        {
-          "item_id": "itm_meena_005",
-          "list_price": 450,
-          "floor_price": 410,
-          "max_rounds": 3
-        }
-      ],
-      "upi_vpa": "meenasarees@okhdfcbank",
-      "since": "2019",
-      "qr_note": "Printed QR taped to the counter",
-      "delivers_within_days": 1
-    },
-    {
-      "merchant_id": "mer_rafiq",
-      "name": "Rafiq Mobile Accessories",
-      "city": "Bangalore",
-      "whatsapp": "+919000000002",
-      "products": [
-        {
-          "item_id": "itm_rafiq_001",
-          "sample_id": "case_silicone",
-          "voice_note": "silicone phone cover hai, black, 250 ka, bahut saare hain, bees piece"
-        },
-        {
-          "item_id": "itm_rafiq_002",
-          "sample_id": "charger_20w",
-          "voice_note": "20 watt fast charger, type C, 450 rupaye, aath piece stock mein"
-        },
-        {
-          "item_id": "itm_rafiq_003",
-          "sample_id": "earphones_wired",
-          "voice_note": "wired earphone, 3.5mm jack, 350 ka, pandrah piece hain"
-        },
-        {
-          "item_id": "itm_rafiq_004",
-          "sample_id": "screenguard_temper",
-          "voice_note": "tempered glass screen guard, 150 rupaye, tees piece pade hain"
-        }
-      ],
-      "policies": [
-        {
-          "item_id": "itm_rafiq_001",
-          "list_price": 250,
-          "floor_price": 140,
-          "max_rounds": 5
-        },
-        {
-          "item_id": "itm_rafiq_002",
-          "list_price": 450,
-          "floor_price": 280,
-          "max_rounds": 5
-        },
-        {
-          "item_id": "itm_rafiq_003",
-          "list_price": 350,
-          "floor_price": 190,
-          "max_rounds": 5
-        },
-        {
-          "item_id": "itm_rafiq_004",
-          "list_price": 150,
-          "floor_price": 80,
-          "max_rounds": 5
-        }
-      ],
-      "upi_vpa": "rafiqmobile@ybl",
+      "merchant_id": "mer_hazel",
+      "name": "Hazel & Crumb",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000101",
+      "upi_vpa": "hazelcrumb@okicici",
       "since": "2021",
-      "qr_note": "Soundbox on the shelf",
-      "delivers_within_days": 0
-    },
-    {
-      "merchant_id": "mer_amma",
-      "name": "Amma's Snacks",
-      "city": "Chennai",
-      "whatsapp": "+919000000003",
+      "qr_note": "Framed QR beside the till",
+      "delivers_within_days": 0,
+      "policy": {
+        "negotiation": true,
+        "max_discount_pct": 8,
+        "cross_sell": true,
+        "upsell": true,
+        "promotions": true,
+        "auto_add": false
+      },
       "products": [
         {
-          "item_id": "itm_amma_001",
-          "sample_id": "murukku",
-          "voice_note": "murukku packet, 90 rupees, fresh today, twenty packets iruku"
-        },
-        {
-          "item_id": "itm_amma_002",
-          "sample_id": "mixture",
-          "voice_note": "kaara mixture, 110 rupees oru packet, pathinanju packet iruku"
-        },
-        {
-          "item_id": "itm_amma_003",
-          "sample_id": "laddu_box",
-          "voice_note": "laddu box, six pieces, 120 rupees, ten box iruku"
-        },
-        {
-          "item_id": "itm_amma_004",
-          "sample_id": "adhirasam",
-          "voice_note": "adhirasam, onnu packet 1100 rupees, ettu packet iruku"
-        },
-        {
-          "item_id": "itm_amma_005",
-          "sample_id": "banana_chips",
-          "voice_note": "vazhakka chips, rate innum pakka pannala, ennoda paiyan sollum, konjam iruku"
-        },
-        {
-          "item_id": "itm_amma_006",
-          "sample_id": "amma_phone_case",
-          "voice_note": "phone cover um vikkuren, silicone, black, 265 rupees, panneendu piece iruku"
+          "item_id": "itm_hazel_001",
+          "sample_id": "hazel_choc",
+          "voice_note": "belgian chocolate cake 450 rupees, 500 gram, five in stock, birthday orders ke liye best"
         }
       ],
       "policies": [
         {
-          "item_id": "itm_amma_001",
+          "item_id": "itm_hazel_001",
+          "list_price": 450,
+          "floor_price": 420,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_002",
+          "list_price": 750,
+          "floor_price": 700,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_003",
+          "list_price": 620,
+          "floor_price": 580,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_004",
+          "list_price": 760,
+          "floor_price": 720,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_005",
           "list_price": 90,
-          "floor_price": 75,
+          "floor_price": 85,
           "max_rounds": 3
         },
         {
-          "item_id": "itm_amma_002",
+          "item_id": "itm_hazel_006",
           "list_price": 110,
-          "floor_price": 90,
-          "max_rounds": 3
-        },
-        {
-          "item_id": "itm_amma_003",
-          "list_price": 120,
           "floor_price": 100,
           "max_rounds": 3
         },
         {
-          "item_id": "itm_amma_004",
-          "list_price": 110,
-          "floor_price": 90,
+          "item_id": "itm_hazel_007",
+          "list_price": 90,
+          "floor_price": 72,
           "max_rounds": 3
         },
         {
-          "item_id": "itm_amma_006",
-          "list_price": 265,
+          "item_id": "itm_hazel_008",
+          "list_price": 180,
+          "floor_price": 170,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_009",
+          "list_price": 30,
+          "floor_price": 30,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_hazel_010",
+          "list_price": 120,
+          "floor_price": 110,
+          "max_rounds": 3
+        }
+      ]
+    },
+    {
+      "merchant_id": "mer_atelier",
+      "name": "Sweet Atelier",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000102",
+      "upi_vpa": "sweetatelier@okaxis",
+      "since": "2020",
+      "qr_note": "QR sticker on the display fridge",
+      "delivers_within_days": 1,
+      "policy": {
+        "negotiation": true,
+        "max_discount_pct": 7,
+        "cross_sell": true,
+        "upsell": true,
+        "promotions": false,
+        "auto_add": false
+      },
+      "products": [
+        {
+          "item_id": "itm_atelier_001",
+          "sample_id": "atelier_choc",
+          "voice_note": "chocolate cake 490, eight pieces stock mein hai"
+        }
+      ],
+      "policies": [
+        {
+          "item_id": "itm_atelier_001",
+          "list_price": 490,
+          "floor_price": 460,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_atelier_002",
+          "list_price": 720,
+          "floor_price": 680,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_atelier_003",
+          "list_price": 320,
+          "floor_price": 300,
+          "max_rounds": 3
+        }
+      ]
+    },
+    {
+      "merchant_id": "mer_ovenroom",
+      "name": "The Oven Room",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000103",
+      "upi_vpa": "theovenroom@okhdfcbank",
+      "since": "2022",
+      "qr_note": "QR card at the counter",
+      "delivers_within_days": 1,
+      "policy": {
+        "negotiation": false,
+        "max_discount_pct": 0,
+        "cross_sell": true,
+        "upsell": false,
+        "promotions": false,
+        "auto_add": false
+      },
+      "products": [
+        {
+          "item_id": "itm_oven_001",
+          "sample_id": "oven_choc",
+          "voice_note": "single origin chocolate cake 620, price fixed hai, teen stock"
+        }
+      ],
+      "policies": [
+        {
+          "item_id": "itm_oven_001",
+          "list_price": 620,
+          "floor_price": 590,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_oven_002",
+          "list_price": 240,
           "floor_price": 230,
           "max_rounds": 3
         }
+      ]
+    },
+    {
+      "merchant_id": "mer_northstar",
+      "name": "Northstar Coffee Co.",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000104",
+      "upi_vpa": "northstarcoffee@okicici",
+      "since": "2021",
+      "qr_note": "QR on the pickup counter",
+      "delivers_within_days": 0,
+      "policy": {
+        "negotiation": true,
+        "max_discount_pct": 6,
+        "cross_sell": true,
+        "upsell": true,
+        "promotions": true,
+        "auto_add": false
+      },
+      "products": [
+        {
+          "item_id": "itm_north_001",
+          "sample_id": "north_coldbrew",
+          "voice_note": "signature cold brew 180 ka 250ml, 320 ka 500ml"
+        }
       ],
-      "upi_vpa": "ammasnacks@paytm",
+      "policies": [
+        {
+          "item_id": "itm_north_001",
+          "list_price": 180,
+          "floor_price": 170,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_002",
+          "list_price": 320,
+          "floor_price": 300,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_003",
+          "list_price": 190,
+          "floor_price": 180,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_004",
+          "list_price": 240,
+          "floor_price": 225,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_005",
+          "list_price": 140,
+          "floor_price": 130,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_006",
+          "list_price": 80,
+          "floor_price": 74,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_north_007",
+          "list_price": 560,
+          "floor_price": 520,
+          "max_rounds": 3
+        }
+      ]
+    },
+    {
+      "merchant_id": "mer_urbanloom",
+      "name": "Urban Loom",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000105",
+      "upi_vpa": "urbanloom@okaxis",
+      "since": "2019",
+      "qr_note": "QR at the billing desk",
+      "delivers_within_days": 2,
+      "policy": {
+        "negotiation": true,
+        "max_discount_pct": 10,
+        "cross_sell": true,
+        "upsell": true,
+        "promotions": true,
+        "auto_add": false
+      },
+      "products": [
+        {
+          "item_id": "itm_loom_001",
+          "sample_id": "loom_shirt",
+          "voice_note": "essential cotton shirt 1299, sab size available"
+        }
+      ],
+      "policies": [
+        {
+          "item_id": "itm_loom_001",
+          "list_price": 1299,
+          "floor_price": 1180,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_loom_002",
+          "list_price": 1599,
+          "floor_price": 1450,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_loom_003",
+          "list_price": 1999,
+          "floor_price": 1820,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_loom_004",
+          "list_price": 1499,
+          "floor_price": 1360,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_loom_005",
+          "list_price": 899,
+          "floor_price": 820,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_loom_006",
+          "list_price": 699,
+          "floor_price": 640,
+          "max_rounds": 3
+        }
+      ]
+    },
+    {
+      "merchant_id": "mer_studioscent",
+      "name": "Studio Scent",
+      "city": "Bengaluru",
+      "whatsapp": "+919000000106",
+      "upi_vpa": "studioscent@okicici",
       "since": "2022",
-      "qr_note": "QR sticker on the sweet jar",
-      "delivers_within_days": 0
+      "qr_note": "QR on the shelf edge",
+      "delivers_within_days": 2,
+      "policy": {
+        "negotiation": true,
+        "max_discount_pct": 9,
+        "cross_sell": true,
+        "upsell": true,
+        "promotions": true,
+        "auto_add": false
+      },
+      "products": [
+        {
+          "item_id": "itm_scent_001",
+          "sample_id": "scent_cedar",
+          "voice_note": "cedarwood candle 890, gift box ke saath bhi de sakte hain"
+        }
+      ],
+      "policies": [
+        {
+          "item_id": "itm_scent_001",
+          "list_price": 890,
+          "floor_price": 820,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_scent_002",
+          "list_price": 790,
+          "floor_price": 730,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_scent_003",
+          "list_price": 990,
+          "floor_price": 910,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_scent_004",
+          "list_price": 1250,
+          "floor_price": 1150,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_scent_005",
+          "list_price": 450,
+          "floor_price": 410,
+          "max_rounds": 3
+        },
+        {
+          "item_id": "itm_scent_006",
+          "list_price": 250,
+          "floor_price": 240,
+          "max_rounds": 3
+        }
+      ]
     }
   ]
 }

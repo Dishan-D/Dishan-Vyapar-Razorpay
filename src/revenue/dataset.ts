@@ -26,15 +26,22 @@ import type { DemandEvent } from "./demand.js";
  */
 
 const WANTS: Record<string, string[]> = {
-  "apparel.saree": ["cotton saree", "blue saree", "saree for a wedding", "silk saree", "light saree for summer"],
-  "apparel.kurta": ["cotton kurta", "white kurta", "kurta size L", "men's kurta"],
-  "apparel.dupatta": ["silk dupatta", "dupatta", "maroon dupatta"],
-  "home.towel": ["bath towel set", "cotton towels", "towel set"],
-  "home.bedsheet": ["double bedsheet", "cotton bedsheet", "printed chaadar"],
-  "mobile.case": ["phone cover", "silicone phone case", "back cover"],
-  "mobile.charger": ["fast charger", "type c cable", "charger"],
-  "food.snack": ["murukku", "banana chips", "adhirasam", "snacks"],
-  "stationery.pen": ["blue pen", "gel pens", "pens"],
+  // Phrased the way a shopper asks, and overlapping the tags the catalog
+  // carries — otherwise the demand log and the Revenue Agent are describing
+  // two different shops.
+  "food.snack": [
+    "chocolate cake", "birthday cake", "cake for a party", "premium cake",
+    "tea snack", "breakfast pastry", "something for breakfast", "croissant",
+    "cold brew coffee", "latte", "coffee beans", "cookie", "dessert box",
+  ],
+  "apparel.kurta": ["cotton shirt", "formal shirt", "oxford shirt", "linen shirt"],
+  "apparel.other": ["chinos", "leather belt", "canvas tote", "trousers"],
+  "home.other": ["scented candle", "candle gift", "reed diffuser", "gift for a housewarming", "candle holder"],
+  "general.other": ["birthday candles", "gift box", "party supplies"],
+  "apparel.saree": ["cotton saree", "silk saree"],
+  "mobile.case": ["phone cover", "back cover"],
+  "mobile.audio": ["earphones", "headphones"],
+  "stationery.pen": ["pen", "gel pens"],
 };
 
 const fallbackWants = ["something like this", "this item"];

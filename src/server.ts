@@ -55,6 +55,7 @@ import { reconcileUpi } from "./finance/upi.js";
 import { buildStatement } from "./finance/statement.js";
 import { buildDemandHistory } from "./revenue/dataset.js";
 import { priceElasticity } from "./revenue/elasticity.js";
+import { crossSell, upsell, deadStock, type Opportunity } from "./revenue/agent.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { activeProvider } from "./llm/provider.js";
@@ -2338,6 +2339,112 @@ export async function createApp(options: AppOptions = {}) {
    * purchase uses. The merchant can check any point on the curve against the
    * buyers it came from, which is not true of a learned elasticity.
    */
+  /**
+   * The Revenue Agent's view for one shop.
+   *
+   * Everything here is a suggestion with its reasoning attached. Nothing is
+   * applied, nothing is added to anyone's basket, and every figure that is
+   * modelled rather than observed is marked as an estimate — a merchant told
+   * "₹1,050 recoverable" deserves to know whether that is a measurement or a
+   * projection.
+   */
+  app.get("/merchants/:id/revenue-agent", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const merchant = merchants.get(id);
+    if (!merchant) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const events = demand.forMerchant(id, "1970-01-01");
+    const mine = catalogItems.filter((i) => i.merchant_id === id && !i.needs_merchant_confirmation);
+    const opportunities: Opportunity[] = [];
+
+    // Cross-sell and upsell are anchored on what buyers actually asked this
+    // shop for, so a suggestion always has a real request behind it.
+    const wanted = new Map<string, number>();
+    for (const e of events) {
+      if (e.item_id) wanted.set(e.item_id, (wanted.get(e.item_id) ?? 0) + 1);
+    }
+    const anchors = mine
+      .slice()
+      .sort((a, b) => (wanted.get(b.item_id) ?? 0) - (wanted.get(a.item_id) ?? 0))
+      .slice(0, 6);
+
+    for (const anchor of anchors) {
+      const ceiling = Math.round(anchor.price.value * 1.55);
+      const x = crossSell(anchor, catalogItems, merchant, ceiling, events);
+      if (x) opportunities.push(x);
+      const u = upsell(anchor, catalogItems, merchant, ceiling, events);
+      if (u) opportunities.push(u);
+    }
+    opportunities.push(...deadStock(merchant, catalogItems, policies, events));
+
+    const byKind = { cross_sell: 0, upsell: 0, dead_stock: 0 } as Record<Opportunity["kind"], number>;
+    for (const o of opportunities) byKind[o.kind] += o.incremental_revenue;
+
+    const ranked = opportunities.sort((a, b) => b.score - a.score || b.incremental_revenue - a.incremental_revenue);
+    res.json({
+      merchant_id: id,
+      merchant_name: merchant.name,
+      policy: merchant.policy ?? null,
+      total_estimated: ranked.reduce((s, o) => s + o.incremental_revenue, 0),
+      by_kind: byKind,
+      count: ranked.length,
+      basis: "Deterministic. Relevance is the shop's own declared complements and shared tags; urgency is stock arithmetic; demand is counted searches. No model decides any of it.",
+      opportunities: ranked.slice(0, 12),
+    });
+  });
+
+  /**
+   * What the Revenue Agent would suggest alongside a purchase in flight.
+   *
+   * Called by the storefront once the buyer has chosen something. It returns a
+   * suggestion and a total; it cannot add anything. The buyer presses, and the
+   * rules layer then re-checks the new total against their ceiling exactly as
+   * it would for any other purchase.
+   */
+  app.post("/revenue-agent/basket", (req: Request, res: Response) => {
+    const itemId = String(req.body?.item_id ?? "");
+    const ceiling = Number(req.body?.max_price ?? 0) || null;
+    const item = catalogItems.find((i) => i.item_id === itemId);
+    if (!item) {
+      res.status(404).json({ error: `no such product: ${itemId}` });
+      return;
+    }
+    const merchant = merchants.get(item.merchant_id);
+    if (!merchant) {
+      res.status(404).json({ error: "product has no merchant" });
+      return;
+    }
+    const events = demand.forMerchant(item.merchant_id, "1970-01-01");
+    const cross = crossSell(item, catalogItems, merchant, ceiling, events);
+    const up = upsell(item, catalogItems, merchant, ceiling, events);
+
+    res.json({
+      item_id: itemId,
+      buyer_ceiling: ceiling,
+      // Never sent to a buyer's screen: cost and margin are the merchant's
+      // business, and a shopper who can see them is being shown the seller's
+      // hand.
+      cross_sell: cross ? publicOpportunity(cross) : null,
+      upsell: up ? publicOpportunity(up) : null,
+      note: "Suggestions only. Nothing is added until the buyer confirms, and the rules layer checks the new total either way.",
+    });
+  });
+
+  /** Strip anything the buyer has no business seeing. */
+  function publicOpportunity(o: Opportunity) {
+    const { merchant_id, merchant_name, headline, suggestions, basket_before, basket_after, buyer_ceiling, factors } = o;
+    return {
+      merchant_id, merchant_name, headline, suggestions,
+      basket_before, basket_after, buyer_ceiling,
+      // The buyer sees why it is relevant and that it fits. Not the score, not
+      // the margin, not how much the shop stands to gain.
+      why: factors.filter((f) => f.ok && f.label !== "Merchant allows cross-sell" && f.label !== "Merchant allows upsell")
+        .map((f) => f.label),
+    };
+  }
+
   app.get("/merchants/:id/price-curve", (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!merchants.has(id)) {

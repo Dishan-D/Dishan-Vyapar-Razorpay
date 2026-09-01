@@ -34,6 +34,22 @@ export interface Merchant {
   qr_note: string;
   /** Soonest the shop can get goods to a buyer, in days. 0 = same day. */
   delivers_within_days: number;
+  /**
+   * What this shop permits. The Revenue Agent reads these and may not exceed
+   * them — a merchant who has not allowed promotions never gets a discount
+   * suggested for their stock, however good the opportunity looks.
+   */
+  policy?: MerchantPolicy;
+}
+
+export interface MerchantPolicy {
+  negotiation: boolean;
+  max_discount_pct: number;
+  cross_sell: boolean;
+  upsell: boolean;
+  promotions: boolean;
+  /** Always false in this product. Nothing is ever added to a basket unasked. */
+  auto_add: boolean;
 }
 
 interface MerchantSeed extends Merchant {

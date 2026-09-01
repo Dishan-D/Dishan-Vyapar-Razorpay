@@ -111,6 +111,20 @@
   .tool { font-size:11.5px; color:var(--ink-3); font-family:var(--mono); padding:5px 0;
           border-bottom:1px dashed var(--border); line-height:1.45; }
   .tool b { color:var(--ink-2); font-weight:600; }
+  .rabox { border:1px solid var(--blue-3); background:var(--blue-2); border-radius:var(--r-sm);
+           padding:13px 14px; margin:10px 0; }
+  .rah { font-size:13px; font-weight:650; color:var(--blue-ink); margin-bottom:10px; }
+  .raopt { background:var(--surface); border:1px solid var(--border); border-radius:8px;
+           padding:11px 12px; margin-bottom:9px; }
+  .raopt.alt { background:none; border-style:dashed; }
+  .rarow { display:flex; justify-content:space-between; gap:12px; font-size:12.5px; padding:4px 0; }
+  .rarow.base { border-bottom:1px solid var(--border); padding-bottom:7px; margin-bottom:3px; }
+  .rarow b { font-variant-numeric:tabular-nums; }
+  .ratot { display:flex; justify-content:space-between; gap:12px; font-size:13.5px; font-weight:650;
+           border-top:1px solid var(--border); margin-top:7px; padding-top:8px; font-variant-numeric:tabular-nums; }
+  .rafit { font-size:11.5px; color:var(--green); margin-top:6px; font-weight:550; }
+  .rawhy { font-size:11px; color:var(--ink-3); margin:7px 0 10px; line-height:1.5; }
+
   .prop2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:9px 0;
            background:var(--amber-2); border:1px solid var(--amber-3); border-radius:var(--r-sm); padding:10px 12px; }
   .prop2 span { flex:1; min-width:130px; font-size:12.5px; color:#6f4608; font-weight:550; }
@@ -550,6 +564,74 @@ function bubble(who, text) {
   $("rb").scrollTop = $("rb").scrollHeight;
 }
 
+/**
+ * The Revenue Agent's suggestion, offered to the shopper.
+ *
+ * Two buttons, and the smaller basket is not the grudging one: "keep it at
+ * ₹450" sits beside "add these" as an equal choice, because a suggestion the
+ * shopper has to fight off is not a suggestion. Nothing is added unless they
+ * press, and the total is shown against their own stated ceiling so they can
+ * see it fits without doing the arithmetic.
+ *
+ * Returns true when the shopper took an offer and the run has been started.
+ */
+async function offerBasket(prop) {
+  let body;
+  try {
+    ({ body } = await api("/revenue-agent/basket", {
+      method: "POST",
+      body: JSON.stringify({ item_id: prop.item_id, max_price: prop.max_price }),
+    }));
+  } catch { return false; }
+
+  const x = body.cross_sell, u = body.upsell;
+  if (!x && !u) return false;
+
+  const id = `ra_${Date.now()}`;
+  const rows = (o) => o.suggestions.map((s) =>
+    `<div class="rarow"><span>${esc(s.name)}</span><b>+${rupee(s.price)}</b></div>`).join("");
+
+  $("rb").insertAdjacentHTML("beforeend", `<div class="rabox" id="${id}">
+    <div class="rah">Complete your order?</div>
+    ${x ? `<div class="raopt">
+      <div class="rarow base"><span>${esc(prop.label.replace(/^Buy /, "").split(",")[0])}</span><b>${rupee(x.basket_before)}</b></div>
+      ${rows(x)}
+      <div class="ratot"><span>Total</span><b>${rupee(x.basket_after)}</b></div>
+      ${x.buyer_ceiling ? `<div class="rafit">✓ Within your ${rupee(x.buyer_ceiling)} limit</div>` : ""}
+      <div class="rawhy">${x.why.map((w) => esc(w)).join(" · ")}</div>
+      <button class="btn primary wide" data-take="add">Confirm ${rupee(x.basket_after)}</button>
+    </div>` : ""}
+    ${u ? `<div class="raopt alt">
+      <div class="rarow base"><span>${esc(u.suggestions[0].name)}</span><b>${rupee(u.suggestions[0].price)}</b></div>
+      <div class="rawhy">${esc(u.suggestions[0].why)}</div>
+      <button class="btn secondary wide" data-take="up">Switch to this instead</button>
+    </div>` : ""}
+    <button class="btn ghost wide" data-take="keep">Keep it at ${rupee(x ? x.basket_before : prop.max_price)}</button>
+  </div>`);
+  $("rb").scrollTop = $("rb").scrollHeight;
+
+  return await new Promise((resolve) => {
+    for (const b of document.getElementById(id).querySelectorAll("[data-take]")) {
+      b.onclick = async () => {
+        const choice = b.dataset.take;
+        document.getElementById(id).innerHTML =
+          `<div class="rah">${choice === "keep" ? "Kept as it was." : "Added."}</div>`;
+        if (choice === "keep") { resolve(false); return; }
+
+        // Each item is its own run: its own negotiation, order and signed
+        // chain. The rules layer checks every one against the ceiling.
+        if (choice === "up") {
+          await run(`${u.suggestions[0].name} under ₹${prop.max_price}`, u.suggestions[0].item_id);
+        } else {
+          await run(prop.goal, prop.item_id);
+          for (const s of x.suggestions) await run(`${s.name} under ₹${s.price}`, s.item_id);
+        }
+        resolve(true);
+      };
+    }
+  });
+}
+
 /** One search hit, as a row the shopper can act on. */
 function hitRow(r) {
   const it = items.find((x) => x.item_id === r.item_id);
@@ -628,8 +710,11 @@ async function say(text) {
   for (const b of $("rb").querySelectorAll("[data-buy]")) {
     b.onclick = async () => {
       const prop = body.proposals[Number(b.dataset.buy)];
-      b.closest(".prop2").innerHTML = `<span>Confirmed — sending the agent.</span>`;
-      await run(prop.goal, prop.item_id);
+      b.closest(".prop2").innerHTML = `<span>Confirmed.</span>`;
+      // Before running, ask whether anything genuinely goes with this. The
+      // shopper answers; nothing is added on their behalf.
+      const took = await offerBasket(prop);
+      if (!took) await run(prop.goal, prop.item_id);
     };
   }
   for (const b of $("rb").querySelectorAll("[data-nobuy]")) {
