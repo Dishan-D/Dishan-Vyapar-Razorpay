@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { OnboardingStore, type OnboardedMerchant } from "./onboarding/store.js";
 import { DemandLog } from "./revenue/demand.js";
 import { findOpportunities } from "./revenue/opportunities.js";
@@ -156,6 +157,16 @@ export async function createApp(options: AppOptions = {}) {
       }
     }
   }
+  /** Which products have a fetched stock photo on disk. Read once. */
+  const genericPhotos = new Set<string>();
+  try {
+    for (const f of readdirSync(path.resolve("data", "sample_products", "generic"))) {
+      if (f.endsWith(".jpg")) genericPhotos.add(f.replace(/\.jpg$/, ""));
+    }
+  } catch {
+    /* none fetched yet — every product falls back to a drawn tile */
+  }
+
   restoreOnboarded();
 
   /**
@@ -365,6 +376,10 @@ export async function createApp(options: AppOptions = {}) {
   // The merchant's own photos, served as-is. They are the input to Stage 1, so
   // showing them next to what was extracted is the point, not decoration.
   app.use("/media", express.static(path.resolve("data", "sample_products")));
+  // Illustrative stock photos, one per product, fetched once by
+  // scripts/fetch-photos.mjs and served locally so a demo never depends on
+  // someone else's CDN being up.
+  app.use("/generic", express.static(path.resolve("data", "sample_products", "generic")));
   app.use("/uploads", express.static(path.resolve("data", "uploads")));
 
   app.get("/health", (_req, res) => {
@@ -425,16 +440,28 @@ export async function createApp(options: AppOptions = {}) {
           held_because: gateReasons(item, sanity),
           sanity,
           audit: structuring.audits[item.item_id] ?? null,
-          // A real photo if there is one; otherwise a generated tile, flagged
-          // as such. The flag is the point — a screen that cannot tell the two
-          // apart would be presenting a drawing as evidence of stock.
+          // Three sources, in descending order of what they prove. The
+          // merchant's own upload is evidence of their stock. A stock photo
+          // matched by keyword looks like the product but is somebody else's
+          // cake. A drawn tile claims nothing at all. Whichever is used, the
+          // row says which — a screen that cannot tell them apart would be
+          // presenting a stranger's photograph as evidence of this shop's
+          // inventory.
           photo_url:
             photoUrlFor.get(item.item_id) ??
             (photo?.present && photo.filename
               ? `/media/${photo.filename}`
-              : `/media/tile/${item.item_id}.svg`),
+              : genericPhotos.has(item.item_id)
+                ? `/generic/${item.item_id}.jpg`
+                : `/media/tile/${item.item_id}.svg`),
+          photo_is_illustrative:
+            !photoUrlFor.get(item.item_id) &&
+            !(photo?.present && photo.filename) &&
+            genericPhotos.has(item.item_id),
           photo_is_placeholder:
-            !photoUrlFor.get(item.item_id) && !(photo?.present && photo.filename),
+            !photoUrlFor.get(item.item_id) &&
+            !(photo?.present && photo.filename) &&
+            !genericPhotos.has(item.item_id),
           photo_filename: photo?.filename ?? null,
         };
       }),

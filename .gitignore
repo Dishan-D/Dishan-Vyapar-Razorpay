@@ -8,3 +8,4 @@ data/vyapar.db*
 data/keys.local.json
 .env.backup
 data/uploads/
+data/sample_products/generic/

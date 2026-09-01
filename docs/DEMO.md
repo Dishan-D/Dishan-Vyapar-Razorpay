@@ -8,8 +8,19 @@ memory. If something here does not reproduce, that is a bug worth reporting.
 ## Start it
 
 ```bash
-npm run serve          # http://localhost:3000
+node scripts/fetch-photos.mjs   # once — product photos for the storefront
+npm run serve                   # http://localhost:3000
 ```
+
+The photo step is one-off and idempotent. It pulls one keyword-matched
+Creative Commons photo per product from loremflickr and saves it under
+`data/sample_products/generic/`, so the demo never depends on someone else's
+CDN being up mid-presentation. They are not committed to the repo, because
+redistributing CC images without attribution is not ours to do — and they are
+**illustrative**: a stock photo of a cake is not Sri Balaji Bakery's cake. The
+merchant's catalog screen says so on every row, and a shopkeeper's own upload
+replaces it immediately. Skip the step and every product falls back to a drawn
+tile that claims nothing.
 
 Two commands prove the system works without opening a browser:
 

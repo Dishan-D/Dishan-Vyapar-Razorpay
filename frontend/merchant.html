@@ -704,19 +704,23 @@ async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
   $("edithead").hidden = mine.length === 0;
-  const noPhoto = mine.filter((i) => i.photo_is_placeholder).length;
+  const noPhoto = mine.filter((i) => i.photo_is_placeholder || i.photo_is_illustrative).length;
   const hint = $("items").closest("section")?.querySelector(".hint:nth-of-type(2)");
   if (hint) {
     hint.textContent = noPhoto > 0
-      ? `${noPhoto} product${noPhoto > 1 ? "s have" : " has"} no photo yet — the grey tiles are placeholders. Tap one to add a picture of your own stock.`
+      ? `${noPhoto} product${noPhoto > 1 ? "s are" : " is"} using a stock photo, not a picture of your own goods. Tap one to replace it.`
       : "Change anything — what you set here is yours, and stops being second-guessed.";
   }
   if (mine.length === 0) { $("items").innerHTML = `<p class="empty">No items.</p>`; return; }
 
   $("items").innerHTML = mine.map((i) => `
     <div class="edit" data-row="${i.item_id}">
-      <label class="pic ${i.photo_is_placeholder ? "ph" : ""}"
-             title="${i.photo_is_placeholder ? "No photo yet — click to add one of your own stock" : "Change this product's photo"}">
+      <label class="pic ${i.photo_is_placeholder || i.photo_is_illustrative ? "ph" : ""}"
+             title="${i.photo_is_illustrative
+               ? "Stock photo, not your own. Click to add a picture of your actual stock."
+               : i.photo_is_placeholder
+                 ? "No photo yet — click to add one of your own stock"
+                 : "Your own photo. Click to change it."}">
         <img src="${esc(i.photo_url)}" alt="" />
         <input type="file" accept="image/*" data-pic="${i.item_id}" hidden />
       </label>
