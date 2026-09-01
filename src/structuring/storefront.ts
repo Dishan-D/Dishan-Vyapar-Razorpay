@@ -13,6 +13,7 @@ import {
 } from "../llm/provider.js";
 import { sharedGroqGovernor } from "../llm/ratelimit.js";
 import { ExtractionWireSchema, fromWire, type Extraction } from "./extraction.js";
+import { readPhotos, isUseful, type PhotoText } from "./ocr.js";
 
 /**
  * A whole shop read at once, rather than one product at a time.
@@ -68,6 +69,32 @@ The shop's own trade is your strongest hint about category. A phone shop is not 
 Categories are a fixed list; pick the closest and use *.other rather than inventing one:
 apparel.saree, apparel.kurta, apparel.dupatta, apparel.other, home.bedsheet, home.towel, home.other, mobile.case, mobile.charger, mobile.audio, mobile.screenguard, mobile.other, food.snack, stationery.pen, stationery.paper, stationery.other, general.other, other`;
 
+/**
+ * The prompt for the no-vision path.
+ *
+ * The main SYSTEM prompt is written around looking at photographs — "every
+ * distinct product you can SEE" — and handing it no images leaves it arguing
+ * with itself. Given OCR text that plainly read COTTON BATH TOWEL and MRP Rs.
+ * 450/- at confidence 94, it returned nothing at all. So this path gets its own
+ * instructions, where the printed text IS the evidence rather than a hint about
+ * a picture that is missing.
+ */
+const TEXT_ONLY_SYSTEM = `A small Indian shopkeeper is putting their shop online. Their photos could not be looked at this time, but the text physically printed in those photos has been read by OCR, character by character, and is given to you below along with anything they typed or said.
+
+Build the catalog from that text. It is real evidence, not a hint: a line reading "COTTON BATH TOWEL / Pack of 3 - Pink / MRP Rs. 450/-" describes a product you can list with a price, and you should.
+
+- List every product the text supports. One entry per product.
+- A price that appears in the OCR text was READ off a tag or packet — treat it as stated by the merchant and score it high.
+- A price that does NOT appear anywhere is unknown: return null and score it near zero. Never infer one from what such a thing usually costs.
+- Same for stock: a printed count is a count; otherwise null.
+- Name the product as a shopper would search for it, using the words that were actually printed.
+- In notes, say that the photograph itself was not seen and the record came from printed text.
+
+Returning an empty list when there IS legible product text is the one wrong answer. If the text genuinely describes no product, return an empty list and say why in store_summary.
+
+`;
+
+
 const MEDIA: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".webp": "image/webp", ".gif": "image/gif",
@@ -84,7 +111,7 @@ const MEDIA: Record<string, string> = {
  */
 export const MAX_PHOTOS_PER_CALL = 3;
 
-function describe(input: StorefrontInput, attached: number): string {
+function describe(input: StorefrontInput, attached: number, ocr: PhotoText[] = []): string {
   return [
     `Shop: ${input.merchant_name}`,
     input.description ? `What they said about the shop: "${input.description}"` : null,
@@ -92,9 +119,32 @@ function describe(input: StorefrontInput, attached: number): string {
     attached > 0
       ? `${attached} photo(s) attached to this message — list every product visible in them, priced or not.`
       : "No photos — go on the words alone.",
+    ...ocrLines(ocr),
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * What was literally printed in each photo, where the reading is trustworthy.
+ *
+ * Offered as evidence, not as an answer. A price tag read at confidence 94 is
+ * better than any vision model's impression of the same tag — it is characters,
+ * not a paraphrase — so the prompt says to prefer it. Photos with no legible
+ * writing contribute nothing here rather than contributing noise.
+ */
+function ocrLines(ocr: PhotoText[]): string[] {
+  const useful = ocr.filter(isUseful);
+  if (useful.length === 0) return [];
+  return [
+    "",
+    "TEXT READ DIRECTLY OFF THE PHOTOS (OCR, character-accurate — trust these over your own reading of the image):",
+    ...useful.map((t, i) => {
+      const amounts = t.amounts.length > 0 ? ` [rupee amounts found: ${t.amounts.join(", ")}]` : "";
+      return `  Photo ${i + 1}: "${t.text.replace(/\n/g, " / ")}"${amounts}`;
+    }),
+    "A price that appears here was READ, not guessed — score its confidence high. A price that does not appear here was not stated.",
+  ];
 }
 
 async function imageParts(photos: string[]): Promise<Array<{ path: string; b64: string; media: string }>> {
@@ -150,7 +200,7 @@ export async function extractStorefront(input: StorefrontInput): Promise<Storefr
   for (let i = 0; i < input.photos.length; i += MAX_PHOTOS_PER_CALL) {
     batches.push(input.photos.slice(i, i + MAX_PHOTOS_PER_CALL));
   }
-  if (batches.length <= 1) return extractBatch(input);
+  if (batches.length <= 1) return extractBatch(input, true);
 
   const all: Extraction[] = [];
   const summaries: string[] = [];
@@ -164,7 +214,7 @@ export async function extractStorefront(input: StorefrontInput): Promise<Storefr
       ...(first && input.description ? { description: input.description } : {}),
       voice_notes: first ? input.voice_notes : [],
       photos,
-    });
+    }, true);
     provider = res.provider;
     used += res.photos_used;
     summaries.push(res.store_summary);
@@ -183,17 +233,37 @@ export async function extractStorefront(input: StorefrontInput): Promise<Storefr
   };
 }
 
-async function extractBatch(input: StorefrontInput): Promise<StorefrontResult> {
+/**
+ * One model call over one batch of photos.
+ *
+ * `allowTextFallback` is what stops a spent vision quota from being the end of
+ * the road. Images are the expensive part of this call by an order of
+ * magnitude — about 1,700 tokens each against a couple of hundred for the whole
+ * text prompt — and the daily ceiling is reached on images long before it is
+ * reached on words. When that happens, the OCR text and the merchant's own
+ * description are still here, still free, and still enough to name most
+ * products. What comes back is thinner and every price is held for
+ * confirmation, which is the correct outcome: a degraded read the shopkeeper
+ * checks, rather than "come back tomorrow".
+ */
+async function extractBatch(
+  input: StorefrontInput,
+  allowTextFallback = false,
+): Promise<StorefrontResult> {
   const provider = activeProvider();
   if (provider === "none") {
     throw new Error("No model provider configured — set GROQ_API_KEY or ANTHROPIC_API_KEY");
   }
 
   const images = await imageParts(input.photos);
-  const text = describe(input, images.length);
+  // Local, free, and unmetered — so this happens before anything is spent on
+  // the model, and its results survive even when the model call cannot be made.
+  const ocr = await readPhotos(input.photos);
+  const text = describe(input, images.length, ocr);
 
   if (provider === "groq") {
     const groq = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
+    try {
     const content = [
       ...(numbered(
         images,
@@ -240,6 +310,51 @@ async function extractBatch(input: StorefrontInput): Promise<StorefrontResult> {
       provider: "groq",
       photos_used: images.length,
     };
+    } catch (err) {
+      // Only a budget refusal degrades. A malformed response or a network fault
+      // is a real failure and must not be quietly answered with a thinner
+      // catalog that looks like a successful read.
+      const budget = (err as Error)?.name === "RateBudgetExceeded" ||
+        /rate.?limit|tokens per day|TPD|429/i.test((err as Error)?.message ?? "");
+      if (!budget || !allowTextFallback || images.length === 0) throw err;
+
+      const words = describe({ ...input, photos: [] }, 0, ocr);
+      const res2 = await sharedGroqGovernor.run(600, () =>
+        groq.chat.completions
+          .create({
+            model: GROQ_MODEL,
+            messages: [
+              // Categories live in the main prompt and must stay identical, so
+              // that section is carried over rather than restated and drifting.
+              { role: "system", content: TEXT_ONLY_SYSTEM + SYSTEM.slice(SYSTEM.indexOf("Categories are a fixed list")) },
+              { role: "user", content: words },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "storefront",
+                strict: true,
+                schema: strictJsonSchema(z.toJSONSchema(StorefrontSchema) as Record<string, unknown>),
+              },
+            },
+          })
+          .withResponse(),
+        // Longer than the vision attempt allows itself. This is the last thing
+        // standing between the merchant and an error, the call is small, and a
+        // per-minute window resets inside ninety seconds — so waiting one out
+        // here buys a working storefront where 20s bought a failure.
+        { maxWaitSeconds: 95 },
+      );
+      const raw2 = res2.choices[0]?.message?.content;
+      if (!raw2) throw err;
+      const parsed2 = StorefrontSchema.parse(JSON.parse(raw2));
+      return {
+        products: parsed2.products.map(fromWire),
+        store_summary: parsed2.store_summary,
+        provider: "groq",
+        photos_used: 0,
+      };
+    }
   }
 
   const anthropic = new Anthropic();
