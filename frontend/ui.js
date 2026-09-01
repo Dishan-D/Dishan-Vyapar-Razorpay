@@ -26,7 +26,7 @@ function renderNav() {
   const here = location.pathname === "/index.html" ? "/" : location.pathname;
   const host = document.getElementById("nav");
   if (!host) return;
-  host.outerHTML = `<header>
+  host.outerHTML = `<header class="sitehead">
     <span class="brand"><span class="mark">V</span>Vyapar</span>
     <nav class="tabs">${NAV.map(([href,label]) =>
       `<a href="${href}"${href === here ? ' class="on"' : ""}>${label}</a>`).join("")}</nav>

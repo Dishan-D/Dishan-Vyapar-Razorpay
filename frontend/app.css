@@ -102,7 +102,16 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ══ header ═══════════════════════════════════════════════════════════════ */
-header {
+/*
+ * Scoped to the site chrome, which is the only header that is a page header.
+ *
+ * A bare `header` selector claiming `height: 60px` and `position: sticky` is
+ * too greedy: it also caught the <header> inside each comparison card on the
+ * landing page, clipped it to 60px, and the card's own text then overlapped
+ * the list beneath it. An element selector that owns a layout has to say which
+ * element it means.
+ */
+.sitehead {
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   padding: 0 var(--gutter); height: 60px;
   background: var(--surface);
@@ -456,7 +465,7 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 @media (max-width: 720px) {
   :root { --gutter: 16px; }
   body { font-size: 14.5px; }
-  header { height: auto; padding: 10px var(--gutter); gap: 10px; }
+  .sitehead { height: auto; padding: 10px var(--gutter); gap: 10px; }
   nav.tabs { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
   nav.tabs::-webkit-scrollbar { display: none; }
   .status { gap: 12px; }

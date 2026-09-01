@@ -56,6 +56,10 @@
   .checks li { font-size:12.5px; color:var(--ink-2); padding:3px 0; display:flex; gap:8px; }
   .checks li::before { content:"✓"; color:var(--green); font-weight:700; }
 
+  /* app.css styles every <section> as a card — white, bordered, 14px radius.
+     These are full-bleed page bands, so they opt out explicitly rather than
+     inheriting a card's chrome at page width. */
+  .sec, .final { background:none; border:0; border-radius:0; box-shadow:none; }
   .sec { border-top:1px solid var(--border); padding:56px 0; position:relative; }
   .sec .inner2 { position:relative; max-width:var(--page); margin:0 auto; padding:0 var(--gutter); }
   .sec .glow, .sec .dots { position:absolute; inset:0; pointer-events:none; }
@@ -123,7 +127,8 @@
   .pay2 .sep2 span { font-size:11px; color:var(--blue); }
 
   /* 06 — closing */
-  .final { text-align:center; padding:72px var(--gutter); position:relative; overflow:hidden; border-top:1px solid var(--border); }
+  .final { text-align:center; padding:72px var(--gutter); position:relative; overflow:hidden;
+           border-top:1px solid var(--border); }
   .final h2 { font-size:clamp(30px,5vw,54px); font-weight:600; letter-spacing:-.04em; line-height:1.05;
               max-width:20ch; margin:0 auto 28px; }
   .final .cta-row { justify-content:center; }
@@ -151,11 +156,14 @@
   .lcard .who b { color:var(--ink-2); font-weight:600; }
 
   .band { border-top:1px solid var(--border); background:var(--surface); }
-  .band .inner { max-width:var(--page); margin:0 auto; padding:52px var(--gutter);
-                 display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1.5fr);
-                 gap:40px; align-items:center; }
-  .band .bandhead { max-width:30ch; }
-  @media (max-width:900px){ .band .inner { grid-template-columns:1fr; gap:22px; }
+  .band .inner { max-width:var(--page); margin:0 auto; padding:52px var(--gutter); }
+
+  /* Only the authority band pairs a heading with a single diagram. Scoped, so
+     the comparison band below keeps its own four-part layout. */
+  .band.split .inner { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1.5fr);
+                       gap:40px; align-items:center; }
+  .band.split .bandhead { max-width:30ch; }
+  @media (max-width:900px){ .band.split .inner { grid-template-columns:1fr; gap:22px; }
                             .authority { grid-template-columns:1fr; } }
   .band h2 { font-size:19px; font-weight:600; letter-spacing:-.02em; margin:0 0 6px; }
   .band p.sub { color:var(--ink-3); font-size:14px; margin:0 0 22px; max-width:62ch; }
@@ -342,7 +350,7 @@
   </div>
 </section>
 
-<div class="band">
+<div class="band split">
   <div class="inner">
     <div class="bandhead">
       <h2>Give the agent authority — not your wallet.</h2>
