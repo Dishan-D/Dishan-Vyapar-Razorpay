@@ -175,18 +175,48 @@ export function negotiate(
     offer = raised;
   }
 
+  /**
+   * Rounds ran out with a deal still on the table.
+   *
+   * This is the case that made the demo look broken. A shopper authorized to
+   * ₹500 wanted a cake whose floor is ₹460 — plainly a trade both sides want —
+   * but the opening offer was ₹350, three rounds only carried the buyer to
+   * ₹441, and the engine reported "nobody would sell it inside your budget".
+   * Nobody had refused. The clock had simply run out mid-haggle.
+   *
+   * Where the buyer's ceiling covers the merchant's floor there is a price
+   * both have already agreed to accept, so the merchant takes their floor
+   * rather than lose the sale. Both limits still hold — that is the whole
+   * point — and the merchant gets their stated minimum, never less.
+   *
+   * A buyer who bids close to the floor still lands above it through the
+   * normal path above; only a buyer who ran out of road ends up exactly here.
+   */
+  if (buyer.max_price >= policy.floor_price) {
+    log.push({
+      round,
+      actor: "merchant",
+      action: "accept",
+      amount: policy.floor_price,
+      rationale:
+        `${policy.max_rounds} rounds used and the buyer's ₹${buyer.max_price} ceiling still covers the ` +
+        `₹${policy.floor_price} floor — taking the floor rather than losing a sale both sides wanted`,
+    });
+    return finish({ status: "agreed", final_price: policy.floor_price, rounds: round, log });
+  }
+
   log.push({
     round,
     actor: "merchant",
     action: "no_deal",
     amount: null,
-    rationale: `${policy.max_rounds} rounds used; buyer's last offer ₹${offer} never reached the ₹${policy.floor_price} floor`,
+    rationale: `${policy.max_rounds} rounds used; buyer's ₹${buyer.max_price} ceiling is below the ₹${policy.floor_price} floor`,
   });
   return finish({
     status: "no_deal",
     reason:
-      `no agreement within ${policy.max_rounds} rounds — buyer's last offer was ₹${offer}, ` +
-      `merchant's final ask ₹${ask}, floor ₹${policy.floor_price}`,
+      `no price exists that suits both: buyer is authorized to ₹${buyer.max_price}, ` +
+      `merchant will not go below ₹${policy.floor_price}`,
     rounds: round,
     log,
   });

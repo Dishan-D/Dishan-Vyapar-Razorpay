@@ -782,8 +782,36 @@ function clearShelfFilter() {
   render();
 }
 
+/**
+ * A proposal that has been prepared and not yet actioned.
+ *
+ * Held here so that typing "confirm" does the same thing as pressing Confirm.
+ * The shopper had no way to know the word was addressed to a model that cannot
+ * act on it — they said confirm, were told the cake was confirmed, and no
+ * order existed. Whichever way they say yes, one path runs the purchase.
+ */
+let pendingProposal = null;
+
+const AFFIRM = /^\s*(confirm|confirmed|yes|yeah|yep|ok|okay|sure|go ahead|do it|buy it|proceed|place it|book it)\s*[.!]?\s*$/i;
+
 async function say(text) {
   if (!text || $("send").disabled) return;
+
+  // Said yes to something already prepared? Run it, and do not involve the
+  // model in a decision it cannot carry out.
+  if (pendingProposal && AFFIRM.test(text)) {
+    const prop = pendingProposal;
+    pendingProposal = null;
+    thread.push({ role: "user", content: text });
+    bubble("user", text);
+    document.querySelector(`[data-buy][data-live="1"]`)?.closest(".prop2")
+      ?.replaceChildren(Object.assign(document.createElement("span"), { textContent: "Confirmed." }));
+    $("goal").value = "";
+    const took = await offerBasket(prop);
+    if (!took) await run(prop.goal, prop.item_id);
+    return;
+  }
+
   $("goal").value = "";
   $("exs").hidden = true;
   thread.push({ role: "user", content: text });
@@ -831,14 +859,17 @@ async function say(text) {
   for (const [i, prop] of (body.proposals ?? []).entries()) {
     $("rb").insertAdjacentHTML("beforeend",
       `<div class="prop2"><span>${esc(prop.label)}</span>
-        <button class="btn go" data-buy="${i}">Confirm</button>
+        <button class="btn go" data-buy="${i}" data-live="1">Confirm</button>
         <button class="btn secondary" data-nobuy="${i}">No</button></div>`);
+    // The latest proposal is the one "confirm" refers to.
+    pendingProposal = prop;
   }
   $("rb").scrollTop = $("rb").scrollHeight;
 
   for (const b of $("rb").querySelectorAll("[data-buy]")) {
     b.onclick = async () => {
       const prop = body.proposals[Number(b.dataset.buy)];
+      pendingProposal = null;
       b.closest(".prop2").innerHTML = `<span>Confirmed.</span>`;
       // Before running, ask whether anything genuinely goes with this. The
       // shopper answers; nothing is added on their behalf.
@@ -847,7 +878,7 @@ async function say(text) {
     };
   }
   for (const b of $("rb").querySelectorAll("[data-nobuy]")) {
-    b.onclick = () => { b.closest(".prop2").innerHTML = `<span>Left it.</span>`; };
+    b.onclick = () => { pendingProposal = null; b.closest(".prop2").innerHTML = `<span>Left it.</span>`; };
   }
 }
 

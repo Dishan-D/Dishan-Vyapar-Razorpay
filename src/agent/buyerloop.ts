@@ -37,6 +37,9 @@ Good: "Three of these under ₹5,000. The wired pair at Rafiq is the cheapest at
 - A tool result marked "tool_failed" is NOT an empty result. It means the lookup broke. Never turn it into a fact — do not say a list is empty, or that nothing exists, on the strength of a failure. Say you could not check, and stop.
 
 Buying:
+- You cannot buy anything. You have no tool that completes a purchase, and no purchase has ever completed because of something you said.
+- NEVER tell a shopper a purchase is done, confirmed, placed, bought, or on its way. Even when they type "confirm" to you, that is them talking to you — it is not the press that runs it. Saying otherwise leaves someone believing they own a cake nobody is baking.
+- What you may say is that it is *ready* and waiting for them to confirm, and where the button is.
 - start_purchase does NOT buy anything. It prepares a purchase the shopper must confirm.
 - Only call it once you know BOTH what they want and the most they will pay. If either is missing, ask for the one that is missing and call no tool.
 - Never guess a budget. "Cheap" is not a budget; ask.
@@ -70,6 +73,35 @@ const MAX_STEPS = 4;
  * This cannot catch every fabrication — a made-up shop name with no number
  * attached would pass. It catches the expensive kind, and it fails closed.
  */
+/**
+ * Does this reply claim a purchase happened?
+ *
+ * A shopper typed "confirm" at the assistant and was told "Done — your Red
+ * Velvet Cake is confirmed for ₹599". No order existed. That is the worst
+ * thing this system can do: everything else here is about not overstating what
+ * is known, and this overstated that money had moved.
+ *
+ * Only completion is caught. "Ready to confirm" and "waiting for you to
+ * confirm" are true and useful; "is confirmed" and "your order is placed" are
+ * not, and the difference is tense, not vocabulary.
+ */
+export function claimsPurchaseDone(answer: string): boolean {
+  const t = answer.toLowerCase();
+  const claims = [
+    // "ready and confirmed" was the live model's own phrasing and slipped a
+    // pattern anchored on "is confirmed". The past participle is what asserts
+    // the state, wherever it sits; "press Confirm" and "to confirm" are the
+    // infinitive and stay allowed.
+    /\b(is|are|was|were|and|now)\s+(confirmed|placed|booked|ordered)\b/,
+    /\b(has been|have been|was|were) (confirmed|placed|ordered|purchased|bought)\b/,
+    /\byour (order|purchase) is (confirmed|placed|complete|done|on its way)\b/,
+    /\b(i(?:'ve| have)?) (bought|purchased|placed|ordered)\b/,
+    /\bdone\b[^.]{0,40}\b(confirmed|purchased|bought)\b/,
+    /\bpurchase (is )?complete\b/,
+  ];
+  return claims.some((re) => re.test(t));
+}
+
 export function ungroundedFigures(answer: string, allowed: Set<number>): number[] {
   const found = [...answer.matchAll(/₹\s?([\d,]+)/g)]
     .map((m) => Number(m[1]!.replace(/,/g, "")))
@@ -221,14 +253,28 @@ export async function converseWithTools(
           continue;
         }
 
+        // A purchase completes when the shopper presses the button, and this
+        // loop never sees that happen — so any claim that one did is false by
+        // construction, whatever the model believes.
+        const overclaims = claimsPurchaseDone(said);
+        const prepared = steps.some((x) => x.tool === "start_purchase" && x.proposal);
+
         return {
-          answer: stray.length > 0 ? fromRowsOnly(steps) : said,
+          answer: stray.length > 0
+            ? fromRowsOnly(steps)
+            : overclaims
+              ? prepared
+                ? "It is ready and waiting for you — press Confirm below and I will send the agent."
+                : "Nothing has been bought yet. Tell me what you want and your budget, and I will get it ready for you to confirm."
+              : said,
           steps,
           proposals: steps.map((s) => s.proposal).filter((p): p is NonNullable<typeof p> => Boolean(p)),
           answered_by: "model",
           ...(stray.length > 0
             ? { note: `replaced an answer that quoted figures no lookup returned (${stray.map((n) => "₹" + n).join(", ")})` }
-            : {}),
+            : overclaims
+              ? { note: "replaced an answer that said a purchase was complete; nothing has been bought" }
+              : {}),
         };
       }
 
