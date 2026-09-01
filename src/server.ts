@@ -261,10 +261,34 @@ export async function createApp(options: AppOptions = {}) {
    * Fire-and-forget: a merchant not hearing about a sale is a bad afternoon,
    * but a notification failing must never unwind a captured payment.
    */
-  async function confirmSale(merchantId: string, itemName: string, price: number): Promise<void> {
+  async function confirmSale(merchantId: string, itemName: string, price: number, txn = ""): Promise<void> {
     const merchant = merchants.get(merchantId);
     if (!merchant) return;
-    await notifier.send(merchant.whatsapp, saleConfirmationMessage(itemName, price)).catch(() => undefined);
+    const sent = await notifier
+      .send(merchant.whatsapp, saleConfirmationMessage(itemName, price))
+      .catch((err) => ({ sent: false, error: err instanceof Error ? err.message : String(err) }));
+    console.log(
+      `[sale] ${txn} ${merchant.name} · ${itemName} ₹${price} · ${notifier.channel} ` +
+        ((sent as { sent: boolean }).sent ? "sent" : `not sent: ${(sent as { error?: string }).error ?? "unknown"}`),
+    );
+  }
+
+  /**
+   * Tell the shop a sale happened, once, however the payment arrived.
+   *
+   * Every capture path routes through here — the browser's Checkout callback,
+   * the Razorpay webhook, and the simulated rail — because a shopkeeper does
+   * not care which of those settled it and a message that only fires on one of
+   * them is worse than none. Deduplicated per transaction, since the webhook
+   * and the callback routinely both land.
+   */
+  const announced = new Set<string>();
+  function announceSale(transactionId: string, itemId: string, price: number): void {
+    if (announced.has(transactionId)) return;
+    announced.add(transactionId);
+    const item = catalogItems.find((i) => i.item_id === itemId);
+    if (!item) return;
+    void confirmSale(item.merchant_id, item.name, price, transactionId);
   }
 
   await openClarifications();
@@ -377,7 +401,7 @@ export async function createApp(options: AppOptions = {}) {
           message: `Razorpay confirmed capture of ${paid.payment_id}`,
           data: { payment_id: paid.payment_id, order_id: paid.order_id, via: "webhook" },
         });
-        void confirmSale(item.merchant_id, item.name, chain.cart?.final_price.value ?? 0);
+        announceSale(transactionId, item.item_id, chain.cart?.final_price.value ?? 0);
         res.json({ status: "settled", transaction_id: transactionId, payment_id: paid.payment_id });
       } catch (err) {
         if (err instanceof PaymentRefused) {
@@ -683,7 +707,7 @@ export async function createApp(options: AppOptions = {}) {
         message: `Payment captured — ₹${outcome.final_price} for ${item.name}`,
         data: { payment_id: paid.payment_id, order_id: paid.order_id, amount: outcome.final_price },
       });
-      void confirmSale(item.merchant_id, item.name, outcome.final_price);
+      announceSale(transaction_id, item.item_id, outcome.final_price);
       res.status(201).json({ ...common, status: "paid", payment_id: paid.payment_id });
     } catch (err) {
       if (err instanceof PaymentRefused) {
@@ -744,7 +768,7 @@ export async function createApp(options: AppOptions = {}) {
         message: `Payment captured — ${paid.payment_id}`,
         data: { payment_id: paid.payment_id, order_id: paid.order_id },
       });
-      void confirmSale(item.merchant_id, item.name, chain.cart?.final_price.value ?? 0);
+      announceSale(id, item.item_id, chain.cart?.final_price.value ?? 0);
       res.status(201).json({
         status: "paid",
         transaction_id: id,
@@ -1329,8 +1353,9 @@ export async function createApp(options: AppOptions = {}) {
         merchant_id: item.merchant_id,
         item_id: item.item_id,
         message: `Agent paid ₹${chosen.final_price} to ${chosen.merchant_name}`,
+        data: { payment_id: paid.payment.razorpay_payment_id, amount: chosen.final_price },
       });
-      void confirmSale(item.merchant_id, item.name, chosen.final_price!);
+      announceSale(transaction_id, item.item_id, chosen.final_price!);
       step("pay", `Paid ₹${chosen.final_price}`, {
         merchant_id: item.merchant_id,
         order_id: paid.order_id,

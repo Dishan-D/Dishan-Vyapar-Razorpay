@@ -96,6 +96,11 @@
   .ord.justin { animation:pop .8s ease; }
   @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
 
+  .autopay { display:flex; gap:9px; align-items:flex-start; padding:0 15px 13px; cursor:pointer; margin:0; }
+  .autopay input { width:auto; margin-top:2px; flex:none; }
+  .autopay b { display:block; font-size:12.5px; font-weight:600; color:var(--ink); }
+  .autopay em { display:block; font-style:normal; font-size:11px; color:var(--ink-3); line-height:1.45; margin-top:2px; }
+
   .paybox { border:1px solid var(--blue-3); background:var(--blue-2); border-radius:var(--r-sm);
             padding:14px; margin:11px 0; }
   .paybox.done { border-color:var(--green-3); background:var(--green-2); }
@@ -218,6 +223,17 @@
       <input id="goal" placeholder="Tell it what you want…" />
       <button class="btn primary" id="send">Send</button>
     </div>
+    <!--
+      Off by default, and it says what it costs you. A real payment needs a
+      person at Checkout; letting the agent finish alone means settling on the
+      simulated rail, whose ids are sim_ prefixed and are not Razorpay's.
+    -->
+    <label class="autopay">
+      <input type="checkbox" id="autopay" />
+      <span><b>Let the agent pay by itself</b>
+        <em>Off: it stops at the order and hands you Razorpay Checkout. On: it settles on the
+        simulated rail so the run finishes unattended — those ids are not Razorpay's.</em></span>
+    </label>
   </aside>
 </div>
 
@@ -360,7 +376,9 @@ async function run(goal, itemId) {
 
   // No Razorpay keys means no Checkout to open, so the run settles on the
   // simulated rail instead of stranding the shopper at a dead end.
-  const settle = config.gateway === "razorpay" ? "checkout" : "test_rail";
+  // The shopper's choice wins; without Razorpay keys there is nothing to hand
+  // off to, so the rail is the only thing that can finish a run.
+  const settle = config.gateway === "razorpay" && !$("autopay").checked ? "checkout" : "test_rail";
 
   let status, body;
   try {
@@ -455,6 +473,17 @@ function offerPayment(r) {
   box.querySelector("[data-pay]").onclick = () => checkout(r, box);
 }
 
+/** Put a pay card into its paid state, whoever settled the payment. */
+function markPaid(transactionId, paymentId) {
+  const box = document.getElementById(`pay_${transactionId}`);
+  if (!box || box.classList.contains("done")) return;
+  box.classList.add("done");
+  box.innerHTML = `<div class="ph2">✓ Paid</div>
+    <div class="pmeta"><span class="mono">${esc(paymentId ?? "confirmed")}</span></div>
+    <div class="pnote">Waiting for the shop to confirm handover. Nothing marks itself delivered.</div>`;
+  beacon(false, "paid");
+}
+
 function checkout(r, box) {
   new window.Razorpay({
     key: config.razorpay_key_id, order_id: r.order_id, amount: r.amount_paise,
@@ -477,13 +506,7 @@ function checkout(r, box) {
         push(stepRow("⚠", "Payment did not complete", "the order is still open"));
         return;
       }
-      beacon(false, "paid");
-      if (box) {
-        box.classList.add("done");
-        box.innerHTML = `<div class="ph2">✓ Paid ${rupee(r.final_price)}</div>
-          <div class="pmeta"><span class="mono">${esc(o.payment_id ?? "confirmed")}</span></div>
-          <div class="pnote">Waiting for the shop to confirm handover. Nothing marks itself delivered.</div>`;
-      }
+      markPaid(r.transaction_id, o.payment_id);
       push(stepRow("₹", `Paid — ${esc(o.payment_id ?? "confirmed")}`,
         status === 409 ? "settled by the Razorpay webhook before this tab could" : "signed into the mandate chain"));
       push(stepRow("■", "Waiting on the shop to confirm handover", "nothing here marks itself delivered"));
@@ -936,6 +959,10 @@ config = await boot({
     // The merchant confirming handover is the only thing that can mark an order
     // delivered, so that event is exactly what this page listens for.
     if (e.type === "fulfillment.confirmed" || e.type === "payment.captured") loadOrders();
+    // The card used to update only from the Checkout callback's own closure,
+    // so a payment settled by the webhook first — which is routine now — left
+    // it sitting on "Ready to pay" after the money had gone.
+    if (e.type === "payment.captured" && e.transaction_id) markPaid(e.transaction_id, e.data?.payment_id);
   },
 });
 showMode();
