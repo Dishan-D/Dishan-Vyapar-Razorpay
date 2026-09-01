@@ -27,11 +27,12 @@ const bar = (v: number): string => "█".repeat(Math.round(v * 12)).padEnd(12, "
 async function main(): Promise<void> {
   console.log(bold("\nVyapar-to-Agent · Milestone J — readiness and marketplace"));
 
-  const { app, store } = await createApp({ gateway: new SimulatedGateway() });
+  const { app, store, setPort } = await createApp({ gateway: new SimulatedGateway() });
   const server: Server = await new Promise((res) => {
     const s = app.listen(0, () => res(s));
   });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const api = async (p: string, init?: RequestInit) => {
     const res = await fetch(`http://localhost:${port}${p}`, {
       ...init,

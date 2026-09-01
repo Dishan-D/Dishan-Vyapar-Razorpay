@@ -27,11 +27,12 @@ async function main(): Promise<void> {
   // Simulated on purpose: this milestone proves the fulfillment and audit
   // stages, and a real gateway would stop the flow at Checkout for reasons
   // that have nothing to do with what is being tested here.
-  const { app, store, gateway } = await createApp({ gateway: new SimulatedGateway() });
+  const { app, store, gateway, setPort } = await createApp({ gateway: new SimulatedGateway() });
   const server: Server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const base = `http://localhost:${port}`;
   const call = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${base}${path}`, {

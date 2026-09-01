@@ -51,9 +51,10 @@ async function main(): Promise<void> {
   console.log(bold("\nVyapar-to-Agent · pipeline audit"));
 
   const spy = new Spy();
-  const { app, store, keyring, catalog, bus } = await createApp({ gateway: spy });
+  const { app, store, keyring, catalog, bus, setPort } = await createApp({ gateway: spy });
   const server: Server = await new Promise((res) => { const s = app.listen(0, () => res(s)); });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const api = async (p: string, init?: RequestInit) => {
     const res = await fetch(`http://localhost:${port}${p}`, {
       ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) },

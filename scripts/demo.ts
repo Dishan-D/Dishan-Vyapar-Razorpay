@@ -26,11 +26,12 @@ function step(n: number, of: number, title: string): void {
 }
 
 async function main(): Promise<void> {
-  const { app, store } = await createApp();
+  const { app, store, setPort } = await createApp();
   const server: Server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const base = `http://localhost:${port}`;
   const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${base}${path}`, {

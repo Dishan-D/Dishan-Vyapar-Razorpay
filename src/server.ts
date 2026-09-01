@@ -22,6 +22,8 @@ import { readinessScore } from "./marketplace/readiness.js";
 import { compareMerchants } from "./marketplace/compare.js";
 import { parseIntent } from "./agent/intent.js";
 import { readPolicyRequest, proposeChange } from "./agent/policy.js";
+import { ask as askMerchantAgent } from "./agent/merchant.js";
+import { TOOLS, type ToolCall, type ToolResult } from "./agent/tools.js";
 import { discover } from "./catalog/discovery.js";
 import { Store } from "./db/store.js";
 import { confirmFulfillment, FulfillmentRefused } from "./fulfillment/confirm.js";
@@ -202,6 +204,10 @@ export async function createApp(options: AppOptions = {}) {
       message: `${item.name} is agent-readable at ₹${item.price.value}`,
     });
   }
+
+  // Set once the server binds; the agent's tools read our own endpoints so
+  // there is exactly one implementation of every answer.
+  let localPort = Number(process.env.PORT || 3000);
 
   const app = express();
 
@@ -2327,6 +2333,136 @@ export async function createApp(options: AppOptions = {}) {
     });
   });
 
+  /**
+   * The agent's hands. Each tool reads the same state every screen reads, so
+   * the assistant and the dashboard can never disagree about the shop.
+   */
+  async function runTool(merchantId: string, call: ToolCall): Promise<ToolResult> {
+    const def = TOOLS.find((t) => t.name === call.tool);
+    const base: ToolResult = { tool: call.tool, args: call.args, summary: "", data: null };
+    if (!def) return { ...base, error: `no such tool: ${call.tool}`, summary: `Unknown tool ${call.tool}` };
+
+    const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+    const mine = () => catalogItems.filter((i) => i.merchant_id === merchantId);
+
+    switch (call.tool) {
+      case "get_alerts": {
+        const r = await fetchLocal(`/merchants/${merchantId}/alerts`);
+        return { ...base, data: r,
+          summary: r.all_clear
+            ? `Nothing needs attention. ${money(r.today.collected)} collected today across ${r.today.payments} payment(s).`
+            : `${r.needs_attention} thing(s) need attention; ${money(r.today.collected)} collected today.` };
+      }
+      case "list_products": {
+        const items = mine().map((i) => ({
+          item_id: i.item_id, name: i.name, price: i.price.value, stock: i.stock.quantity,
+          sellable: !i.needs_merchant_confirmation,
+          held_because: gateReasons(i, sanityFor(i)),
+        }));
+        const held = items.filter((i) => !i.sellable).length;
+        return { ...base, data: items,
+          summary: `${items.length} product(s); ${held} cannot be sold until confirmed.` };
+      }
+      case "get_orders": {
+        const r = await fetchLocal(`/merchants/${merchantId}/orders`);
+        return { ...base, data: r.orders,
+          summary: `${r.orders.length} order(s); ${r.awaiting_handover} waiting to be handed over.` };
+      }
+      case "explain_payment": {
+        const id = String(call.args.transaction_id ?? "");
+        const trust = trustFor(id);
+        if (!trust) return { ...base, error: `no such transaction: ${id}`, summary: `Could not find ${id}` };
+        return { ...base, data: trust,
+          summary: `${trust.headline} — recommended: ${trust.action}.` };
+      }
+      case "explain_readiness": {
+        const r = readinessFor(merchantId);
+        return { ...base, data: r, summary: `Readiness ${r.score}/100 — ${r.explanation}` };
+      }
+      case "get_lost_sales": {
+        const r = await fetchLocal(`/merchants/${merchantId}/opportunities`);
+        return { ...base, data: r,
+          summary: `${r.buyers_lost} buyer(s) left without buying, across ${r.searches_seen} search(es).` };
+      }
+      case "get_commerce_history": {
+        const r = await fetchLocal(`/merchants/${merchantId}/commerce-history`);
+        return { ...base, data: {
+            completed: r.completed_transactions, verified_value: r.total_verified_value,
+            fulfillment_rate: r.fulfillment_confirmation_rate, avg_discount: r.negotiation_avg_discount_pct },
+          summary: `${r.completed_transactions} delivered sale(s), ${money(r.total_verified_value)} verified.` };
+      }
+
+      // ── proposals — these do not act ────────────────────────────────────
+      case "propose_confirm_handover": {
+        const id = String(call.args.transaction_id ?? "");
+        const chain = store.loadChain(id);
+        if (!chain?.payment) return { ...base, error: `${id} is not a paid order`, summary: `${id} has not been paid` };
+        if (chain.fulfillment) return { ...base, data: { already: true }, summary: `${id} was already handed over.` };
+        const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
+        return { ...base,
+          data: { transaction_id: id, item: item?.name, amount: chain.cart?.final_price.value },
+          summary: `Ready to confirm handover of ${item?.name ?? id}.`,
+          proposal: {
+            label: `Confirm handover — ${item?.name ?? id}, ${money(chain.cart?.final_price.value ?? 0)}`,
+            endpoint: `/transactions/${id}/confirm-fulfillment`, method: "POST",
+            body: { evidence_note: "Handed over in person at the shop" },
+          } };
+      }
+      case "propose_set_price": {
+        const itemId = String(call.args.item_id ?? "");
+        const item = mine().find((i) => i.item_id === itemId);
+        if (!item) return { ...base, error: `no such product: ${itemId}`, summary: `Could not find ${itemId}` };
+        const price = Number(call.args.price ?? 0);
+        const stock = Number(call.args.stock ?? -1);
+        const body: Record<string, unknown> = {};
+        if (price > 0) body.price = price;
+        if (stock >= 0) body.stock = stock;
+        if (Object.keys(body).length === 0) {
+          return { ...base, error: "no price or stock given", summary: "Nothing to propose — no price or stock." };
+        }
+        return { ...base, data: { item_id: itemId, ...body },
+          summary: `Ready to set ${item.name}${price > 0 ? ` to ${money(price)}` : ""}${stock >= 0 ? `, ${stock} in stock` : ""}.`,
+          proposal: {
+            label: `Set ${item.name}${price > 0 ? ` to ${money(price)}` : ""}${stock >= 0 ? `, stock ${stock}` : ""}`,
+            endpoint: `/merchants/${merchantId}/items/${itemId}`, method: "PATCH", body,
+          } };
+      }
+      default:
+        return { ...base, error: `tool not implemented: ${call.tool}`, summary: "Not implemented" };
+    }
+  }
+
+  /** Read one of our own endpoints without going over the network. */
+  async function fetchLocal(path: string): Promise<any> {
+    const res = await fetch(`http://127.0.0.1:${localPort}${path}`);
+    return res.json();
+  }
+
+  /**
+   * The merchant asks; the agent looks it up and answers from what it found.
+   * Every lookup is returned so the answer can be checked against its sources.
+   */
+  app.post("/merchants/:id/ask", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const question = String(req.body?.question ?? "").trim();
+    if (!question) {
+      res.status(400).json({ error: "ask something" });
+      return;
+    }
+
+    const started = Date.now();
+    const result = await askMerchantAgent(question, (call) => {
+      console.log(`[ask ${id}] tool ${call.tool} ${JSON.stringify(call.args)}`);
+      return runTool(id, call);
+    });
+    console.log(`[ask ${id}] "${question}" → ${result.steps.length} lookup(s) in ${Date.now() - started}ms`);
+    res.json({ ...result, elapsed_ms: Date.now() - started });
+  });
+
   app.get("/merchants", (_req, res) => {
     res.json({
       merchants: structuring.merchants.map((m) => ({
@@ -2583,7 +2719,10 @@ export async function createApp(options: AppOptions = {}) {
     res.json({ transactions: store.listTransactions() });
   });
 
-  return { app, store, keyring, catalog: catalogItems, gateway, structuring, notifier, bus };
+  return {
+    app, store, keyring, catalog: catalogItems, gateway, structuring, notifier, bus,
+    setPort: (p: number) => { localPort = p; },
+  };
 }
 
 /**
@@ -2623,7 +2762,8 @@ const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split
 if (isMain) {
   const port = Number(process.env.PORT || 3000);
   createApp()
-    .then(({ app, gateway, bus, notifier }) => {
+    .then(({ app, gateway, bus, notifier, setPort }) => {
+      setPort(port);
       const httpServer = createServer(app);
       attachRealtime(httpServer, bus);
       httpServer.listen(port, () => {

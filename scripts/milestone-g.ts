@@ -22,11 +22,12 @@ function heading(t: string): void {
 async function main(): Promise<void> {
   console.log(bold("\nVyapar-to-Agent · Milestone G — structuring pipeline"));
 
-  const { app, store } = await createApp();
+  const { app, store, setPort } = await createApp();
   const server: Server = await new Promise((res) => {
     const s = app.listen(0, () => res(s));
   });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const api = async (p: string, init?: RequestInit) => {
     const res = await fetch(`http://localhost:${port}${p}`, {
       ...init,

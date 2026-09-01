@@ -38,11 +38,12 @@ const connect = (url: string, watch: Record<string, string>): Promise<{ socket: 
 async function main(): Promise<void> {
   console.log(bold("\nVyapar-to-Agent · Milestone I — real-time layer"));
 
-  const { app, store, bus } = await createApp({ gateway: new SimulatedGateway() });
+  const { app, store, bus, setPort } = await createApp({ gateway: new SimulatedGateway() });
   const httpServer: Server = createServer(app);
   attachRealtime(httpServer, bus);
   await new Promise<void>((res) => httpServer.listen(0, res));
   const port = (httpServer.address() as { port: number }).port;
+  setPort(port);
   const url = `http://localhost:${port}`;
 
   const api = async (p: string, init?: RequestInit) => {

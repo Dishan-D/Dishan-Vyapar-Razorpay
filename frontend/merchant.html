@@ -93,6 +93,25 @@
   .edit button { padding:6px 11px; font-size:12px; }
   @media (max-width:720px){ .edit { grid-template-columns:1fr 1fr; } }
 
+  .askbox { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
+  .askrow2 { display:flex; gap:9px; padding:14px 16px; border-bottom:1px solid var(--border); }
+  .askrow2 input { flex:1; }
+  .askout { padding:14px 16px; }
+  .astep { display:grid; grid-template-columns:18px 1fr; gap:10px; padding:8px 0; font-size:12.5px; }
+  .astep + .astep { border-top:1px solid var(--border); }
+  .astep .ic { color:var(--ink-4); }
+  .astep .tn { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .astep .sm { color:var(--ink-2); margin-top:1px; }
+  .aans { font-size:14.5px; line-height:1.6; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); white-space:pre-wrap; }
+  .asrc { font-size:11.5px; color:var(--ink-4); margin-top:9px; }
+  .aprop { border:1px solid var(--amber-3); background:var(--amber-2); border-radius:var(--r-sm);
+           padding:12px 14px; margin-top:11px; display:flex; gap:11px; align-items:center; flex-wrap:wrap; }
+  .aprop .pl { flex:1; font-size:13px; color:#6f4608; font-weight:550; }
+  .qchips { display:flex; gap:7px; flex-wrap:wrap; padding:0 16px 14px; }
+  .qchips button { font-size:11.5px; color:var(--ink-3); background:var(--surface-2);
+                   border:1px solid var(--border); border-radius:999px; padding:4px 11px; }
+  .qchips button:hover { color:var(--ink); border-color:var(--border-2); }
+
   .modes { display:inline-flex; gap:3px; padding:3px; background:var(--surface-2);
            border:1px solid var(--border); border-radius:10px; }
   .modes button { background:none; border:0; border-radius:7px; padding:7px 15px;
@@ -578,6 +597,86 @@ async function loadSimple() {
     };
   }
   for (const b of document.querySelectorAll("[data-deep]")) b.onclick = (e) => { e.preventDefault(); setMode("deep"); };
+}
+
+// ── ask ─────────────────────────────────────────────────────────────────────
+//
+// The activity trail is not decoration: each row is a tool that actually ran,
+// and the answer is only ever phrased from what those returned. An assistant
+// that produced the same paragraph without looking would be indistinguishable
+// on screen, which is exactly why the lookups are shown.
+async function askAgent(question) {
+  $("askq").value = question;
+  $("askgo").disabled = true;
+  $("askout").hidden = false;
+  $("askout").innerHTML = `<div class="astep"><span class="ic">🔎</span><div class="sm">Looking it up…</div></div>`;
+
+  let body;
+  try {
+    ({ body } = await api(`/merchants/${merchantId}/ask`, { method: "POST", body: JSON.stringify({ question }) }));
+  } catch (err) {
+    $("askout").innerHTML = note("bad", `Could not reach the server — ${esc(err?.message ?? String(err))}`);
+    $("askgo").disabled = false;
+    return;
+  }
+
+  const steps = (body.steps ?? []).map((s) => `
+    <div class="astep"><span class="ic">${s.error ? "⚠" : "🔎"}</span>
+      <div><div class="tn">${esc(s.tool)}</div><div class="sm">${esc(s.error ?? s.summary)}</div></div>
+    </div>`).join("");
+
+  const proposals = (body.proposals ?? []).map((p, i) => `
+    <div class="aprop"><span class="pl">${esc(p.label)}</span>
+      <button class="btn go" data-prop="${i}">Approve</button></div>`).join("");
+
+  $("askout").innerHTML = steps +
+    `<div class="aans">${esc(body.answer ?? "")}</div>` + proposals +
+    `<div class="asrc">${body.answered_by === "model" ? "Answered from the lookups above" : "Answered without the model"}${body.note ? ` — ${esc(body.note)}` : ""} · ${body.elapsed_ms}ms</div>`;
+
+  for (const b of document.querySelectorAll("[data-prop]")) {
+    b.onclick = async () => {
+      const p = body.proposals[Number(b.dataset.prop)];
+      b.disabled = true;
+      const { status, body: r } = await api(p.endpoint, { method: p.method, body: JSON.stringify(p.body) });
+      b.closest(".aprop").innerHTML = status < 300
+        ? `<span class="pl">✓ Done — ${esc(p.label)}</span>`
+        : `<span class="pl">Could not apply: ${esc(r.error ?? status)}</span>`;
+      if (status < 300) refresh();
+    };
+  }
+  $("askgo").disabled = false;
+  if (speak && body.answer) say(body.answer);
+}
+
+$("askgo").onclick = () => { const q = $("askq").value.trim(); if (q) askAgent(q); };
+$("askq").addEventListener("keydown", (e) => { if (e.key === "Enter") $("askgo").click(); });
+for (const b of document.querySelectorAll(".qchips button")) b.onclick = () => askAgent(b.dataset.q);
+
+// Voice, using what the browser already has. No infrastructure for a demo.
+let speak = false;
+const Recog = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+$("askmic").onclick = () => {
+  if (!Recog) { $("askq").placeholder = "This browser has no speech recognition — type instead."; return; }
+  const rec = new Recog();
+  rec.lang = "en-IN";
+  rec.interimResults = false;
+  $("askmic").textContent = "●";
+  rec.onresult = (e) => {
+    const said = e.results[0][0].transcript;
+    speak = true;               // asked by voice, answered by voice
+    askAgent(said);
+  };
+  rec.onend = () => { $("askmic").textContent = "🎙"; };
+  rec.onerror = () => { $("askmic").textContent = "🎙"; };
+  rec.start();
+};
+
+function say(text) {
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text.slice(0, 400));
+  u.lang = "en-IN";
+  window.speechSynthesis.speak(u);
+  speak = false;
 }
 
 // ── mode ────────────────────────────────────────────────────────────────────

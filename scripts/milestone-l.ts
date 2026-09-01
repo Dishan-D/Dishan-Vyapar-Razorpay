@@ -63,11 +63,12 @@ async function main(): Promise<void> {
   process.env.RAZORPAY_WEBHOOK_SECRET = WEBHOOK_SECRET;
   console.log(bold("\nVyapar-to-Agent · Milestone L — Razorpay webhook"));
 
-  const { app, store } = await createApp({ gateway: new WebhookGateway() });
+  const { app, store, setPort } = await createApp({ gateway: new WebhookGateway() });
   const server: Server = await new Promise((res) => {
     const s = app.listen(0, () => res(s));
   });
   const port = (server.address() as { port: number }).port;
+  setPort(port);
   const base = `http://localhost:${port}`;
 
   const api = async (p: string, init?: RequestInit) => {
