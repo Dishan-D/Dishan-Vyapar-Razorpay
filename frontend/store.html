@@ -95,6 +95,18 @@
   .ord.justin { animation:pop .8s ease; }
   @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
 
+  .hit { display:flex; gap:10px; align-items:center; padding:9px 10px; margin:7px 0;
+         border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface); }
+  .hit:hover { border-color:var(--border-2); }
+  .hit .th2 { width:42px; height:42px; border-radius:8px; background:var(--surface-2); flex:none;
+              display:grid; place-items:center; overflow:hidden; font-size:19px; }
+  .hit .th2 img { width:100%; height:100%; object-fit:cover; }
+  .hit .hb { flex:1; min-width:0; }
+  .hit .hn { font-size:12.5px; font-weight:600; letter-spacing:-.01em; line-height:1.3; }
+  .hit .hs { font-size:11px; color:var(--ink-3); margin-top:1px; }
+  .hit .hp { font-size:13px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:3px; }
+  .hit .dn { font-size:11px; font-weight:450; color:var(--green); margin-left:5px; }
+
   .tool { font-size:11.5px; color:var(--ink-3); font-family:var(--mono); padding:5px 0;
           border-bottom:1px dashed var(--border); line-height:1.45; }
   .tool b { color:var(--ink-2); font-weight:600; }
@@ -463,10 +475,50 @@ render();
  */
 const thread = [];
 
+/**
+ * Bubbles render the little markdown a model actually emits.
+ *
+ * Escaping first and formatting second: the text is model output and is never
+ * trusted as HTML. Only bold and line breaks are honoured — enough that `**`
+ * and stray bullets stop showing up as literal characters, and not so much
+ * that a reply can style itself into looking like part of the interface.
+ */
+function md(text) {
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/^\s*[-•]\s+/gm, "· ")
+    .replace(/\n/g, "<br>");
+}
+
 function bubble(who, text) {
   $("rb").insertAdjacentHTML("beforeend",
-    `<div class="bub ${who === "user" ? "me" : "it"}">${esc(text)}</div>`);
+    `<div class="bub ${who === "user" ? "me" : "it"}">${md(text)}</div>`);
   $("rb").scrollTop = $("rb").scrollHeight;
+}
+
+/** One search hit, as a row the shopper can act on. */
+function hitRow(r) {
+  const it = items.find((x) => x.item_id === r.item_id);
+  const floor = r.lowest && r.lowest < r.price ? `<span class="dn">down to ${rupee(r.lowest)}</span>` : "";
+  return `<div class="hit" data-hit="${esc(r.item_id)}">
+    <div class="th2">${it?.photo_url ? `<img src="${esc(it.photo_url)}" alt="" />` : (GLYPH[top(it?.category ?? "other")] ?? "📦")}</div>
+    <div class="hb">
+      <div class="hn">${esc(r.name)}</div>
+      <div class="hs">${esc(r.shop)} · ${r.in_stock} in stock</div>
+      <div class="hp">${rupee(r.price)} ${floor}</div>
+    </div>
+    <button class="btn secondary sm" data-hitbuy="${esc(r.item_id)}">Buy</button>
+  </div>`;
+}
+
+/** Clicking Buy asks for this exact product at its listed price. */
+function wireHits() {
+  for (const b of $("rb").querySelectorAll("[data-hitbuy]")) {
+    b.onclick = () => {
+      const r = items.find((x) => x.item_id === b.dataset.hitbuy);
+      if (r) say(`buy the ${r.name} for up to ${r.price.value}`);
+    };
+  }
 }
 
 async function say(text) {
@@ -492,6 +544,16 @@ async function say(text) {
   for (const st of body.steps ?? []) {
     $("rb").insertAdjacentHTML("beforeend",
       `<div class="tool">${st.error ? "⚠" : "🔎"} <b>${esc(st.tool)}</b> ${esc(st.summary ?? st.error ?? "")}</div>`);
+
+    // Products are shown, not described.
+    //
+    // The model was re-typing every result into a paragraph — name, list
+    // price, floor, stock, four times over — which is slower to read than a
+    // list, drops the photo, and gives the shopper nothing to click. The rows
+    // below are the tool's own data, so they cannot drift from what the shelf
+    // actually holds, and each one buys directly.
+    const rows = st.tool === "search_shelf" ? (st.data?.results ?? []) : [];
+    if (rows.length > 0) $("rb").insertAdjacentHTML("beforeend", rows.map(hitRow).join(""));
   }
 
   thread.push({ role: "assistant", content: body.answer });
@@ -506,6 +568,7 @@ async function say(text) {
         <button class="btn go" data-buy="${i}">Confirm</button>
         <button class="btn secondary" data-nobuy="${i}">No</button></div>`);
   }
+  wireHits();
   $("rb").scrollTop = $("rb").scrollHeight;
 
   for (const b of $("rb").querySelectorAll("[data-buy]")) {
