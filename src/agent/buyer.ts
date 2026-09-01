@@ -71,17 +71,18 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "start_purchase",
     description:
-      "Propose buying ONE specific product that search_shelf has already returned. This does NOT buy it — it prepares the purchase and the shopper must confirm before any money moves. You must call search_shelf first and pass an item_id from its results; you cannot buy a product you have not looked up.",
+      "Propose buying ONE specific product that search_shelf has already returned. This does NOT buy it — it prepares the purchase and the shopper must confirm before any money moves. Call search_shelf first and pass the NUMBER of the product you want from its numbered results.",
     parameters: {
       type: "object",
       properties: {
-        item_id: {
+        product: {
           type: "string",
-          description: "The item_id of a product returned by search_shelf in this conversation. Never invent one.",
+          description:
+            "Which product, taken from the numbered list search_shelf returned — just the number, e.g. \"2\". The product's exact name also works. Never make up an id.",
         },
         max_price: { type: "number", description: "The most the shopper will pay, in rupees" },
       },
-      required: ["item_id", "max_price"],
+      required: ["product", "max_price"],
       additionalProperties: false,
     },
     spends: true,

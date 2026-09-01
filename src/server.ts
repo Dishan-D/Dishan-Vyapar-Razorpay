@@ -2257,14 +2257,29 @@ export async function createApp(options: AppOptions = {}) {
    * would not show. `start_purchase` runs nothing — it returns the sentence the
    * shopper has to agree to before an agent is sent.
    */
-  async function runBuyerTool(call: BuyerToolCall): Promise<BuyerToolResult> {
+  async function runBuyerTool(
+    call: BuyerToolCall,
+    lastSearch: string[],
+  ): Promise<BuyerToolResult> {
     const { tool, args } = call;
     try {
       if (tool === "search_shelf") {
         const want = String(args.want ?? "").trim();
         const max = Number(args.max_price ?? 0);
         const found = discover(catalogItems, { want, ...(max > 0 ? { max_price: max } : {}) });
-        const rows = found.matches.slice(0, 6).map((m) => ({
+        const rows = found.matches.slice(0, 6).map((m, n) => ({
+          /**
+           * A number the model can actually carry.
+           *
+           * It was asked to pass an item_id back and kept inventing
+           * plausible-looking ones — sri-balaji-choc-500, new_nature1005,
+           * sri_balaji_42 — none of which existed. Opaque identifiers are
+           * something models copy unreliably, so the conversation stalled on
+           * a guard doing its job. A one-digit reference is small enough to
+           * carry correctly, and the server resolves it against the very rows
+           * it just returned.
+           */
+          ref: n + 1,
           item_id: m.item.item_id,
           name: m.item.name,
           shop: merchants.get(m.item.merchant_id)?.name ?? m.item.merchant_id,
@@ -2273,10 +2288,15 @@ export async function createApp(options: AppOptions = {}) {
           lowest: policies.get(m.item.item_id)?.floor_price ?? null,
           in_stock: m.item.stock.quantity,
         }));
+        // What the numbers in this turn's answer refer to.
+        lastSearch.length = 0;
+        lastSearch.push(...rows.map((r) => r.item_id));
+
         return {
           tool,
           summary: rows.length > 0
-            ? `${rows.length} on the shelf for "${want}"${max > 0 ? ` under ₹${max}` : ""}.`
+            ? `${rows.length} on the shelf for "${want}"${max > 0 ? ` under ₹${max}` : ""}: ` +
+              rows.map((r) => `${r.ref}) ${r.name} ₹${r.price} at ${r.shop}`).join("; ")
             : `Nothing on the shelf matches "${want}".`,
           data: { results: rows, withheld: found.withheld.length },
         };
@@ -2311,8 +2331,24 @@ export async function createApp(options: AppOptions = {}) {
       }
 
       if (tool === "start_purchase") {
-        const itemId = String(args.item_id ?? "").trim();
+        const said = String(args.product ?? args.item_id ?? "").trim();
         const max = Number(args.max_price ?? 0);
+
+        /**
+         * Resolve what the model said to something that exists.
+         *
+         * Three ways, in order of how reliable each is: the reference number
+         * from the search it just ran, a real item_id if it happened to copy
+         * one correctly, or an exact product name. Everything else is a guess
+         * and is refused — the point is not to be lenient, it is to stop
+         * asking the model for the one thing it cannot reliably carry.
+         */
+        const byRef = /^\d+$/.test(said) ? lastSearch[Number(said) - 1] : undefined;
+        const byId = catalogItems.find((i) => i.item_id === said);
+        const byName = catalogItems.find(
+          (i) => i.name.toLowerCase() === said.toLowerCase() && !i.needs_merchant_confirmation,
+        );
+        const itemId = byRef ?? byId?.item_id ?? byName?.item_id ?? "";
 
         // A purchase with no ceiling is the one thing this must never prepare:
         // the ceiling is what the authorization check gates on, and without it
@@ -2333,8 +2369,10 @@ export async function createApp(options: AppOptions = {}) {
         if (!item) {
           return {
             tool,
-            summary: `No product with id ${itemId || "(none given)"}.`,
-            error: `${itemId || "(empty)"} is not a product on this shelf. Call search_shelf and use an item_id it returned.`,
+            summary: `"${said || "(nothing)"}" does not point at a product.`,
+            error:
+              `"${said}" is not one of the numbered results. Call search_shelf, then pass the NUMBER of the row you want — ` +
+              (lastSearch.length > 0 ? `this search returned 1 to ${lastSearch.length}.` : "there is no search to refer to yet."),
           };
         }
         if (item.needs_merchant_confirmation || item.stock.quantity < 1) {
@@ -2387,7 +2425,10 @@ export async function createApp(options: AppOptions = {}) {
     }
 
     const started = Date.now();
-    const out = await converseWithTools(turns, runBuyerTool);
+    // Scoped to this request: two shoppers searching at once must not be able
+    // to resolve each other's numbers.
+    const lastSearch: string[] = [];
+    const out = await converseWithTools(turns, (call) => runBuyerTool(call, lastSearch));
     res.json({ ...out, elapsed_ms: Date.now() - started });
   });
 
