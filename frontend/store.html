@@ -120,6 +120,10 @@ $("buycart").onclick = async () => {
   .mini .mw { font-size:11px; color:var(--green); margin-top:4px; line-height:1.5; }
   .mini .mp { font-size:13.5px; font-weight:650; font-variant-numeric:tabular-nums; margin-top:3px; }
 
+  .waitbox { font-size:12px; color:var(--amber); background:var(--amber-2);
+             border:1px solid var(--amber-3); border-radius:var(--r-sm);
+             padding:10px 12px; margin:9px 0; line-height:1.5; }
+
   .subhead { font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-4);
              font-weight:700; margin:13px 0 4px; }
 
@@ -840,6 +844,8 @@ render();
  * asked for, so it does not get to hold the pen.
  */
 const thread = [];
+/** One automatic retry at a time, so a busy minute cannot become a loop. */
+let retrying = false;
 
 /**
  * Bubbles render the little markdown a model actually emits.
@@ -1008,6 +1014,39 @@ async function say(text) {
     // table, a cart is a cart, a search narrows the shelf — the alternative is
     // every answer arriving as a paragraph the shopper has to decode.
     drawResult(st);
+  }
+
+  /**
+   * Out of budget for the minute: wait it out rather than hand the shopper a
+   * dead end.
+   *
+   * The window resets inside sixty seconds, so telling someone to try again is
+   * asking them to do the waiting manually — and they will try immediately,
+   * fail again, and conclude the thing is broken. One automatic retry, with
+   * the seconds counting down where they can see them.
+   */
+  if (body.retry_after_seconds && !retrying) {
+    retrying = true;
+    const id = `w_${Date.now()}`;
+    $("rb").insertAdjacentHTML("beforeend", `<div class="waitbox" id="${id}"></div>`);
+    const box = document.getElementById(id);
+    let left = Math.min(60, Math.ceil(body.retry_after_seconds));
+    const tick = () => {
+      if (box) box.textContent = `The assistant is at its limit for this minute. Retrying in ${left}s — the shelf and Buy still work.`;
+    };
+    tick();
+    await new Promise((done) => {
+      const t = setInterval(() => {
+        left -= 1;
+        tick();
+        if (left <= 0) { clearInterval(t); done(); }
+      }, 1000);
+    });
+    box?.remove();
+    retrying = false;
+    thread.pop();               // drop the failed exchange before retrying
+    $("send").disabled = false;
+    return say(text);
   }
 
   thread.push({ role: "assistant", content: body.answer });

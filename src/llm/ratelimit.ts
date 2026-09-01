@@ -149,4 +149,37 @@ export const estimateTokens = (hasImage: boolean): number => (hasImage ? 2200 : 
 export const sharedGroqGovernor = new RateGovernor();
 
 /** How long an interactive call will wait before falling back. */
-export const INTERACTIVE_MAX_WAIT_SECONDS = 3;
+/**
+ * How long a call may wait for budget while someone is watching.
+ *
+ * Three seconds was too impatient. The per-minute window resets inside sixty,
+ * so a burst that overshot by a little failed outright when waiting eight
+ * seconds would have answered — and the shopper saw "I could not reach the
+ * model just now" for something that was merely busy. Twenty-five is long
+ * enough to ride out an ordinary overshoot and short enough that nobody
+ * wonders whether the page has hung.
+ */
+export const INTERACTIVE_MAX_WAIT_SECONDS = 25;
+
+/**
+ * A step inside a multi-call turn. Shorter, because a turn can make five of
+ * them and the shopper is waiting for all of them, not one.
+ */
+export const STEP_MAX_WAIT_SECONDS = 10;
+
+/**
+ * The smallest gap between consecutive calls.
+ *
+ * The governor reacts to what the last response reported, which is a beat
+ * behind: five calls fired back to back all believe there is budget, and the
+ * fifth learns otherwise. A short spacer keeps a single turn from lapping its
+ * own accounting.
+ */
+export const MIN_CALL_SPACING_MS = 350;
+
+let lastCallAt = 0;
+export async function spaceCalls(): Promise<void> {
+  const since = Date.now() - lastCallAt;
+  if (since < MIN_CALL_SPACING_MS) await sleep(MIN_CALL_SPACING_MS - since);
+  lastCallAt = Date.now();
+}

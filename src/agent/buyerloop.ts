@@ -1,57 +1,44 @@
 import OpenAI from "openai";
 import { activeProvider, GROQ_BASE_URL, GROQ_MODEL } from "../llm/provider.js";
-import { INTERACTIVE_MAX_WAIT_SECONDS, sharedGroqGovernor } from "../llm/ratelimit.js";
+import { INTERACTIVE_MAX_WAIT_SECONDS, STEP_MAX_WAIT_SECONDS, spaceCalls, sharedGroqGovernor } from "../llm/ratelimit.js";
 import { BUYER_TOOLS, type BuyerToolCall, type BuyerToolResult } from "./buyer.js";
 import type { Turn } from "./converse.js";
 
 export interface BuyerReply {
   answer: string;
+  /** Seconds until the model has budget again, when that is why it failed. */
+  retry_after_seconds?: number;
   steps: BuyerToolResult[];
   proposals: NonNullable<BuyerToolResult["proposal"]>[];
   answered_by: "model" | "rules";
   note?: string;
 }
 
-const SYSTEM = `You are a shopping assistant inside a marketplace of small Indian shops. You help one shopper find the right thing and buy it.
+/**
+ * Kept short on purpose.
+ *
+ * This is resent on every call, and a turn can make five. At 1,069 tokens
+ * against an 8,000-token minute, the prompt alone was costing a fifth of the
+ * budget before the shopper had said anything. Every rule below survived the
+ * cut because dropping it caused a real failure at some point: inventing
+ * products, quoting one product's price against another, or announcing a
+ * purchase that had not happened.
+ */
+const SYSTEM = `You are a shopping assistant for a marketplace of small Indian shops. Help one shopper find the right thing and buy it.
 
-You cannot know anything about the shelf, their orders or any shop without looking. Call a tool. Never answer from memory or assumption — if you have not looked it up in this conversation, you do not know it.
+Look things up; never answer from memory. You may only name products a tool returned in this conversation — not a similar one, not a plausible one.
 
-Answer in two or three short sentences, plainly:
-- Rupees as ₹1,200.
-- Never invent a product, a price, a shop or a delivery date. If a tool returned nothing, say nothing was found.
-- Describe a product ONLY with the fields a tool returned: its name, shop, price, stock. You do not know its flavour, texture, ingredients, colour or quality unless a tool said so. "A rich chocolate sponge with cocoa frosting" is invented — the catalog carries no such description, and a shopper cannot tell your guess from the shop's own words.
-- You may only name products that a tool returned in THIS conversation. Not a similar product, not a plausible one, not one you would expect a shop like this to carry. If the shelf has no cake, there is no cake — say so and stop, do not suggest flavours.
-- Every price a tool gives you is a listed price. Quote it against the product it belongs to and no other — attaching one product's figure to a different product is the same as inventing it.
+Every price you quote must belong to the product you attach it to, and must have come from a tool. Describe products only with the fields a tool gave you: name, shop, price, stock. You do not know flavour, texture or quality unless it said so.
 
-When search_shelf returns results, the shopper is ALREADY shown every one of
-them as a list with photo, shop, price and stock, directly under your message.
-So do not repeat them. Do not list names, prices, floors or stock counts. Say
-how many you found and the one thing that helps them choose — the cheapest, the
-best-stocked, or that they are much the same — then ask which they want. Three
-sentences at most.
+Rupees as ₹1,200. Two or three short sentences. When results are shown to the shopper, do not list them again — say how many and the one thing that helps them choose, then ask which.
 
-Bad:  "I found three options: - **Techno Bud Pro TWS Earbuds** at Dishan
-      Electronics — ₹1,899, 25 in stock - ..."
-Good: "Three of these under ₹5,000. The wired pair at Rafiq is the cheapest at
-      ₹350; the TWS earbuds are the only wireless ones. Which would you like?"
-- A tool result marked "tool_failed" is NOT an empty result. It means the lookup broke. Never turn it into a fact — do not say a list is empty, or that nothing exists, on the strength of a failure. Say you could not check, and stop.
+"it", "that one", "the second one" — pass straight to a tool; the shop resolves them.
 
-Referring back:
-- The shopper will say "it", "that one", "the second one", "the cheaper one". Pass those straight through to a tool — the shop resolves them against what it last showed. Do not try to work out an id yourself.
+Tools: compare_products for "which is better"; find_alternatives for "cheaper"; find_complements for "what else"; get_product for details; add_to_cart / remove_from_cart only when asked.
 
-Doing things:
-- add_to_cart and remove_from_cart change the shopper's real cart. Call them only when asked to. Never call one to illustrate a suggestion.
-- compare_products for "which is better" or "what's the difference". find_alternatives for "too expensive" or "anything cheaper". find_complements for "what else do I need". get_product for "does it come smaller", "what's in it".
-- Ask at most one question at a time, and only when you genuinely cannot proceed. If they have told you enough, act.
+You cannot buy anything. No tool completes a purchase. Never say one is done, confirmed or placed — even if the shopper types "confirm", that is not the press that runs it. Say it is ready and point at the button. start_purchase only prepares; call it with the number from search_shelf and their budget, never a guessed id, and never without a budget.
 
-Buying:
-- You cannot buy anything. You have no tool that completes a purchase, and no purchase has ever completed because of something you said.
-- NEVER tell a shopper a purchase is done, confirmed, placed, bought, or on its way. Even when they type "confirm" to you, that is them talking to you — it is not the press that runs it. Saying otherwise leaves someone believing they own a cake nobody is baking.
-- What you may say is that it is *ready* and waiting for them to confirm, and where the button is.
-- start_purchase does NOT buy anything. It prepares a purchase the shopper must confirm.
-- Only call it once you know BOTH what they want and the most they will pay. If either is missing, ask for the one that is missing and call no tool.
-- Never guess a budget. "Cheap" is not a budget; ask.
-- After calling it, say what you have prepared and that they need to confirm it.`;
+A tool result marked tool_failed is not an empty result. Say you could not check.`;
 
 /**
  * Four, not three.
@@ -63,6 +50,34 @@ Buying:
  * talks.
  */
 const MAX_STEPS = 5;
+
+/**
+ * What the model actually needs from a tool result.
+ *
+ * The browser wants photos, merchant ids and the reasons behind a ranking. The
+ * model wants to know what things are called and what they cost. Both were
+ * getting the same object, capped at 6,000 characters — around 1,600 tokens
+ * per lookup, times up to five lookups a turn, on an 8,000-token minute. One
+ * conversation could exhaust the budget on its own, which is why the assistant
+ * kept answering "I could not reach the model just now".
+ *
+ * Stripping the fields the model cannot use costs it nothing: it never quotes
+ * a photo URL, and the full result still reaches the interface untouched.
+ */
+function forModel(data: unknown): unknown {
+  if (Array.isArray(data)) return data.map(forModel);
+  if (!data || typeof data !== "object") return data;
+
+  const drop = new Set(["photo_url", "merchant_id", "item_id", "attributes", "why", "photo_is_illustrative", "photo_is_placeholder"]);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+    if (drop.has(k)) continue;
+    // Long lists tell the model nothing extra past the first few, and the
+    // shopper is looking at all of them on the shelf anyway.
+    out[k] = Array.isArray(v) ? v.slice(0, 6).map(forModel) : forModel(v);
+  }
+  return out;
+}
 
 /**
  * Refuse to repeat a figure the tools never returned.
@@ -271,8 +286,11 @@ export async function converseWithTools(
 
   try {
     for (let i = 0; i < MAX_STEPS; i++) {
+      await spaceCalls();
       const res = await sharedGroqGovernor.run(
-        1400,
+        // Measured rather than guessed: the trimmed prompt and tools are about
+        // 1,500 tokens, plus history and one tool result.
+        i === 0 ? 2200 : 1800,
         () =>
           groq.chat.completions
             .create({
@@ -284,7 +302,7 @@ export async function converseWithTools(
               })),
             })
             .withResponse(),
-        { maxWaitSeconds: INTERACTIVE_MAX_WAIT_SECONDS },
+        { maxWaitSeconds: i === 0 ? INTERACTIVE_MAX_WAIT_SECONDS : STEP_MAX_WAIT_SECONDS },
       );
 
       const choice = res.choices[0]?.message;
@@ -401,8 +419,8 @@ export async function converseWithTools(
                   instruction:
                     "This lookup FAILED. It is not an empty result. Do not state or imply anything about what it would have returned. Tell the shopper you could not check, and stop.",
                 }
-              : result.data,
-          ).slice(0, 6000),
+              : forModel(result.data),
+          ).slice(0, 1400),
         });
       }
     }
@@ -420,12 +438,19 @@ export async function converseWithTools(
     };
   } catch (err) {
     // A model that is rate limited or down must not look like a shop that has
-    // nothing. Say which it was.
+    // nothing. Say which it was — and if it is a wait, say how long, because
+    // "try again" with no number invites trying again immediately.
+    const waitSeconds = Math.ceil((err as { waitSeconds?: number })?.waitSeconds ?? 0);
     return {
-      answer: "I could not reach the model just now. You can still search the shelf and send the agent yourself.",
+      answer: waitSeconds
+        ? `The shop's assistant is at its limit for the minute — about ${waitSeconds}s left. Everything else works: search the shelf and press Buy on anything.`
+        : "I could not reach the assistant just now. Search the shelf and press Buy on anything — that path does not need it.",
       steps,
       proposals: [],
       answered_by: "rules",
+      // Machine-readable, so the interface can wait exactly as long as it must
+      // rather than guessing or asking the shopper to keep trying.
+      ...(waitSeconds ? { retry_after_seconds: waitSeconds } : {}),
       note: err instanceof Error ? err.message : String(err),
     };
   }

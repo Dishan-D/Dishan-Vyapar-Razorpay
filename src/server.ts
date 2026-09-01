@@ -2731,8 +2731,18 @@ export async function createApp(options: AppOptions = {}) {
       .filter((m: unknown): m is Turn =>
         typeof (m as Turn)?.content === "string" &&
         ((m as Turn).role === "user" || (m as Turn).role === "assistant"))
-      .slice(-12)
-      .map((m: Turn) => ({ role: m.role, content: String(m.content).slice(0, 500) }));
+      /**
+       * Six turns, not twelve, and 320 characters each.
+       *
+       * The transcript used to be the only memory, so it had to be long. It is
+       * not any more — what was shown, what is selected, the budget and the
+       * cart all live in the session now, and the model reads those from tool
+       * results. What the transcript still carries is tone and the shape of
+       * the request, and six turns of that is plenty. Halving it takes roughly
+       * a fifth off a turn on an 8,000-token minute.
+       */
+      .slice(-6)
+      .map((m: Turn) => ({ role: m.role, content: String(m.content).slice(0, 320) }));
 
     if (turns.length === 0 || !turns.some((t) => t.role === "user")) {
       res.status(400).json({ error: "send at least one user message" });

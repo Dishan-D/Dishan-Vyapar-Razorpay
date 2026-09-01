@@ -25,7 +25,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "search_shelf",
     description:
-      "Search every shop's catalog for something. Returns products an AI buyer can buy right now: name, shop, listed price and stock. Prices here are the listed prices — the shop may still be haggled down, but by how much is theirs to know, not yours to quote.",
+      "Search every shop for something. Returns a numbered list: name, shop, listed price, stock.",
     parameters: {
       type: "object",
       properties: {
@@ -47,7 +47,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "get_order",
     description:
-      "One order in detail: what was bought, from whom, what was paid, the payment reference, and whether the shop has confirmed handover.",
+      "One order in detail.",
     parameters: {
       type: "object",
       properties: { transaction_id: { type: "string", description: "The order to look up" } },
@@ -59,7 +59,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "check_shop",
     description:
-      "A shop's delivery record before buying from it: how many sales it has actually handed over, and how quickly.",
+      "A shop's delivery record.",
     parameters: {
       type: "object",
       properties: { merchant_id: { type: "string", description: "The shop to check" } },
@@ -71,7 +71,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "get_product",
     description:
-      "Everything known about one product: price, stock, its attributes, other sizes of it, and what goes with it. Use it when the shopper asks about a specific thing — 'does it come smaller', 'what's in it', 'is that one any good'.",
+      "One product in detail: price, stock, other sizes, what goes with it.",
     parameters: {
       type: "object",
       properties: { product: { type: "string", description: "Number from the last list, or the product's name. \"it\" and \"that\" mean whatever they were last looking at." } },
@@ -83,7 +83,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "compare_products",
     description:
-      "Put two or more products side by side on price, size, stock and shop. Use it for 'which is better', 'what's the difference', 'which should I buy'.",
+      "Two or more products side by side on price, size, stock and shop.",
     parameters: {
       type: "object",
       properties: {
@@ -97,7 +97,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "find_alternatives",
     description:
-      "Other products that do the same job, nearest in price first. Use it for 'too expensive', 'anything cheaper', 'what else is like this'.",
+      "Other products that do the same job, nearest in price first.",
     parameters: {
       type: "object",
       properties: {
@@ -112,7 +112,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "find_complements",
     description:
-      "Things that genuinely go with a product, from the shop's own list. Use it for 'what else do I need', 'anything that goes with this'.",
+      "Things the shop lists as going with a product.",
     parameters: {
       type: "object",
       properties: { product: { type: "string", description: "The product to build around." } },
@@ -130,7 +130,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "add_to_cart",
     description:
-      "Actually put a product in the cart. Only call this when the shopper has asked for it — 'add that', 'I'll take two'. It changes their cart, so never call it to illustrate a suggestion.",
+      "Put a product in the shopper's real cart. Only when they ask.",
     parameters: {
       type: "object",
       properties: {
@@ -156,7 +156,7 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "start_purchase",
     description:
-      "Propose buying ONE specific product that search_shelf has already returned. This does NOT buy it — it prepares the purchase and the shopper must confirm before any money moves. Call search_shelf first and pass the NUMBER of the product you want from its numbered results.",
+      "Prepare a purchase for the shopper to confirm. Does NOT buy. Pass the number from search_shelf and their budget.",
     parameters: {
       type: "object",
       properties: {
