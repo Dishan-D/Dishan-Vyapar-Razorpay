@@ -18,6 +18,35 @@
   .railtoggle input { width:auto; margin-top:2px; accent-color:var(--ink); }
   .railtoggle b { font-size:13px; font-weight:550; display:block; }
   .railtoggle .hint { display:block; margin-top:2px; }
+  .ov { position:fixed; inset:0; z-index:60; background:rgba(22,24,29,.34);
+        backdrop-filter:blur(3px); display:grid; place-items:center; padding:24px; }
+  .ov[hidden] { display:none; }
+  .ovcard { background:var(--surface); border:1px solid var(--border); border-radius:16px;
+            width:min(660px,100%); max-height:88vh; display:flex; flex-direction:column;
+            box-shadow:0 24px 64px -20px rgba(22,24,29,.4); animation:pop .22s cubic-bezier(.22,1,.36,1); }
+  @keyframes pop { from { opacity:0; transform:translateY(10px) scale(.985); } to { opacity:1; transform:none; } }
+  .ovhead { display:flex; align-items:flex-start; gap:14px; padding:18px 20px; border-bottom:1px solid var(--border); }
+  .ovk { font-size:10px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-4); font-weight:700; }
+  .ovgoal { font-size:15px; font-weight:600; letter-spacing:-.015em; margin-top:3px; }
+  .ovx { background:none; border:0; color:var(--ink-4); font-size:14px; padding:2px 4px; line-height:1; }
+  .ovx:hover { color:var(--ink); }
+  .ovbody { padding:6px 20px 18px; overflow-y:auto; flex:1; min-height:190px; }
+  .ovfoot { padding:16px 20px; border-top:1px solid var(--border); background:var(--surface-2); }
+
+  .ost { display:grid; grid-template-columns:22px 1fr; gap:12px; padding:11px 0; }
+  .ost + .ost { border-top:1px solid var(--border); }
+  .ost .oi { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:10px;
+             border:1px solid var(--border-2); color:var(--ink-4); background:var(--surface); }
+  .ost.done .oi { background:var(--green); border-color:var(--green); color:#fff; }
+  .ost.now .oi { border-color:var(--ink-3); }
+  .ost .oh { font-size:13.5px; font-weight:550; }
+  .ost .od { font-size:12px; color:var(--ink-3); margin-top:2px; }
+  .badge2 { font-size:9px; text-transform:uppercase; letter-spacing:.07em; font-weight:700;
+            padding:1px 6px; border-radius:4px; background:var(--surface-3); color:var(--ink-3); margin-left:7px; }
+  .badge2.model { background:var(--blue-2); color:var(--blue); }
+  .osp { width:12px; height:12px; border-radius:50%; border:1.5px solid var(--border-2);
+         border-top-color:var(--ink-3); animation:spin .7s linear infinite; }
+
   .rail { font-size:11px; color:var(--ink-3); margin-top:6px; }
   .liveline { display:flex; align-items:center; gap:9px; padding:9px 0; font-size:13px; color:var(--ink-2); }
   .liveline + .liveline { border-top:1px solid var(--border); }
@@ -120,6 +149,21 @@
 <body>
 <div id="nav"></div>
 
+<div class="ov" id="ov" hidden>
+  <div class="ovcard">
+    <div class="ovhead">
+      <div style="flex:1;min-width:0">
+        <div class="ovk">Buyer agent</div>
+        <div class="ovgoal" id="ovgoal"></div>
+      </div>
+      <span class="beacon on" id="ovbeacon"><i></i><span id="ovstate">working</span></span>
+      <button class="ovx" id="ovclose" title="Close">✕</button>
+    </div>
+    <div class="ovbody" id="ovbody"></div>
+    <div class="ovfoot" id="ovfoot" hidden></div>
+  </div>
+</div>
+
 <div class="pagehead">
   <h1>Buyer agent</h1>
   <p>Say what you want. It shops three merchants, haggles with each, and picks one.</p>
@@ -215,73 +259,107 @@ function offerCard(o, won) {
 
 let activeRunId = null;
 let watchedTxn = null;
-const liveSteps = [];
 
 /**
- * Steps are shown as they arrive and then kept.
+ * One overlay owns a run from the first step to the payment.
  *
- * A whole purchase finishes in about 700ms, so the previous version rendered
- * the live list and replaced it with the finished trace before anyone could
- * read either. These are real events off the socket, held at a legible pace and
- * then expanded in place — nothing is invented and the queue drains to empty.
+ * The previous version streamed steps into the page and then swapped the whole
+ * list for a finished render. If that handoff stalled, the run appeared to end
+ * at "order opened" with nothing after it and no way forward. A single surface
+ * that only ever appends has no handoff to stall: steps arrive, the summary is
+ * added beneath them, and Checkout opens from there.
  */
-const stepQueue = [];
-let draining = false;
+const ov = {
+  steps: [],
+  queue: [],
+  draining: false,
 
-function liveRow(s) {
-  return `<div class="rstep enter"><span class="icn">${s.done ? "✓" : '<span class="spin"></span>'}</span>
-    <div><div class="hd">${esc(s.message)}</div>
-    <div class="nt">${s.elapsed_ms}ms${s.decided_by ? ` · ${esc(s.decided_by)}` : ""}</div></div></div>`;
-}
+  open(goal) {
+    this.steps.length = 0;
+    this.queue.length = 0;
+    $("ovgoal").textContent = goal;
+    $("ovbody").innerHTML = "";
+    $("ovfoot").hidden = true;
+    $("ovfoot").innerHTML = "";
+    $("ovstate").textContent = "working";
+    $("ovbeacon").classList.add("on");
+    $("ov").hidden = false;
+    this.push({ message: "Sending to the agent\u2026", elapsed_ms: 0 });
+  },
 
-function renderLive() {
-  $("run").innerHTML = liveSteps.map(liveRow).join("");
-  $("run").lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
+  close() { $("ov").hidden = true; },
 
-async function drain() {
-  if (draining) return;
-  draining = true;
-  while (stepQueue.length > 0) {
-    const e = stepQueue.shift();
-    for (const s of liveSteps) s.done = true;
-    liveSteps.push({ message: e.message, elapsed_ms: e.data?.elapsed_ms ?? 0, decided_by: e.data?.decided_by, done: false });
-    renderLive();
-    await new Promise((r) => setTimeout(r, stepQueue.length > 6 ? 140 : 380));
-  }
-  for (const s of liveSteps) s.done = true;
-  renderLive();
-  draining = false;
-}
+  push(step) { this.queue.push(step); this.drain(); },
+
+  render() {
+    $("ovbody").innerHTML = this.steps.map((s, i) => {
+      const busy = i === this.steps.length - 1 && !s.settled;
+      return `<div class="ost ${busy ? "now" : "done"}">
+        <span class="oi">${busy ? '<span class="osp"></span>' : "\u2713"}</span>
+        <div><div class="oh">${esc(s.message)}${s.by ? `<span class="badge2 ${s.by === "model" ? "model" : ""}">${esc(s.by)}</span>` : ""}</div>
+        <div class="od">${s.elapsed_ms}ms</div></div>
+      </div>`;
+    }).join("");
+    $("ovbody").scrollTop = $("ovbody").scrollHeight;
+  },
+
+  async drain() {
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      while (this.queue.length > 0) {
+        for (const s of this.steps) s.settled = true;
+        this.steps.push(this.queue.shift());
+        this.render();
+        await new Promise((r) => setTimeout(r, this.queue.length > 5 ? 130 : 340));
+      }
+    } finally {
+      // Released even if a render throws, so nothing can wait on this forever.
+      this.draining = false;
+    }
+  },
+
+  /** Let the paced list catch up — but never wait indefinitely for it. */
+  async caughtUp(limitMs = 6000) {
+    const until = Date.now() + limitMs;
+    while ((this.draining || this.queue.length > 0) && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    for (const s of this.steps) s.settled = true;
+    this.render();
+  },
+
+  finish(state) {
+    $("ovstate").textContent = state;
+    $("ovbeacon").classList.toggle("on", state === "working");
+  },
+
+  foot(html) { $("ovfoot").hidden = false; $("ovfoot").innerHTML = html; },
+};
+
+$("ovclose").onclick = () => ov.close();
+$("ov").onclick = (e) => { if (e.target === $("ov")) ov.close(); };
 
 function onAgentStep(e) {
-  // Anything about the transaction being watched refreshes the audit panel, so
-  // the chain fills in while you look at it rather than after everything ends.
+  // Anything about the watched transaction refreshes the audit panel, so the
+  // chain fills in while you look at it rather than after everything ends.
   if (watchedTxn && e.transaction_id === watchedTxn) refreshAudit(watchedTxn);
   if (e.type !== "agent.step" || !activeRunId || e.data?.run_id !== activeRunId) return;
-  stepQueue.push(e);
-  drain();
-}
-
-/** Wait for the paced list to finish before swapping in the detail. */
-async function settled() {
-  while (draining || stepQueue.length > 0) await new Promise((r) => setTimeout(r, 80));
+  ov.push({ message: e.message, elapsed_ms: e.data?.elapsed_ms ?? 0, by: e.data?.decided_by });
 }
 
 async function run() {
   const goal = $("goal").value.trim();
   if (!goal) return;
-  $("go").disabled = true;
-  $("runcard").style.display = "";
-  $("bacard").style.display = "none";
 
+  $("go").disabled = true;
   watchedTxn = null;
   $("auditcard").style.display = "none";
+  $("runcard").style.display = "none";
+  $("bacard").style.display = "none";
+
   activeRunId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-  liveSteps.length = 0;
-  stepQueue.length = 0;
-  liveSteps.push({ message: "Sending to the agent…", elapsed_ms: 0, done: false });
-  renderLive();
+  ov.open(goal);
 
   const settle = $("rail").checked ? "test_rail" : "checkout";
 
@@ -292,164 +370,127 @@ async function run() {
       body: JSON.stringify({ goal, settle, run_id: activeRunId }),
     }));
   } catch (err) {
-    // Without this the page sat on "Thinking…" forever with the button dead —
-    // a dropped connection or a restarted server looked identical to a slow run.
-    $("run").innerHTML = note("bad",
-      `Couldn't reach the server — ${esc(err?.message ?? String(err))}.<br>Is <code>npm run serve</code> still running?`);
+    ov.finish("failed");
+    ov.foot(note("bad", `Couldn't reach the server \u2014 ${esc(err?.message ?? String(err))}.<br>Is <code>npm run serve</code> still running?`));
     $("go").disabled = false;
     activeRunId = null;
     return;
   }
-
   activeRunId = null;
 
-  if (status >= 500) {
-    $("run").innerHTML = note("bad", esc(body.error ?? "the run failed")) +
-      (Array.isArray(body.trace) ? `<p class="hint" style="margin-top:8px">Got as far as: ${esc(body.trace.map((t) => t.stage).join(" → "))}</p>` : "");
-    $("go").disabled = false;
-    return;
-  }
-  if (status === 400) { $("run").innerHTML = note("warn", esc(body.error)); $("go").disabled = false; return; }
-  if (status === 402) {
-    $("run").innerHTML = note("bad", `Refused: ${esc((body.reasons ?? []).join("; "))}`);
-    $("go").disabled = false; return;
-  }
+  // The run is real whatever the panels do, so a render fault must not strand
+  // the shopper on a spinner with no way to pay.
+  try {
+    await ov.caughtUp();
 
+    if (status >= 500 || status === 400 || status === 402) {
+      ov.finish("stopped");
+      ov.foot(note("bad", esc(body.reasons ? body.reasons.join("; ") : body.error ?? "the run failed")));
+      return;
+    }
+
+    if (body.status === "no_match" || body.status === "no_deal") {
+      ov.finish("no purchase");
+      ov.foot(
+        note("warn", esc(body.reason ?? "Nothing matched.")) +
+        (body.withheld?.length
+          ? `<div class="hint" style="margin-top:9px">${body.withheld.map((w) =>
+              `${esc(w.merchant_name)} has ${esc(w.item_name)} \u2014 ${esc(w.reason)}`).join("<br>")}</div>`
+          : "") +
+        `<div class="hint" style="margin-top:10px">No money moved, and no order was opened.</div>`,
+      );
+      renderDetail(body);
+      return;
+    }
+
+    if (body.transaction_id) {
+      watchedTxn = body.transaction_id;
+      try { await refreshAudit(body.transaction_id); } catch { /* panel is optional */ }
+    }
+
+    if (body.status === "awaiting_payment") {
+      ov.finish("ready to pay");
+      ov.foot(
+        purchaseSummary(body) +
+        `<dl class="kv" style="margin-top:11px"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>` +
+        (config.razorpay_key_id
+          ? `<button class="btn go big wide" id="pay" style="margin-top:13px">Pay ${rupee(body.final_price)} securely</button>
+             <div class="hint" style="margin-top:9px" id="paynote">Opening Razorpay Checkout\u2026</div>`
+          : note("bad", "Razorpay keys are not configured on the server, so Checkout cannot open.")),
+      );
+      if ($("pay")) {
+        $("pay").onclick = () => checkout(body);
+        // Straight through. The button stays for a retry if the window is closed.
+        setTimeout(() => checkout(body), 500);
+      }
+    } else if (body.status === "paid") {
+      ov.finish("paid");
+      ov.foot(
+        purchaseSummary(body) +
+        `<dl class="kv" style="margin-top:11px"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>` +
+        note("warn", "Waiting for the shop to confirm handover \u2014 nothing marks itself delivered.") +
+        `<a class="btn secondary wide" style="margin-top:4px;display:block;text-align:center" href="/merchant.html">Open the shop's dashboard to confirm</a>`,
+      );
+    }
+
+    renderDetail(body);
+  } catch (err) {
+    ov.finish("done");
+    ov.foot(note("warn", `The purchase went through, but this panel could not draw it: ${esc(err?.message ?? String(err))}`));
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+/** The full trace, left on the page behind the overlay as a record. */
+function renderDetail(body) {
+  $("runcard").style.display = "";
   const html = [];
-  for (const t of body.trace) {
+
+  for (const t of body.trace ?? []) {
     if (t.stage === "understand") {
       const i = t.intent;
       html.push(stepRow("01", esc(t.headline),
-        `<div class="nt">${esc(t.note)}</div>
+        `<div class="nt">${esc(t.note ?? "")}</div>
          <dl class="kv" style="margin-top:9px"><dt>want</dt><dd>${esc(i.want)}</dd><dt>ceiling</dt><dd>${rupee(i.max_price)}</dd><dt>opens at</dt><dd>${rupee(i.opening_offer)}</dd></dl>` +
         (t.fallback_reason
-          ? `<div class="warnrow"><span>⚠</span><span>Model unavailable, so this was read by rules instead — ${esc(t.fallback_reason)}</span></div>`
+          ? `<div class="warnrow"><span>\u26a0</span><span>Model unavailable, so this was read by rules instead \u2014 ${esc(t.fallback_reason)}</span></div>`
           : ""),
         t.decided_by === "model"));
     } else if (t.stage === "shop") {
       html.push(stepRow("02", esc(t.headline),
-        `<div class="offers">${t.offers.map((o) => offerCard(o, body.comparison?.selected?.merchant_id === o.merchant_id)).join("")}</div>`));
+        `<div class="offers">${(t.offers ?? []).map((o) => offerCard(o, body.comparison?.selected?.merchant_id === o.merchant_id)).join("")}</div>`));
     } else if (t.stage === "choose") {
-      const last = t.reasoning[t.reasoning.length - 1];
+      const last = (t.reasoning ?? []).slice(-1)[0] ?? "";
       html.push(stepRow("03", esc(t.headline),
-        `<div class="verdict" style="margin-top:10px"><div class="h">Recommended: ${esc(body.merchant)}</div><div class="why">${esc(last)}</div></div>`));
+        `<div class="verdict" style="margin-top:10px"><div class="h">Chose ${esc(body.merchant ?? "")}</div><div class="why">${esc(last)}</div></div>`));
     } else if (t.stage === "sign") {
-      html.push(stepRow("04", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
+      html.push(stepRow("04", esc(t.headline), `<div class="nt">${esc(t.note ?? "")}</div>`));
     } else if (t.stage === "authorize") {
       html.push(stepRow("05", esc(t.headline), authorityBlock(t.checks, t.authorized)));
     } else if (t.stage === "blocked") {
-      html.push(stepRow("✕", esc(t.headline),
-        authorityBlock(t.checks, false) +
-        `<div class="nt" style="margin-top:9px">Not bought. Trying the next shop.</div>`));
+      html.push(stepRow("\u2715", esc(t.headline),
+        authorityBlock(t.checks, false) + `<div class="nt" style="margin-top:9px">Not bought. Trying the next shop.</div>`));
     } else if (t.stage === "pay") {
-      html.push(stepRow("05", esc(t.headline),
+      html.push(stepRow("06", esc(t.headline),
         `<dl class="kv" style="margin-top:8px">${t.order_id ? `<dt>order</dt><dd>${esc(t.order_id)}</dd>` : ""}${t.payment_id ? `<dt>payment</dt><dd>${esc(t.payment_id)}</dd>` : ""}</dl>` +
         (t.rail ? `<div class="rail">settled on: ${esc(t.rail)}</div>` : "") +
         (t.note ? `<div class="nt">${esc(t.note)}</div>` : "")));
-    } else if (t.stage === "wait") {
-      html.push(stepRow("06", esc(t.headline), `<div class="nt">${esc(t.note)}</div>`));
     } else if (t.stage === "stop") {
-      html.push(stepRow("—", esc(t.headline),
+      html.push(stepRow("\u2014", esc(t.headline),
         (t.withheld?.length
           ? `<div class="offers" style="margin-top:10px">${t.withheld.map((w) => `
               <div class="offer"><div class="top"><div class="mn">${esc(w.merchant_name)}</div>
               <span class="chip warn">not on sale yet</span></div>
-              <div class="rd">${esc(w.item_name)} — ${esc(w.reason)}</div></div>`).join("")}</div>
-             <div class="nt" style="margin-top:9px">They have it. The shopkeeper has not confirmed a price, so an agent cannot buy it.</div>`
+              <div class="rd">${esc(w.item_name)} \u2014 ${esc(w.reason)}</div></div>`).join("")}</div>`
           : `<div class="nt">${esc((t.reasoning ?? []).join(" "))}</div>`)));
     } else {
-      html.push(stepRow("—", esc(t.headline), t.reasons ? `<div class="nt">${esc(t.reasons.join("; "))}</div>` : ""));
+      html.push(stepRow("\u2014", esc(t.headline), ""));
     }
   }
-  // Let the watcher finish reading the live list before it is replaced.
-  await settled();
+
   $("run").innerHTML = html.join("");
-
-  if (body.status === "awaiting_payment") {
-    // The agent has done everything it may. A real payment id only exists once
-    // a person pays, so this is where it hands over — and it hands over
-    // immediately rather than making the shopper find a second button for a
-    // decision they already made when they sent the agent.
-    $("run").insertAdjacentHTML("beforeend", `
-      <div class="rstep enter"><span class="icn">₹</span><div>
-        <div class="hd">Pay with Razorpay<span class="badge">test mode</span></div>
-        ${purchaseSummary(body)}
-        <dl class="kv" style="margin-top:10px"><dt>order</dt><dd>${esc(body.order_id)}</dd></dl>
-        ${config.razorpay_key_id
-          ? `<button class="btn go big" id="pay" style="margin-top:12px">Pay ${rupee(body.final_price)} securely</button>
-             <div class="nt" style="margin-top:8px" id="paynote">Opening Razorpay Checkout…</div>`
-          : note("bad", "Razorpay keys are not configured on the server, so Checkout cannot open.")}
-      </div></div>`);
-
-    if ($("pay")) {
-      $("pay").onclick = () => checkout(body);
-      // Straight into Checkout. The button stays for a retry if it is dismissed.
-      setTimeout(() => checkout(body), 350);
-    }
-  } else if (body.status === "paid") {
-    $("run").insertAdjacentHTML("beforeend", `
-      <div class="rstep enter"><span class="icn">✓</span><div>
-        <div class="hd">Paid${body.rail === "test_rail" ? '<span class="badge">simulated rail</span>' : '<span class="badge">Razorpay</span>'}</div>
-        ${purchaseSummary(body)}
-        <dl class="kv" style="margin-top:10px"><dt>order</dt><dd>${esc(body.order_id)}</dd><dt>payment</dt><dd>${esc(body.payment_id)}</dd></dl>
-        ${note("warn", "Waiting for the shop to confirm handover — nothing marks itself delivered.")}
-      </div></div>`);
-  }
-
-  if (body.transaction_id) {
-    watchedTxn = body.transaction_id;
-    try { await refreshAudit(body.transaction_id); } catch { /* panel is optional */ }
-    try { await showTrust(body.transaction_id); } catch { /* the drawer is optional */ }
-  }
-
-  if (body.comparison?.selected) {
-    try { await showBeforeAfter(body.comparison.selected.merchant_id); } catch { /* optional */ }
-  }
-  $("go").disabled = false;
-}
-
-/**
- * The four mandates, always shown, with the ones not yet signed greyed out.
- *
- * The panel is deliberately visible from the first step rather than appearing
- * at the end: the point is that each money action is signed *as it happens*,
- * and a chain that only shows up once everything is over looks like a receipt
- * printed afterwards.
- */
-const MANDATE_STEPS = [
-  ["intent", "Intent", "what you authorised, in your own words"],
-  ["cart", "Agreement", "the price both sides signed"],
-  ["payment", "Payment", "captured, and bound to that agreement"],
-  ["fulfillment", "Handover", "only the shop can sign this one"],
-];
-
-async function refreshAudit(txnId) {
-  if (!txnId) return;
-  const { status, body } = await api(`/transactions/${txnId}/audit`);
-  if (status !== 200) return;
-
-  $("auditcard").style.display = "";
-  const byStage = new Map(body.timeline.map((t) => [t.stage, t]));
-
-  $("auditbody").innerHTML = MANDATE_STEPS.map(([stage, label, blurb], i) => {
-    const t = byStage.get(stage);
-    const done = t?.present;
-    return `<div class="mstep ${done ? "done" : "pending"}">
-      <span class="mk2">${done ? "✓" : i + 1}</span>
-      <div>
-        <div class="mt">${label}</div>
-        <div class="md">${done ? esc(t.headline) : blurb}</div>
-        ${done ? `<div class="mh">${esc(t.hash)}</div>
-          <div class="sg">signed by ${t.signatures.map((x) => esc(x.role)).join(", ")}</div>` : ""}
-      </div></div>`;
-  }).join("");
-
-  const signed = body.timeline.filter((t) => t.present).length;
-  const v = $("averdict");
-  v.style.display = "";
-  v.innerHTML = body.verified
-    ? `<span>✓</span><span>${signed} of 4 mandates signed — every signature and hash link re-checked just now, not read from a stored flag.</span>`
-    : `<span>✕</span><span>${esc(body.failures.join("; "))}</span>`;
+  if (body.comparison?.selected) showBeforeAfter(body.comparison.selected.merchant_id).catch(() => {});
 }
 
 function purchaseSummary(body) {
