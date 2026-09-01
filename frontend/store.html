@@ -95,6 +95,13 @@
   .bub.me { margin-left:auto; background:var(--ink); color:#fff; border-bottom-right-radius:4px; }
   .bub.it { background:var(--surface-2); border:1px solid var(--border); border-bottom-left-radius:4px; }
 
+  .tool { font-size:11.5px; color:var(--ink-3); font-family:var(--mono); padding:5px 0;
+          border-bottom:1px dashed var(--border); line-height:1.45; }
+  .tool b { color:var(--ink-2); font-weight:600; }
+  .prop2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:9px 0;
+           background:var(--amber-2); border:1px solid var(--amber-3); border-radius:var(--r-sm); padding:10px 12px; }
+  .prop2 span { flex:1; min-width:130px; font-size:12.5px; color:#6f4608; font-weight:550; }
+
   .cline { display:flex; gap:11px; align-items:center; border:1px solid var(--border);
            border-radius:var(--r-sm); padding:10px 12px; margin-bottom:8px; background:var(--surface); }
   .cline .th { width:42px; height:42px; border-radius:7px; background:var(--surface-2); flex:none;
@@ -472,24 +479,52 @@ async function say(text) {
   $("send").disabled = true;
   let body;
   try {
-    ({ body } = await api("/agent/chat", { method: "POST", body: JSON.stringify({ messages: thread }) }));
+    ({ body } = await api("/agent/assist", { method: "POST", body: JSON.stringify({ messages: thread }) }));
   } catch (err) {
     bubble("assistant", `Couldn't reach the server — ${err?.message ?? err}`);
     $("send").disabled = false;
     return;
   }
-  thread.push({ role: "assistant", content: body.reply });
-  bubble("assistant", body.reply);
+
+  // The lookups it actually ran, shown before the answer. An assistant that
+  // produced the same sentence without looking would read identically, which
+  // is exactly why the trail is on screen rather than in a log.
+  for (const st of body.steps ?? []) {
+    $("rb").insertAdjacentHTML("beforeend",
+      `<div class="tool">${st.error ? "⚠" : "🔎"} <b>${esc(st.tool)}</b> ${esc(st.summary ?? st.error ?? "")}</div>`);
+  }
+
+  thread.push({ role: "assistant", content: body.answer });
+  bubble("assistant", body.answer);
   $("send").disabled = false;
 
-  if (body.ready && body.goal) await run(body.goal);
+  // Nothing has been bought. A proposal is a sentence the shopper has to agree
+  // to, and the agent only runs on the press.
+  for (const [i, prop] of (body.proposals ?? []).entries()) {
+    $("rb").insertAdjacentHTML("beforeend",
+      `<div class="prop2"><span>${esc(prop.label)}</span>
+        <button class="btn go" data-buy="${i}">Confirm</button>
+        <button class="btn secondary" data-nobuy="${i}">No</button></div>`);
+  }
+  $("rb").scrollTop = $("rb").scrollHeight;
+
+  for (const b of $("rb").querySelectorAll("[data-buy]")) {
+    b.onclick = async () => {
+      const prop = body.proposals[Number(b.dataset.buy)];
+      b.closest(".prop2").innerHTML = `<span>Confirmed — sending the agent.</span>`;
+      await run(prop.goal);
+    };
+  }
+  for (const b of $("rb").querySelectorAll("[data-nobuy]")) {
+    b.onclick = () => { b.closest(".prop2").innerHTML = `<span>Left it.</span>`; };
+  }
 }
 
 $("send").onclick = () => say($("goal").value.trim());
 $("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("send").click(); });
 for (const b of document.querySelectorAll("#exs button")) b.onclick = () => say(b.dataset.g);
 
-bubble("assistant", "Tell me what you're after and the most you'd pay. I'll shop every stall for it.");
+bubble("assistant", "Ask me anything — what's on the shelf, where your order is, or buy something. Nothing is bought without your say-so.");
 
 // ── cart ───────────────────────────────────────────────────────────────────
 //

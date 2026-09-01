@@ -45,6 +45,8 @@ import {
   WhatsAppNotifier,
 } from "./structuring/whatsapp.js";
 import { converse, shopperText, type Turn } from "./agent/converse.js";
+import { converseWithTools } from "./agent/buyerloop.js";
+import type { BuyerToolCall, BuyerToolResult } from "./agent/buyer.js";
 import { reconcileUpi } from "./finance/upi.js";
 import { buildStatement } from "./finance/statement.js";
 import { buildDemandHistory } from "./revenue/dataset.js";
@@ -2126,6 +2128,116 @@ export async function createApp(options: AppOptions = {}) {
    * the intent parser is text the shopper typed. That is the whole reason this
    * is a separate, deliberately small surface.
    */
+  /**
+   * Run one of the buyer agent's tools.
+   *
+   * Every read goes through this server's own endpoints rather than reaching
+   * into state directly, so the assistant cannot answer with something the site
+   * would not show. `start_purchase` runs nothing — it returns the sentence the
+   * shopper has to agree to before an agent is sent.
+   */
+  async function runBuyerTool(call: BuyerToolCall): Promise<BuyerToolResult> {
+    const { tool, args } = call;
+    try {
+      if (tool === "search_shelf") {
+        const want = String(args.want ?? "").trim();
+        const max = Number(args.max_price ?? 0);
+        const found = discover(catalogItems, { want, ...(max > 0 ? { max_price: max } : {}) });
+        const rows = found.matches.slice(0, 6).map((m) => ({
+          item_id: m.item.item_id,
+          name: m.item.name,
+          shop: merchants.get(m.item.merchant_id)?.name ?? m.item.merchant_id,
+          merchant_id: m.item.merchant_id,
+          price: m.item.price.value,
+          lowest: policies.get(m.item.item_id)?.floor_price ?? null,
+          in_stock: m.item.stock.quantity,
+        }));
+        return {
+          tool,
+          summary: rows.length > 0
+            ? `${rows.length} on the shelf for "${want}"${max > 0 ? ` under ₹${max}` : ""}.`
+            : `Nothing on the shelf matches "${want}".`,
+          data: { results: rows, withheld: found.withheld.length },
+        };
+      }
+
+      if (tool === "get_orders") {
+        const body = await fetchLocal("/orders");
+        const rows = (body.orders ?? []).slice(0, 8);
+        return {
+          tool,
+          summary: `${rows.length} order(s): ${body.awaiting_handover} awaiting handover, ${body.delivered} delivered.`,
+          data: { orders: rows },
+        };
+      }
+
+      if (tool === "get_order") {
+        const id = String(args.transaction_id ?? "");
+        const body = await fetchLocal(`/orders/${encodeURIComponent(id)}`);
+        if (body?.error) return { tool, summary: `No order ${id}.`, error: String(body.error) };
+        return { tool, summary: `${body.item_name}: ${body.status.replace(/_/g, " ")}.`, data: body };
+      }
+
+      if (tool === "check_shop") {
+        const id = String(args.merchant_id ?? "");
+        const body = await fetchLocal(`/merchants/${encodeURIComponent(id)}/commerce-history`);
+        if (body?.error) return { tool, summary: `No shop ${id}.`, error: String(body.error) };
+        return {
+          tool,
+          summary: `${body.delivered_sales ?? 0} delivered sale(s), ₹${body.verified_value ?? 0} verified.`,
+          data: body,
+        };
+      }
+
+      if (tool === "start_purchase") {
+        const want = String(args.want ?? "").trim();
+        const max = Number(args.max_price ?? 0);
+        // A purchase with no ceiling is the one thing this must never prepare:
+        // the ceiling is what the authorization check gates on, and without it
+        // "confirm" would mean "spend whatever it takes".
+        if (!want || !Number.isFinite(max) || max <= 0) {
+          return { tool, summary: "Cannot prepare that without both a product and a budget.", error: "need a product and a rupee ceiling" };
+        }
+        return {
+          tool,
+          summary: `Ready to buy ${want}, up to ₹${max.toLocaleString("en-IN")} — needs your confirmation.`,
+          data: { prepared: true, want, max_price: max },
+          proposal: { label: `Buy ${want}, up to ₹${max.toLocaleString("en-IN")}`, goal: `${want} under ₹${max}`, max_price: max },
+        };
+      }
+
+      return { tool, summary: `No such tool: ${tool}`, error: "unknown tool" };
+    } catch (err) {
+      return { tool, summary: "That lookup failed.", error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * The buyer agent, with tools.
+   *
+   * /agent/chat decides only whether there is enough to shop. This one can also
+   * act: check an order, look up a shop's delivery record, search the shelf —
+   * and prepare a purchase, which still takes a person's press to run.
+   */
+  app.post("/agent/assist", async (req: Request, res: Response) => {
+    const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const turns: Turn[] = raw
+      .filter((m: unknown): m is Turn =>
+        typeof (m as Turn)?.content === "string" &&
+        ((m as Turn).role === "user" || (m as Turn).role === "assistant"))
+      .slice(-12)
+      .map((m: Turn) => ({ role: m.role, content: String(m.content).slice(0, 500) }));
+
+    if (turns.length === 0 || !turns.some((t) => t.role === "user")) {
+      res.status(400).json({ error: "send at least one user message" });
+      return;
+    }
+
+    const started = Date.now();
+    const out = await converseWithTools(turns, runBuyerTool);
+    res.json({ ...out, elapsed_ms: Date.now() - started });
+  });
+
   app.post("/agent/chat", async (req: Request, res: Response) => {
     const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
     const turns: Turn[] = raw
