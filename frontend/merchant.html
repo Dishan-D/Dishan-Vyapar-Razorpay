@@ -78,11 +78,14 @@
   .opp.act { border-color:var(--amber-3); background:var(--amber-2); }
   .opp h3 { margin:0 0 9px; font-size:14.5px; font-weight:600; letter-spacing:-.01em; }
   .opp.act h3 { color:#6f4608; }
-  .opp .ev { list-style:none; margin:0 0 12px; padding:0; }
-  .opp .ev li { font-size:12.5px; color:var(--ink-2); padding:2.5px 0; display:flex; gap:8px; }
-  .opp .ev li::before { content:"·"; color:var(--ink-4); }
-  .opp.act .ev li { color:#85540a; }
-  .opp .rec { font-size:13.5px; padding:11px 13px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); }
+  .opp .evid { display:block; list-style:none; margin:0 0 12px; padding:0; }
+  .opp .evid li { font-size:12.5px; color:var(--ink-2); padding:2.5px 0; display:flex; gap:8px;
+                  line-height:1.5; text-transform:none; }
+  .opp .evid li::before { content:"·"; color:var(--ink-4); flex:none; }
+  .opp.act .evid li { color:#85540a; }
+  .opp .advice { display:block; font-size:13.5px; font-weight:450; line-height:1.55;
+                 text-transform:none; letter-spacing:0; padding:11px 13px; background:var(--surface);
+                 border:1px solid var(--border); border-radius:var(--r-sm); }
   .opp .delta { display:flex; align-items:baseline; gap:9px; margin:11px 0 0; font-variant-numeric:tabular-nums; }
   .opp .delta .from { color:var(--ink-3); text-decoration:line-through; font-size:14px; }
   .opp .delta .to { font-size:20px; font-weight:600; color:var(--green); }
@@ -526,8 +529,8 @@ async function loadOpportunities() {
   $("opps").innerHTML = body.opportunities.map((o) => `
     <div class="opp ${o.change ? "act" : ""}">
       <h3>${esc(o.headline)}</h3>
-      <ul class="ev">${o.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
-      <div class="rec">${esc(o.recommendation)}</div>
+      <ul class="evid">${o.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
+      <div class="advice">${esc(o.recommendation)}</div>
       ${o.change ? `<div class="delta">
         <span class="hint">Price floor</span>
         <span class="from">${rupee(o.change.from)}</span><span>→</span><span class="to">${rupee(o.change.to)}</span>

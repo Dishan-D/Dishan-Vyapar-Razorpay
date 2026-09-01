@@ -91,6 +91,28 @@
   .ord.justin { animation:pop .8s ease; }
   @keyframes pop { 0% { box-shadow:0 0 0 4px var(--green-2); } 100% { box-shadow:none; } }
 
+  .bub { max-width:88%; font-size:12.5px; line-height:1.5; padding:8px 11px; border-radius:12px; margin:7px 0; }
+  .bub.me { margin-left:auto; background:var(--ink); color:#fff; border-bottom-right-radius:4px; }
+  .bub.it { background:var(--surface-2); border:1px solid var(--border); border-bottom-left-radius:4px; }
+
+  .cline { display:flex; gap:11px; align-items:center; border:1px solid var(--border);
+           border-radius:var(--r-sm); padding:10px 12px; margin-bottom:8px; background:var(--surface); }
+  .cline .th { width:42px; height:42px; border-radius:7px; background:var(--surface-2); flex:none;
+               display:grid; place-items:center; overflow:hidden; }
+  .cline .th img { width:100%; height:100%; object-fit:cover; }
+  .cline .nm2 { flex:1; min-width:0; font-size:13px; font-weight:600; letter-spacing:-.01em; }
+  .cline .nm2 span { display:block; font-size:11px; font-weight:450; color:var(--ink-3); }
+  .cline input { width:92px; font:inherit; font-size:12.5px; padding:6px 9px;
+                 border:1px solid var(--border-2); border-radius:7px; background:var(--surface); }
+  .cline .x { background:none; border:0; color:var(--ink-4); font-size:15px; padding:2px 5px; }
+
+  .ord { cursor:pointer; }
+  .odet { border:1px solid var(--border); border-top:0; border-radius:0 0 var(--r-sm) var(--r-sm);
+          padding:12px 14px; margin:-9px 0 9px; background:var(--surface-2); font-size:12.5px; }
+  .odet dl { display:grid; grid-template-columns:auto 1fr; gap:5px 14px; margin:0; }
+  .odet dt { color:var(--ink-3); }
+  .odet dd { margin:0; font-family:var(--mono); font-size:11.5px; word-break:break-all; }
+
   .exs { display:flex; gap:6px; flex-wrap:wrap; padding:0 15px 13px; }
   .exs button { font-size:11px; color:var(--ink-3); background:var(--surface-2); border:1px solid var(--border);
                 border-radius:999px; padding:4px 10px; }
@@ -103,6 +125,7 @@
   <div class="in">
     <div class="brand">Vyapar Market <span>— every shop here took UPI and nothing else</span></div>
     <input id="q" placeholder="Search the shelf…" />
+    <button class="btn secondary" id="cartbtn">Cart <b id="cartn">0</b></button>
   </div>
 </div>
 
@@ -112,6 +135,17 @@
   <div>
     <p class="hint" id="count" style="margin:0 0 12px">Loading the shelf…</p>
     <div class="grid" id="grid"></div>
+
+    <section id="cartsec" style="margin-top:26px; display:none">
+      <h2 style="font-size:16px">Cart</h2>
+      <p class="hint">Set what you're willing to pay for each. The agent negotiates below it — it
+        never pays more, and it may find the same thing cheaper at another shop.</p>
+      <div id="cart" style="margin-top:14px"></div>
+      <div class="row" style="margin-top:13px; display:flex; gap:9px; flex-wrap:wrap">
+        <button class="btn primary" id="buycart">Send the agent to buy these</button>
+        <button class="btn secondary" id="clearcart">Clear</button>
+      </div>
+    </section>
 
     <section style="margin-top:30px">
       <h2 style="font-size:16px">Your orders</h2>
@@ -126,17 +160,15 @@
       <span class="t">AI buyer</span>
       <span class="beacon" id="beacon"><i></i><span id="bstate">idle</span></span>
     </div>
+    <div class="rb" id="rb"></div>
+    <div class="exs" id="exs">
+      <button data-g="i want a saree">i want a saree</button>
+      <button data-g="phone cover, max ₹250">phone cover, max ₹250</button>
+      <button data-g="murukku under ₹120">murukku under ₹120</button>
+    </div>
     <div class="ask">
-      <input id="goal" value="a blue cotton saree under ₹1500" />
+      <input id="goal" placeholder="Tell it what you want…" />
       <button class="btn primary" id="send">Send</button>
-    </div>
-    <div class="exs">
-      <button data-g="murukku, up to ₹120">murukku under ₹120</button>
-      <button data-g="phone cover, max ₹250">phone cover ₹250</button>
-      <button data-g="a cotton towel set under ₹500">towel set ₹500</button>
-    </div>
-    <div class="rb" id="rb">
-      <p class="empty2">Send a buyer agent and watch it work the shelf on the left — it marks what it looked at, what it passed on and why, and what it chose.</p>
     </div>
   </aside>
 </div>
@@ -169,6 +201,7 @@ function cardHTML(i) {
           ? `<span class="tag ok">agent-ready</span><span class="tag">${i.stock.quantity} in stock</span>`
           : `<span class="tag held">${esc(i.held_because ? "awaiting shopkeeper" : "not buyable yet")}</span>`}
       </div>
+      ${buyable ? `<button class="btn secondary" data-add="${esc(i.item_id)}" style="margin-top:9px">Add to cart</button>` : ""}
       <div class="agentnote" hidden></div>
     </div>
   </article>`;
@@ -180,6 +213,9 @@ function render() {
     (cat === "all" || top(i.category) === cat) &&
     (!q || `${i.name} ${i.category} ${merchants[i.merchant_id]?.name ?? ""}`.toLowerCase().includes(q)));
   $("grid").innerHTML = shown.map(cardHTML).join("") || `<p class="empty2">Nothing on the shelf matches that.</p>`;
+  for (const b of document.querySelectorAll("[data-add]")) {
+    b.onclick = (e) => { e.stopPropagation(); addToCart(b.dataset.add); b.textContent = "In cart ✓"; };
+  }
   const ready = shown.filter((i) => i.transactable && i.price.value > 0).length;
   $("count").textContent =
     `${shown.length} product${shown.length === 1 ? "" : "s"} across ${new Set(shown.map((i) => i.merchant_id)).size} shops · ${ready} an agent can buy right now`;
@@ -372,8 +408,23 @@ async function loadOrders() {
       </div>
       <div class="amt">${rupee(o.amount)}</div>
       <span class="pill ${cls}">${esc(label)}</span>
+    </div>
+    <div class="odet" id="det_${esc(o.transaction_id)}" hidden>
+      <dl>
+        <dt>Order</dt><dd>${esc(o.transaction_id)}</dd>
+        <dt>Ordered</dt><dd>${esc(new Date(o.ordered_at).toLocaleString("en-GB"))}</dd>
+        <dt>Payment</dt><dd>${o.payment_id ? esc(o.payment_id) : "not paid yet"}</dd>
+        <dt>Handover</dt><dd>${o.delivered_at ? esc(new Date(o.delivered_at).toLocaleString("en-GB")) : "waiting on the shop"}</dd>
+      </dl>
+      <p class="hint" style="margin:9px 0 0">${o.delivered
+        ? "The shop signed a fulfillment mandate for this. That signature is what changed this line."
+        : "This stays unchanged until the shop confirms handover — nothing marks itself delivered."}</p>
     </div>`;
   }).join("");
+
+  for (const el of document.querySelectorAll(".ord")) {
+    el.onclick = () => { const d = el.nextElementSibling; if (d?.classList.contains("odet")) d.hidden = !d.hidden; };
+  }
   lastDelivered = nowDelivered;
 }
 
@@ -394,12 +445,121 @@ for (const b of document.querySelectorAll("#pills button")) {
 $("q").addEventListener("input", render);
 render();
 
-$("send").onclick = () => { const g = $("goal").value.trim(); if (g) run(g); };
-$("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("send").click(); });
-for (const b of document.querySelectorAll(".exs button")) {
-  b.onclick = () => { $("goal").value = b.dataset.g; run(b.dataset.g); };
+/**
+ * The buyer agent, as a conversation.
+ *
+ * The chat layer decides one thing only: whether enough has been said to shop.
+ * When it is, the run goes out over the shopper's own words joined together —
+ * never over a brief the model composed. A chat that could rewrite the request
+ * would be a way around the rule that stops the agent buying something nobody
+ * asked for, so it does not get to hold the pen.
+ */
+const thread = [];
+
+function bubble(who, text) {
+  $("rb").insertAdjacentHTML("beforeend",
+    `<div class="bub ${who === "user" ? "me" : "it"}">${esc(text)}</div>`);
+  $("rb").scrollTop = $("rb").scrollHeight;
 }
 
+async function say(text) {
+  if (!text || $("send").disabled) return;
+  $("goal").value = "";
+  $("exs").hidden = true;
+  thread.push({ role: "user", content: text });
+  bubble("user", text);
+
+  $("send").disabled = true;
+  let body;
+  try {
+    ({ body } = await api("/agent/chat", { method: "POST", body: JSON.stringify({ messages: thread }) }));
+  } catch (err) {
+    bubble("assistant", `Couldn't reach the server — ${err?.message ?? err}`);
+    $("send").disabled = false;
+    return;
+  }
+  thread.push({ role: "assistant", content: body.reply });
+  bubble("assistant", body.reply);
+  $("send").disabled = false;
+
+  if (body.ready && body.goal) await run(body.goal);
+}
+
+$("send").onclick = () => say($("goal").value.trim());
+$("goal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("send").click(); });
+for (const b of document.querySelectorAll("#exs button")) b.onclick = () => say(b.dataset.g);
+
+bubble("assistant", "Tell me what you're after and the most you'd pay. I'll shop every stall for it.");
+
+// ── cart ───────────────────────────────────────────────────────────────────
+//
+// A shortlist with a ceiling per line, not a checkout. Each line is still bought
+// the way everything else here is bought — the agent goes and negotiates for it —
+// so a cart cannot become a second, quieter way to spend money.
+let cart = [];
+try { cart = JSON.parse(localStorage.getItem("vyapar.cart") ?? "[]"); } catch { cart = []; }
+const saveCart = () => { try { localStorage.setItem("vyapar.cart", JSON.stringify(cart)); } catch {} };
+
+function renderCart() {
+  $("cartn").textContent = String(cart.length);
+  $("cartsec").style.display = cart.length ? "" : "none";
+  $("cart").innerHTML = cart.map((c, i) => {
+    const it = items.find((x) => x.item_id === c.item_id);
+    return `<div class="cline">
+      <div class="th">${it?.photo_url ? `<img src="${esc(it.photo_url)}" alt="" />` : "📦"}</div>
+      <div class="nm2">${esc(c.name)}<span>${esc(c.merchant_name)} · listed ${rupee(c.list_price)}</span></div>
+      <input type="number" min="1" value="${c.ceiling}" data-ceil="${i}" title="most you'll pay" />
+      <button class="x" data-rm="${i}" title="Remove">✕</button>
+    </div>`;
+  }).join("");
+
+  for (const el of document.querySelectorAll("[data-ceil]")) {
+    el.onchange = () => {
+      const v = Number(el.value);
+      if (v > 0) { cart[Number(el.dataset.ceil)].ceiling = Math.round(v); saveCart(); }
+      renderCart();
+    };
+  }
+  for (const b of document.querySelectorAll("[data-rm]")) {
+    b.onclick = () => { cart.splice(Number(b.dataset.rm), 1); saveCart(); renderCart(); };
+  }
+}
+
+function addToCart(itemId) {
+  if (cart.some((c) => c.item_id === itemId)) return;
+  const it = items.find((x) => x.item_id === itemId);
+  if (!it) return;
+  cart.push({
+    item_id: itemId,
+    name: it.name,
+    merchant_name: merchants[it.merchant_id]?.name ?? it.merchant_id,
+    list_price: it.price.value,
+    ceiling: it.price.value,
+  });
+  saveCart(); renderCart();
+}
+
+$("cartbtn").onclick = () => {
+  if (!cart.length) { bubble("assistant", "Your cart is empty — add something from the shelf."); return; }
+  $("cartsec").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+$("clearcart").onclick = () => { cart = []; saveCart(); renderCart(); };
+
+// One run per line, in order. Sequential because each run ends at a payment a
+// person may have to approve, and two Checkouts cannot be open at once.
+$("buycart").onclick = async () => {
+  $("buycart").disabled = true;
+  const lines = [...cart];
+  for (const c of lines) {
+    bubble("user", `${c.name}, up to ${rupee(c.ceiling)}`);
+    await run(`${c.name} under ₹${c.ceiling}`);
+    cart = cart.filter((x) => x.item_id !== c.item_id);
+    saveCart(); renderCart();
+  }
+  $("buycart").disabled = false;
+};
+
+renderCart();
 await loadOrders();
 
 config = await boot({

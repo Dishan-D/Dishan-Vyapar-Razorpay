@@ -44,6 +44,7 @@ import {
   twilioConfigFromEnv,
   WhatsAppNotifier,
 } from "./structuring/whatsapp.js";
+import { converse, shopperText, type Turn } from "./agent/converse.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
 import { activeProvider } from "./llm/provider.js";
@@ -1945,6 +1946,36 @@ export async function createApp(options: AppOptions = {}) {
    * reason a buyer can be shown a delivery state at all — nothing marks itself
    * handed over, so the buyer's screen changes only when the merchant acts.
    */
+  /**
+   * The buyer agent's front desk.
+   *
+   * Multi-turn, so a shopper can arrive with half a thought and be asked the
+   * one thing that is missing rather than made to compose a full sentence.
+   *
+   * It decides only whether there is enough to shop. When there is, the caller
+   * runs the agent over `goal` — which is the shopper's own words, joined, and
+   * nothing else. The chat cannot add a requirement, because the text handed to
+   * the intent parser is text the shopper typed. That is the whole reason this
+   * is a separate, deliberately small surface.
+   */
+  app.post("/agent/chat", async (req: Request, res: Response) => {
+    const raw = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const turns: Turn[] = raw
+      .filter((m: unknown): m is Turn =>
+        typeof (m as Turn)?.content === "string" &&
+        ((m as Turn).role === "user" || (m as Turn).role === "assistant"))
+      .slice(-12)
+      .map((m: Turn) => ({ role: m.role, content: String(m.content).slice(0, 500) }));
+
+    if (turns.length === 0 || !turns.some((t) => t.role === "user")) {
+      res.status(400).json({ error: "send at least one user message" });
+      return;
+    }
+
+    const out = await converse(turns);
+    res.json({ ...out, goal: out.ready ? shopperText(turns) : null });
+  });
+
   app.get("/orders", (_req: Request, res: Response) => {
     const rows = store
       .listTransactions()

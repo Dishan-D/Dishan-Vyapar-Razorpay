@@ -20,7 +20,6 @@ const NAV = [
   ["/onboard.html", "Set up a store"],
   ["/store.html", "Storefront"],
   ["/merchant.html", "Merchant"],
-  ["/market.html", "Live market"],
 ];
 
 function renderNav() {
