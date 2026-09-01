@@ -222,26 +222,46 @@
   .pckeys .oth::before { color:var(--blue-2); }
 
   /* One subject per screen. The nav is the table of contents the page lacked. */
-  .secnav { position:sticky; top:0; z-index:30; display:flex; gap:2px; overflow-x:auto;
-            padding:0 var(--gutter); margin:0 auto; max-width:var(--page);
-            background:var(--surface); border-bottom:1px solid var(--border); scrollbar-width:none; }
-  .secnav::-webkit-scrollbar { display:none; }
-  .secnav button { position:relative; display:inline-flex; align-items:center; gap:8px;
-                   white-space:nowrap; background:none; border:0; border-bottom:2px solid transparent;
-                   padding:14px 15px 12px; font-size:13.5px; font-weight:550; color:var(--ink-3);
-                   transition:color .12s, border-color .12s; }
-  .secnav button i { font-style:normal; font-size:11px; opacity:.55; }
-  .secnav button:hover { color:var(--ink); }
-  .secnav button.on { color:var(--ink); border-bottom-color:var(--blue); font-weight:650; }
+  /* Deep view: a sidebar on a desktop, a tab strip on a phone.
+     Same markup, same buttons, same script — only the axis changes. */
+  #deepwrap { max-width:var(--page); margin:0 auto; display:grid;
+              grid-template-columns:222px minmax(0,1fr); align-items:start; }
+  .secnav { display:flex; flex-direction:column; gap:2px; position:sticky; top:60px;
+            padding:18px 12px; border-right:1px solid var(--border);
+            min-height:calc(100vh - 60px); background:var(--surface); }
+  .secnav button { position:relative; display:flex; align-items:center; gap:11px; width:100%;
+                   text-align:left; background:none; border:0; border-radius:var(--r-sm);
+                   padding:10px 13px; font-size:13.5px; font-weight:550; color:var(--ink-3);
+                   transition:background .12s, color .12s; }
+  .secnav button i { font-style:normal; font-size:12px; width:16px; text-align:center; opacity:.6; flex:none; }
+  .secnav button:hover { background:var(--surface-2); color:var(--ink); }
+  .secnav button.on { background:var(--blue-2); color:var(--blue-ink); font-weight:650; }
   .secnav button.on i { opacity:1; color:var(--blue); }
-  .secnav .badge2 { background:var(--red); color:#fff; border-radius:999px; font-size:10px;
-                    font-weight:700; padding:1px 6px; min-width:17px; text-align:center;
-                    font-variant-numeric:tabular-nums; }
+  /* The active marker is a shape as well as a colour, so the current screen is
+     still obvious in greyscale or to a colour-blind reader. */
+  .secnav button.on::before { content:""; position:absolute; left:0; top:9px; bottom:9px;
+                              width:3px; border-radius:0 3px 3px 0; background:var(--blue); }
+  .secnav .badge2 { margin-left:auto; background:var(--red); color:#fff; border-radius:999px;
+                    font-size:10px; font-weight:700; padding:1px 6px; min-width:17px;
+                    text-align:center; font-variant-numeric:tabular-nums; }
 
-  .secpane { display:none; max-width:1240px; margin:0 auto; padding:20px 26px 70px;
+  @media (max-width:900px) {
+    #deepwrap { grid-template-columns:1fr; }
+    .secnav { flex-direction:row; overflow-x:auto; position:sticky; top:0; z-index:30;
+              min-height:0; padding:0 var(--gutter); gap:2px;
+              border-right:0; border-bottom:1px solid var(--border); scrollbar-width:none; }
+    .secnav::-webkit-scrollbar { display:none; }
+    .secnav button { width:auto; white-space:nowrap; border-radius:0; padding:13px 14px 11px;
+                     border-bottom:2px solid transparent; }
+    .secnav button.on { background:none; color:var(--ink); border-bottom-color:var(--blue); }
+    .secnav button.on::before { display:none; }
+    .secnav .badge2 { margin-left:0; }
+  }
+
+  .secpane { display:none; grid-column:2; padding:22px var(--gutter) 72px;
              grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
   .secpane.on { display:grid; }
-  @media (max-width:900px){ .secpane.on { grid-template-columns:1fr; } }
+  @media (max-width:900px){ .secpane { grid-column:1; } .secpane.on { grid-template-columns:1fr; } }
   /* A single panel should not be squeezed into half the page. */
   .secpane > section:only-child { grid-column:1 / -1; }
 
@@ -908,7 +928,9 @@ function markAttention(n) {
 // ── mode ────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   $("simplewrap").style.display = mode === "simple" ? "grid" : "none";
-  $("deepwrap").style.display = mode === "deep" ? "block" : "none";
+  // grid, not block: #deepwrap is the sidebar-plus-pane layout, and an inline
+  // "block" here would silently flatten it back into one column.
+  $("deepwrap").style.display = mode === "deep" ? "grid" : "none";
   for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === mode);
   try { localStorage.setItem("vyapar.mode", mode); } catch { /* private window */ }
   window.scrollTo({ top: 0 });
