@@ -960,16 +960,40 @@ export async function createApp(options: AppOptions = {}) {
       const attributes: Record<string, string> = {};
       for (const { key, value } of intent.attributes ?? []) attributes[key] = value;
 
+      /**
+       * When the shopper confirmed a specific product, buy that product.
+       *
+       * A confirmation names one thing — "Buy Blue Cotton Saree from Meena's,
+       * up to ₹1,400" — and the run that follows must not re-open the question
+       * by searching the whole shelf again. Text search is how the wrong saree
+       * gets bought after the right one was approved, so the catalog handed to
+       * the comparison is narrowed to exactly the confirmed item.
+       */
+      const pinnedItemId = typeof req.body?.item_id === "string" ? req.body.item_id.trim() : "";
+      const shoppable = pinnedItemId
+        ? catalogItems.filter((i) => i.item_id === pinnedItemId)
+        : catalogItems;
+      if (pinnedItemId && shoppable.length === 0) {
+        step("stop", `No product with id ${pinnedItemId}`, { item_id: pinnedItemId });
+        res.status(404).json({ run_id: runId, goal, status: "no_match", reason: `no such product: ${pinnedItemId}`, trace });
+        return;
+      }
+
       const comparison = compareMerchants(
         intent.want,
         { buyer_agent_id: "agent_xyz", max_price: intent.max_price, opening_offer: intent.opening_offer },
         views,
-        catalogItems,
+        shoppable,
         policies,
-        {
-          ...(intent.category ? { category: intent.category } : {}),
-          ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
-        },
+        // A pinned purchase carries no category or attribute filter. The
+        // shopper has already picked the product; re-applying a constraint the
+        // model inferred could only exclude the very thing they confirmed.
+        pinnedItemId
+          ? {}
+          : {
+              ...(intent.category ? { category: intent.category } : {}),
+              ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+            },
       );
       // Recorded per shop, not per search: a merchant needs to know that buyers
       // came to them and left, which a search-level log cannot tell them.
@@ -2194,19 +2218,51 @@ export async function createApp(options: AppOptions = {}) {
       }
 
       if (tool === "start_purchase") {
-        const want = String(args.want ?? "").trim();
+        const itemId = String(args.item_id ?? "").trim();
         const max = Number(args.max_price ?? 0);
+
         // A purchase with no ceiling is the one thing this must never prepare:
         // the ceiling is what the authorization check gates on, and without it
         // "confirm" would mean "spend whatever it takes".
-        if (!want || !Number.isFinite(max) || max <= 0) {
-          return { tool, summary: "Cannot prepare that without both a product and a budget.", error: "need a product and a rupee ceiling" };
+        if (!Number.isFinite(max) || max <= 0) {
+          return { tool, summary: "Cannot prepare that without a budget.", error: "need a rupee ceiling" };
         }
+
+        // The model names a product by id, and the id has to resolve to
+        // something really on the shelf.
+        //
+        // This used to take the product as free text, which meant the model
+        // could compose one: a run went out for "Classic Handloom Cotton Saree,
+        // 6 feet, Rag & Reuse" — a product that has never existed in any shop
+        // here — and the pipeline dutifully searched nine merchants for it. The
+        // model may choose among real things. It may not mint them.
+        const item = catalogItems.find((i) => i.item_id === itemId);
+        if (!item) {
+          return {
+            tool,
+            summary: `No product with id ${itemId || "(none given)"}.`,
+            error: `${itemId || "(empty)"} is not a product on this shelf. Call search_shelf and use an item_id it returned.`,
+          };
+        }
+        if (item.needs_merchant_confirmation || item.stock.quantity < 1) {
+          return {
+            tool,
+            summary: `${item.name} cannot be bought right now.`,
+            error: item.stock.quantity < 1 ? "out of stock" : "the shopkeeper has not confirmed this item yet",
+          };
+        }
+
+        const shop = merchants.get(item.merchant_id)?.name ?? item.merchant_id;
         return {
           tool,
-          summary: `Ready to buy ${want}, up to ₹${max.toLocaleString("en-IN")} — needs your confirmation.`,
-          data: { prepared: true, want, max_price: max },
-          proposal: { label: `Buy ${want}, up to ₹${max.toLocaleString("en-IN")}`, goal: `${want} under ₹${max}`, max_price: max },
+          summary: `Ready to buy ${item.name} from ${shop}, up to ₹${max.toLocaleString("en-IN")} — needs your confirmation.`,
+          data: { prepared: true, item_id: item.item_id, name: item.name, shop, max_price: max },
+          proposal: {
+            label: `Buy ${item.name} from ${shop}, up to ₹${max.toLocaleString("en-IN")}`,
+            goal: `${item.name} under ₹${max}`,
+            item_id: item.item_id,
+            max_price: max,
+          },
         };
       }
 

@@ -19,6 +19,8 @@ You cannot know anything about the shelf, their orders or any shop without looki
 Answer in two or three short sentences, plainly:
 - Rupees as ₹1,200.
 - Never invent a product, a price, a shop or a delivery date. If a tool returned nothing, say nothing was found.
+- You may only name products that a tool returned in THIS conversation. Not a similar product, not a plausible one, not one you would expect a shop like this to carry. If the shelf has no cake, there is no cake — say so and stop, do not suggest flavours.
+- Quote the LISTED price. The "lowest" figure is a floor the shop might negotiate down to, not what the product costs; never present it as the price.
 
 When search_shelf returns results, the shopper is ALREADY shown every one of
 them as a list with photo, shop, price and stock, directly under your message.
@@ -49,6 +51,64 @@ Buying:
  * talks.
  */
 const MAX_STEPS = 4;
+
+/**
+ * Refuse to repeat a figure the tools never returned.
+ *
+ * The prompt tells the model not to invent products, and it invented one
+ * anyway: asked for a "Classic Handloom Cotton Saree" it reported "₹7,499 at
+ * Neeta Handlooms, in stock" — a price and a shop that exist nowhere in this
+ * system. A shopper cannot tell that apart from a real result, which makes it
+ * the most damaging thing the assistant can do.
+ *
+ * So the answer is checked against the evidence rather than trusted. Every
+ * rupee figure in the reply must appear in a tool result or in what the shopper
+ * themselves typed; anything else means the sentence was composed rather than
+ * read, and the whole reply is replaced by one built from the real rows.
+ *
+ * This cannot catch every fabrication — a made-up shop name with no number
+ * attached would pass. It catches the expensive kind, and it fails closed.
+ */
+export function ungroundedFigures(answer: string, allowed: Set<number>): number[] {
+  const found = [...answer.matchAll(/₹\s?([\d,]+)/g)]
+    .map((m) => Number(m[1]!.replace(/,/g, "")))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return [...new Set(found)].filter((n) => !allowed.has(n));
+}
+
+/** Every number the assistant is entitled to say back. */
+function groundedNumbers(turns: Turn[], steps: BuyerToolResult[]): Set<number> {
+  const ok = new Set<number>();
+  // What the shopper said — their own budget is theirs to quote back.
+  for (const t of turns) {
+    if (t.role !== "user") continue;
+    for (const m of t.content.matchAll(/(\d[\d,]*)/g)) {
+      const n = Number(m[1]!.replace(/,/g, ""));
+      if (Number.isFinite(n)) ok.add(n);
+    }
+  }
+  // What the tools actually returned.
+  const walk = (v: unknown): void => {
+    if (typeof v === "number" && Number.isFinite(v)) ok.add(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  for (const s of steps) walk(s.data);
+  return ok;
+}
+
+/** A reply built only from rows, for when the model's own cannot be trusted. */
+function fromRowsOnly(steps: BuyerToolResult[]): string {
+  const rows = steps.flatMap((s) =>
+    s.tool === "search_shelf" ? ((s.data as { results?: Array<{ name: string; shop: string; price: number }> })?.results ?? []) : [],
+  );
+  if (rows.length === 0) return "I could not find anything on the shelf for that.";
+  const cheapest = rows.reduce((a, b) => (b.price < a.price ? b : a));
+  return (
+    `${rows.length} on the shelf. The cheapest is ${cheapest.name} at ${cheapest.shop} ` +
+    `for ₹${cheapest.price.toLocaleString("en-IN")}. They are listed below — which would you like?`
+  );
+}
 
 /**
  * The buyer's agent loop.
@@ -103,11 +163,16 @@ export async function converseWithTools(
 
       const calls = choice.tool_calls ?? [];
       if (calls.length === 0) {
+        const said = choice.content?.trim() || "I could not work that out.";
+        const stray = ungroundedFigures(said, groundedNumbers(turns, steps));
         return {
-          answer: choice.content?.trim() || "I could not work that out.",
+          answer: stray.length > 0 ? fromRowsOnly(steps) : said,
           steps,
           proposals: steps.map((s) => s.proposal).filter((p): p is NonNullable<typeof p> => Boolean(p)),
           answered_by: "model",
+          ...(stray.length > 0
+            ? { note: `replaced an answer that quoted figures no lookup returned (${stray.map((n) => "₹" + n).join(", ")})` }
+            : {}),
         };
       }
 

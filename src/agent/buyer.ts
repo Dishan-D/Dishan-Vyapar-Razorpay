@@ -71,14 +71,17 @@ export const BUYER_TOOLS: BuyerToolDef[] = [
   {
     name: "start_purchase",
     description:
-      "Propose buying something. This does NOT buy it — it prepares the purchase and the shopper must confirm before any agent runs or any money moves. Use it once you know what they want and what they will pay.",
+      "Propose buying ONE specific product that search_shelf has already returned. This does NOT buy it — it prepares the purchase and the shopper must confirm before any money moves. You must call search_shelf first and pass an item_id from its results; you cannot buy a product you have not looked up.",
     parameters: {
       type: "object",
       properties: {
-        want: { type: "string", description: "The product, as the shopper described it" },
-        max_price: { type: "number", description: "The most they will pay, in rupees" },
+        item_id: {
+          type: "string",
+          description: "The item_id of a product returned by search_shelf in this conversation. Never invent one.",
+        },
+        max_price: { type: "number", description: "The most the shopper will pay, in rupees" },
       },
-      required: ["want", "max_price"],
+      required: ["item_id", "max_price"],
       additionalProperties: false,
     },
     spends: true,
@@ -100,6 +103,8 @@ export interface BuyerToolResult {
   proposal?: {
     label: string;
     goal: string;
+    /** The exact product this proposal is for. Never a name the model composed. */
+    item_id: string;
     max_price: number;
   };
 }

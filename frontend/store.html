@@ -121,6 +121,20 @@
   .cline .th img { width:100%; height:100%; object-fit:cover; }
   .cline .nm2 { flex:1; min-width:0; font-size:13px; font-weight:600; letter-spacing:-.01em; }
   .cline .nm2 span { display:block; font-size:11px; font-weight:450; color:var(--ink-3); }
+  .cline .qty { display:flex; align-items:center; gap:2px; border:1px solid var(--border-2);
+                border-radius:8px; overflow:hidden; flex:none; }
+  .cline .qty button { width:28px; height:30px; border:0; background:var(--surface-2); color:var(--ink-2); font-size:14px; }
+  .cline .qty button:hover:not(:disabled) { background:var(--surface-3); color:var(--ink); }
+  .cline .qty button:disabled { color:var(--ink-4); cursor:not-allowed; }
+  .cline .qty b { min-width:26px; text-align:center; font-size:13px; font-variant-numeric:tabular-nums; }
+  .cline .ceil { display:flex; flex-direction:column; gap:2px; flex:none; margin:0; }
+  .cline .ceil span { font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-4); font-weight:700; }
+  .ctot { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+          padding-top:12px; margin-top:4px; border-top:1px solid var(--border); font-size:13px; }
+  .ctot span { color:var(--ink-3); }
+  .ctot b { font-size:17px; font-weight:650; font-variant-numeric:tabular-nums; }
+  @media (max-width:560px){ .cline { flex-wrap:wrap; } .cline .nm2 { flex-basis:100%; } }
+
   .cline input { width:92px; font:inherit; font-size:12.5px; padding:6px 9px;
                  border:1px solid var(--border-2); border-radius:7px; background:var(--surface); }
   .cline .x { background:none; border:0; color:var(--ink-4); font-size:15px; padding:2px 5px; }
@@ -234,7 +248,12 @@ function render() {
     (!q || `${i.name} ${i.category} ${merchants[i.merchant_id]?.name ?? ""}`.toLowerCase().includes(q)));
   $("grid").innerHTML = shown.map(cardHTML).join("") || `<p class="empty2">Nothing on the shelf matches that.</p>`;
   for (const b of document.querySelectorAll("[data-add]")) {
-    b.onclick = (e) => { e.stopPropagation(); addToCart(b.dataset.add); b.textContent = "In cart ✓"; };
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const added = addToCart(b.dataset.add);
+      b.textContent = added ? "In cart ✓" : "All stock in cart";
+      b.disabled = !added;
+    };
   }
   const ready = shown.filter((i) => i.transactable && i.price.value > 0).length;
   $("count").textContent =
@@ -296,7 +315,7 @@ function onStep(e) {
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
-async function run(goal) {
+async function run(goal, itemId) {
   $("send").disabled = true;
   runId = `run_${Date.now().toString(36)}`;
   $("rb").innerHTML = "";
@@ -550,7 +569,7 @@ function wireHits() {
   for (const b of $("rb").querySelectorAll("[data-hitbuy]")) {
     b.onclick = () => {
       const r = items.find((x) => x.item_id === b.dataset.hitbuy);
-      if (r) say(`buy the ${r.name} for up to ${r.price.value}`);
+      if (r) say(`buy ${r.name} (${r.item_id}) for up to ₹${r.price.value}`);
     };
   }
 }
@@ -609,7 +628,7 @@ async function say(text) {
     b.onclick = async () => {
       const prop = body.proposals[Number(b.dataset.buy)];
       b.closest(".prop2").innerHTML = `<span>Confirmed — sending the agent.</span>`;
-      await run(prop.goal);
+      await run(prop.goal, prop.item_id);
     };
   }
   for (const b of $("rb").querySelectorAll("[data-nobuy]")) {
@@ -630,20 +649,51 @@ bubble("assistant", "Ask me anything — what's on the shelf, where your order i
 // so a cart cannot become a second, quieter way to spend money.
 let cart = [];
 try { cart = JSON.parse(localStorage.getItem("vyapar.cart") ?? "[]"); } catch { cart = []; }
+// Carts saved before quantities existed have no qty. Repair rather than drop.
+cart = cart.filter((c) => c && c.item_id).map((c) => ({ ...c, qty: Math.max(1, Number(c.qty) || 1) }));
 const saveCart = () => { try { localStorage.setItem("vyapar.cart", JSON.stringify(cart)); } catch {} };
 
 function renderCart() {
-  $("cartn").textContent = String(cart.length);
+  // The badge counts units, not lines — two of one thing is two things.
+  const units = cart.reduce((n, c) => n + c.qty, 0);
+  $("cartn").textContent = String(units);
   $("cartsec").style.display = cart.length ? "" : "none";
+
+  const total = cart.reduce((n, c) => n + c.ceiling * c.qty, 0);
   $("cart").innerHTML = cart.map((c, i) => {
     const it = items.find((x) => x.item_id === c.item_id);
+    const stock = it?.stock?.quantity ?? c.qty;
     return `<div class="cline">
       <div class="th">${it?.photo_url ? `<img src="${esc(it.photo_url)}" alt="" />` : "📦"}</div>
-      <div class="nm2">${esc(c.name)}<span>${esc(c.merchant_name)} · listed ${rupee(c.list_price)}</span></div>
-      <input type="number" min="1" value="${c.ceiling}" data-ceil="${i}" title="most you'll pay" />
+      <div class="nm2">${esc(c.name)}<span>${esc(c.merchant_name)} · listed ${rupee(c.list_price)} · ${stock} in stock</span></div>
+      <div class="qty">
+        <button data-less="${i}" title="One fewer"${c.qty <= 1 ? " disabled" : ""}>−</button>
+        <b>${c.qty}</b>
+        <button data-more="${i}" title="One more"${c.qty >= stock ? " disabled" : ""}>+</button>
+      </div>
+      <label class="ceil"><span>max each</span>
+        <input type="number" min="1" value="${c.ceiling}" data-ceil="${i}" /></label>
       <button class="x" data-rm="${i}" title="Remove">✕</button>
     </div>`;
-  }).join("");
+  }).join("") +
+  `<div class="ctot"><span>${units} item${units === 1 ? "" : "s"} · you'll pay at most</span><b>${rupee(total)}</b></div>`;
+
+  // Quantity is capped at real stock, so a cart can never promise more than
+  // the shop has — the agent would refuse it later anyway, and finding that
+  // out after confirming is a worse experience than not being offered it.
+  for (const b of document.querySelectorAll("[data-more]")) {
+    b.onclick = () => {
+      const c = cart[Number(b.dataset.more)];
+      const stock = items.find((x) => x.item_id === c.item_id)?.stock?.quantity ?? 1;
+      if (c.qty < stock) { c.qty++; saveCart(); renderCart(); }
+    };
+  }
+  for (const b of document.querySelectorAll("[data-less]")) {
+    b.onclick = () => {
+      const c = cart[Number(b.dataset.less)];
+      if (c.qty > 1) { c.qty--; saveCart(); renderCart(); }
+    };
+  }
 
   for (const el of document.querySelectorAll("[data-ceil]")) {
     el.onchange = () => {
@@ -657,18 +707,30 @@ function renderCart() {
   }
 }
 
+/** Adding something already in the cart adds another of it, rather than
+    silently doing nothing — which is what it did before, and which reads as a
+    broken button. */
 function addToCart(itemId) {
-  if (cart.some((c) => c.item_id === itemId)) return;
   const it = items.find((x) => x.item_id === itemId);
-  if (!it) return;
-  cart.push({
-    item_id: itemId,
-    name: it.name,
-    merchant_name: merchants[it.merchant_id]?.name ?? it.merchant_id,
-    list_price: it.price.value,
-    ceiling: it.price.value,
-  });
+  if (!it) return false;
+  const stock = it.stock?.quantity ?? 1;
+
+  const line = cart.find((c) => c.item_id === itemId);
+  if (line) {
+    if (line.qty >= stock) return false;
+    line.qty++;
+  } else {
+    cart.push({
+      item_id: itemId,
+      name: it.name,
+      merchant_name: merchants[it.merchant_id]?.name ?? it.merchant_id,
+      list_price: it.price.value,
+      ceiling: it.price.value,
+      qty: 1,
+    });
+  }
   saveCart(); renderCart();
+  return true;
 }
 
 $("cartbtn").onclick = () => {
@@ -683,8 +745,12 @@ $("buycart").onclick = async () => {
   $("buycart").disabled = true;
   const lines = [...cart];
   for (const c of lines) {
-    bubble("user", `${c.name}, up to ${rupee(c.ceiling)}`);
-    await run(`${c.name} under ₹${c.ceiling}`);
+    // One run per unit. Each is its own negotiation, its own order and its own
+    // signed chain — batching them would hide which unit failed if one did.
+    for (let n = 0; n < c.qty; n++) {
+      bubble("user", `${c.name}${c.qty > 1 ? ` (${n + 1} of ${c.qty})` : ""}, up to ${rupee(c.ceiling)}`);
+      await run(`${c.name} under ₹${c.ceiling}`, c.item_id);
+    }
     cart = cart.filter((x) => x.item_id !== c.item_id);
     saveCart(); renderCart();
   }
