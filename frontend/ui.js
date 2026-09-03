@@ -7,6 +7,26 @@ export const rupee = (n) => "₹" + Number(n).toLocaleString("en-IN");
 export const clock = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 export const note = (kind, html) => `<div class="note ${kind}">${html}</div>`;
 
+/**
+ * A scroll box that has nothing to scroll should not look like one.
+ *
+ * The bottom fade means "there is more below". On a panel whose four rows
+ * already fit it means nothing, and a fade under the last row reads as a row
+ * cut in half. Measured after every render rather than guessed from a count,
+ * because how much fits depends on the window.
+ *
+ * Shared rather than per-page: both the shopper's order list and the merchant's
+ * settlement feed grow without bound from the same transactions, and a fix that
+ * lived on one page only ever half-worked.
+ */
+export function settleScrollboxes() {
+  for (const el of document.querySelectorAll(".scrollbox")) {
+    el.classList.remove("fits");
+    if (el.scrollHeight <= el.clientHeight + 1) el.classList.add("fits");
+  }
+}
+addEventListener("resize", settleScrollboxes);
+
 export async function api(path, options) {
   const res = await fetch(path, {
     ...options,

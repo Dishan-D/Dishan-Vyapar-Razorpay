@@ -473,10 +473,41 @@ $("go2").onclick = async () => {
       return;
     }
 
-    // The remaining stages all happen inside one server call, so they are
-    // marked off as it returns rather than pretending to tick along on a timer.
-    const res = await fetch(`/onboarding/merchants/${merchantId}/structure`, { method: "POST" });
-    const body = await res.json();
+    /**
+     * The remaining stages all happen inside one server call, so they are
+     * marked off as it returns rather than pretending to tick along on a timer.
+     *
+     * Bounded, because this call can legitimately run for minutes — eight
+     * photos through a vision model that is being paced by a token budget — and
+     * a browser tab that sits on a dead connection forever is worse than one
+     * that gives up and says so. Four minutes is longer than the slowest run we
+     * have measured and short enough that nobody assumes the page has hung.
+     */
+    const giveUp = new AbortController();
+    const timer = setTimeout(() => giveUp.abort(), 240_000);
+    let res;
+    try {
+      res = await fetch(`/onboarding/merchants/${merchantId}/structure`, {
+        method: "POST",
+        signal: giveUp.signal,
+      });
+    } catch (netErr) {
+      // A failure here is the connection, not the server's answer — there is no
+      // status and no body to read. Distinguishing the two matters, because one
+      // of them means "try again" and the other means "something is wrong with
+      // what you sent".
+      const e = new Error(
+        netErr?.name === "AbortError"
+          ? "This is taking longer than expected, so I stopped waiting."
+          : "I could not reach the server.",
+      );
+      e.kind = "unreachable";
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       const e = new Error(body.error ?? "structuring failed");
       e.kind = body.kind;
@@ -490,18 +521,44 @@ $("go2").onclick = async () => {
     $("nav3").style.display = "";
     $("back2").onclick = () => showStep(2);
   } catch (err) {
-    // A spent model quota is not the merchant's fault and not their photos'
-    // fault, so it must not send them back to re-shoot anything. The uploads
-    // are already stored server-side; the only useful action is to try again.
+    /**
+     * Three different failures, and a shopkeeper needs to be told them apart.
+     *
+     * The one this used to get wrong is the connection dying: the browser hands
+     * back the literal string **"Failed to fetch"**, which was printed as-is
+     * under a heading saying "That didn't work" and a button offering to try
+     * different inputs. A shopkeeper reads that as *my photos were no good* and
+     * goes to re-shoot them — when nothing was wrong with the photos, the
+     * photos are already saved on the server, and the only useful action is to
+     * press the button again.
+     *
+     * So: a spent quota and an unreachable server both offer **Try again**, and
+     * both say the uploads are safe. Only a genuine refusal of the input sends
+     * them back to change it.
+     */
     const quota = err.kind === "daily_quota" || err.kind === "rate_limit";
-    $("h3").textContent = quota ? "Not right now — try again shortly" : "That didn't work";
+    const unreachable = err.kind === "unreachable";
+    const retryable = quota || unreachable;
+
+    $("h3").textContent = quota
+      ? "Not right now — try again shortly"
+      : unreachable
+        ? "I lost the connection"
+        : "That didn't work";
     $("l3").textContent = "";
+
+    const reassurance = retryable
+      ? `<p class="hint" style="margin-top:10px">Nothing you sent has been lost — your photos and notes are saved. Just press Try again.</p>`
+      : "";
+
     $("result").innerHTML =
-      `<div class="note ${quota ? "warn" : "bad"}">${esc(err.message)}</div>` +
-      (quota ? `<button class="btn primary" id="retry" style="margin-top:12px">Try again</button>` : "");
-    if (quota) $("retry").onclick = () => $("go2").onclick();
+      `<div class="note ${retryable ? "warn" : "bad"}">${esc(err.message)}</div>` +
+      reassurance +
+      (retryable ? `<button class="btn primary" id="retry" style="margin-top:12px">Try again</button>` : "");
+
+    if (retryable) $("retry").onclick = () => $("go2").onclick();
     $("nav3").style.display = "";
-    $("back2").textContent = quota ? "← Back" : "← Try different inputs";
+    $("back2").textContent = retryable ? "← Back" : "← Try different inputs";
     $("back2").onclick = () => showStep(2);
   }
 };

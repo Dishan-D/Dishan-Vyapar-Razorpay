@@ -21,8 +21,11 @@ history is the source, not memory.
 
 ## The claim
 
-65–90 million Indian merchants take payment through a UPI QR and nothing else:
-no website, no catalog, no API. Every live agent-commerce protocol (Google AP2,
+India has around **13 million kirana stores**, 88% of its retail, against
+**678 million** deployed UPI QR codes — and roughly **93%** of Tier-2 kirana
+stores already take digital payments. What they do not have is a website, a
+catalog or an API. *(Sourced in `docs/PITCH.md`; the earlier "65–90 million"
+figure here had no source.)* Every live agent-commerce protocol (Google AP2,
 OpenAI ACP) requires a structured product feed before an agent can *see* a
 merchant, and all of them assume a fixed price — while ~85% of India's retail
 runs through kirana stores where negotiation is the norm.

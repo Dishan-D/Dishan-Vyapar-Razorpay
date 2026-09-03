@@ -60,6 +60,11 @@ export class Store {
         status         TEXT NOT NULL,
         at             TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS attributions (
+        transaction_id TEXT PRIMARY KEY,
+        attribution    TEXT NOT NULL,
+        at             TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS mandates (
         transaction_id TEXT NOT NULL,
         mandate_type   TEXT NOT NULL,
@@ -84,6 +89,37 @@ export class Store {
          VALUES (@transaction_id, @item_id, @merchant_id, @buyer_agent_id, @created_at)`,
       )
       .run({ ...row, created_at: new Date().toISOString() });
+  }
+
+  /**
+   * Why this sale happened, written down when it happens.
+   *
+   * Whether a product was what the shopper came for, or something the shop
+   * suggested alongside it, is known at exactly one moment: when the buyer
+   * agrees to the offer. Nothing in the mandate chain records it, and there is
+   * no way to recover it afterwards — a cross-sold packet of candles and one
+   * the shopper asked for by name produce identical transactions. Reading it
+   * back out of product names or prices would be a guess dressed as a
+   * statistic, so the buying path states it and this stores it verbatim.
+   *
+   * Idempotent: the storefront may re-post a run it already recorded, and the
+   * first answer is the true one.
+   */
+  recordAttribution(transactionId: string, attribution: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO attributions (transaction_id, attribution, at) VALUES (?, ?, ?)
+         ON CONFLICT(transaction_id) DO NOTHING`,
+      )
+      .run(transactionId, attribution, new Date().toISOString());
+  }
+
+  attributions(): Map<string, string> {
+    const rows = this.db.prepare(`SELECT transaction_id, attribution FROM attributions`).all() as Array<{
+      transaction_id: string;
+      attribution: string;
+    }>;
+    return new Map(rows.map((r) => [r.transaction_id, r.attribution]));
   }
 
   /**

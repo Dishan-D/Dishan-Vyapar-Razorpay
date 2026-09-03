@@ -7,6 +7,18 @@
 <link rel="stylesheet" href="/app.css" />
 <script src="/socket.io/socket.io.js"></script>
 <style>
+  /* `hidden` has to actually hide.
+     The browser's own [hidden]{display:none} sits in the user-agent sheet, so
+     any author rule that sets a display beats it — and two rules here do:
+     .thread and .chips are both display:flex. So `el.hidden = true` set the
+     attribute, changed nothing, and left a flex:1 thread claiming every spare
+     pixel of the empty screen. That is why the greeting sat at the top and the
+     composer at the bottom with a screen of nothing between them, and why the
+     opener chips stayed up through an entire conversation.
+     !important because equal specificity would just lose to whichever rule is
+     written later, which is exactly the accident this is fixing. */
+  [hidden] { display:none !important; }
+
   .wrap { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:20px;
           padding:18px 26px 72px; max-width:1460px; margin:0 auto; align-items:start; }
   @media (max-width:1060px){ .wrap { grid-template-columns:1fr; } }
@@ -67,22 +79,46 @@
   .fstep .fc { font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
   .fdrop { font-size:11px; color:var(--red); padding:3px 13px 0; }
 
-  .opp { border:1px solid var(--border); border-radius:var(--r); padding:16px; }
+  /* An opportunity card, laid out top to bottom and stated as such.
+     
+     It rendered as five narrow vertical strips — the headline, the evidence,
+     the advice, the price and the buttons each squeezed into about 90px, with
+     the text wrapping every second word. Every child here was already a block
+     and the card had no display of its own, which is exactly the situation
+     where an inherited or later-loaded rule wins by default. So the card now
+     declares its own axis instead of relying on `block` being what it gets,
+     and each child is given a width it cannot be squeezed below. A panel that
+     is explicit about its layout cannot be quietly relaid by something else. */
+  .opp { display:flex; flex-direction:column; align-items:stretch; gap:12px;
+         border:1px solid var(--border); border-radius:var(--r); padding:16px;
+         width:100%; min-width:0; }
+  .opp > * { min-width:0; max-width:100%; }
   .opp + .opp { margin-top:11px; }
   .opp.act { border-color:var(--amber-3); background:var(--amber-2); }
-  .opp h3 { margin:0 0 9px; font-size:14.5px; font-weight:600; letter-spacing:-.01em; }
-  .opp.act h3 { color:#6f4608; }
-  .opp .evid { display:block; list-style:none; margin:0 0 12px; padding:0; }
+  .opp h3 { display:block; margin:0; font-size:14.5px; font-weight:600; letter-spacing:-.022em;
+            line-height:1.4; }
+  .opp.act h3 { color:var(--amber); }
+  .opp .evid { display:block; list-style:none; margin:0; padding:0; }
   .opp .evid li { font-size:12.5px; color:var(--ink-2); padding:2.5px 0; display:flex; gap:8px;
-                  line-height:1.5; text-transform:none; }
+                  line-height:1.55; text-transform:none; letter-spacing:0; }
   .opp .evid li::before { content:"·"; color:var(--ink-4); flex:none; }
-  .opp.act .evid li { color:#85540a; }
+  .opp.act .evid li { color:var(--amber); }
   .opp .advice { display:block; font-size:13.5px; font-weight:450; line-height:1.55;
                  text-transform:none; letter-spacing:0; padding:11px 13px; background:var(--surface);
                  border:1px solid var(--border); border-radius:var(--r-sm); }
-  .opp .delta { display:flex; align-items:baseline; gap:9px; margin:11px 0 0; font-variant-numeric:tabular-nums; }
+  /* The price change and the two buttons on one line at comfortable widths,
+     wrapping to two lines rather than shrinking when the card is narrow. */
+  .opp .actbar { display:flex; align-items:center; justify-content:space-between;
+                 gap:14px; flex-wrap:wrap; }
+  .opp .delta { display:flex; align-items:baseline; gap:9px; margin:0;
+                font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
   .opp .delta .from { color:var(--ink-3); text-decoration:line-through; font-size:14px; }
-  .opp .delta .to { font-size:20px; font-weight:600; color:var(--green); }
+  .opp .delta .to { font-size:21px; font-weight:600; color:var(--green); }
+  .opp .actbar .row { flex:none; }
+  @media (max-width:520px) {
+    .opp .actbar { flex-direction:column; align-items:stretch; }
+    .opp .actbar .row .btn { flex:1; }
+  }
   /* Catalog row: thumbnail, product, price, stock, state, actions.
      Six columns, and it used to declare five — the thumbnail was added later
      and silently took the product name's column. Named areas now, so adding a
@@ -107,6 +143,12 @@
   .edit input { font-size:13px; padding:7px 10px; }
   .edit .who2 { min-width:0; }
   .edit .who2 .prov { margin-top:4px; white-space:nowrap; }
+  /* What the row has actually sold, sitting under the name where a shopkeeper
+     reads it against the stock box on the same line. */
+  .edit .sold { display:block; margin-top:3px; font-size:11px; color:var(--ink-3);
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .edit .sold.none { color:var(--ink-4); font-style:italic; }
+  .edit .sold em { font-style:normal; color:var(--s1); }
   .edit .who2 input { width:100%; }
   .edit .st2 { min-width:84px; justify-self:start; }
   .edit .acts { display:flex; gap:6px; }
@@ -132,6 +174,176 @@
   .askbox { border:1px solid var(--border); border-radius:var(--r); background:var(--surface); overflow:hidden; }
   .askrow2 { display:flex; gap:9px; padding:14px 16px; border-bottom:1px solid var(--border); }
   .askrow2 input { flex:1; }
+  /* ══ Insights — the headline row ═══════════════════════════════════════ */
+  .secpane > section.wide { grid-column:1 / -1; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:12px;
+          margin-top:16px; }
+  .kpi2 { border:1px solid var(--border); border-radius:var(--r); padding:15px 16px;
+          background:var(--surface); }
+  .kpi2 .k { font-size:11.5px; color:var(--ink-3); font-weight:500; }
+  .kpi2 .v { font-family:var(--display); font-size:27px; font-weight:600; letter-spacing:-.028em;
+             font-variant-numeric:tabular-nums; margin:5px 0 0; }
+  .kpi2 .d { font-size:11.5px; font-weight:600; margin-top:6px; display:flex; align-items:center; gap:4px; }
+  .kpi2 .d.up { color:var(--green); } .kpi2 .d.dn { color:var(--red); } .kpi2 .d.flat { color:var(--ink-4); }
+
+  /* One observation, unasked. Shown only when the data actually says something,
+     because a panel that always has an insight is a panel nobody reads. */
+  .noticed { margin-top:16px; padding:18px 20px; border-radius:var(--r);
+             border:1px solid var(--blue-3); background:var(--blue-2); }
+  .noticed .lab { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:650;
+                  color:var(--blue-ink); letter-spacing:-.01em; }
+  .noticed h3 { margin:9px 0 0; font-size:17px; font-weight:600; letter-spacing:-.022em;
+                line-height:1.35; }
+  .noticed p { margin:6px 0 0; font-size:13px; color:var(--ink-2); line-height:1.55; }
+  .noticed .row { margin-top:14px; }
+
+  .chartwrap { margin-top:20px; padding-top:18px; border-top:1px solid var(--border); }
+  .charthead { display:flex; justify-content:space-between; align-items:center; gap:14px;
+               flex-wrap:wrap; margin-bottom:14px; }
+  .charthead b { display:block; font-size:14px; font-weight:600; letter-spacing:-.022em; }
+  .charthead span { font-size:12px; color:var(--ink-3); }
+  .seg { display:inline-flex; gap:2px; padding:3px; background:var(--surface-2);
+         border:1px solid var(--border); border-radius:999px; }
+  .seg button { border:0; background:none; border-radius:999px; padding:6px 13px; font-size:12px;
+                font-weight:550; color:var(--ink-3); }
+  .seg button.on { background:var(--ink); color:var(--surface); }
+
+  /* ══ Simple Mode — the assistant is the screen ══════════════════════════
+     One column, centred on the page, with the composer under it. A shopkeeper
+     who has just opened this should have exactly one obvious thing to do. */
+  .simplewrap { position:relative; min-height:calc(100vh - 150px); }
+  /* The reference's mesh: four soft radial blobs behind everything, so the
+     empty state reads as a surface rather than as a page that failed to load
+     its content. Fixed, so it does not slide under a long conversation. */
+  .simplewrap::before { content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+                        background-image:var(--gradient-mesh); opacity:.5; }
+  .assistant { position:relative; z-index:1; max-width:720px; margin:0 auto;
+               display:flex; flex-direction:column; min-height:calc(100vh - 150px);
+               padding:0 20px 26px; }
+  /* Nothing said yet: the greeting and the composer belong together in the
+     middle of the screen. They were pinned to opposite ends, leaving a screen
+     of blank between a question and the box for answering it. */
+  .assistant.empty { justify-content:center; }
+  /* The composer's gradient exists to fade a scrolling conversation out behind
+     it while it is stuck to the bottom. On the empty screen it is stuck to
+     nothing, so the fade painted an opaque slab of --bg across the mesh — a
+     panel with no content and no edges, sitting under the chips. */
+  .assistant.empty .composer { position:static; padding:0; background:none; }
+  /* A little more air between the greeting and the composer than before: with
+     the pair now centred as one group they read as a single object, and 26px
+     was tight enough to look like a gap rather than a relationship. */
+  .welcome { text-align:center; padding:0 8px 30px; }
+  .welcome .hi { font-size:14px; color:var(--ink-3); margin:0 0 8px; }
+  .welcome h2 { font-family:var(--display); font-size:clamp(26px,3.6vw,40px); font-weight:600;
+                letter-spacing:-.028em; margin:0; line-height:1.12; }
+  .welcome p { color:var(--ink-3); font-size:15px; margin:11px 0 0; }
+  .proactive { margin:26px auto 0; max-width:520px; padding:13px 16px; font-size:13px; line-height:1.55;
+               text-align:left; color:var(--ink-2); background:var(--surface-2);
+               border:1px solid var(--border); border-radius:var(--r-sm); }
+  .proactive b { color:var(--ink); display:block; margin-bottom:3px; }
+
+  .thread { flex:1; overflow-y:auto; padding:22px 4px 8px; display:flex; flex-direction:column; gap:5px; }
+  .msg { max-width:100%; }
+  .msg.me { align-self:flex-end; max-width:78%; background:var(--ink); color:var(--surface);
+            padding:10px 15px; border-radius:16px 16px 4px 16px; font-size:13.5px; line-height:1.5;
+            margin-top:14px; }
+  .msg.it { align-self:stretch; margin-bottom:10px; }
+  .said { font-size:14px; line-height:1.62; color:var(--ink); padding:2px 2px 6px; }
+  .waiting { font-size:14px; color:var(--ink-3); padding:2px; }
+  .msg .bad { font-size:13.5px; color:var(--red); padding:2px; }
+
+  /* The lookups that really ran, ticked off as they landed. */
+  .acts { display:flex; flex-direction:column; gap:3px; margin:2px 0 9px; }
+  .act { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-3); }
+  .act .tick { color:var(--green); font-weight:700; }
+  .act.no .tick { color:var(--red); }
+  .act em { font-style:normal; font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+            color:var(--ink-4); background:var(--surface-2); border:1px solid var(--border);
+            padding:1px 6px; border-radius:999px; }
+
+  /* Results, rendered rather than described. */
+  .rcard { border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface);
+           padding:14px 16px; margin:8px 0; }
+  .rct { font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+         color:var(--ink-4); }
+  .rcv { font-family:var(--display); font-size:29px; letter-spacing:-0.02em; margin-top:5px;
+         font-variant-numeric:tabular-nums; }
+  .rcs { font-size:12px; color:var(--ink-3); margin-top:3px; line-height:1.5; }
+  .rcd { display:inline-block; margin-top:7px; font-size:11.5px; font-weight:700;
+         padding:2px 8px; border-radius:999px; }
+  .rcd.up { color:var(--green); background:var(--green-2); }
+  .rcd.dn { color:var(--red); background:var(--red-2); }
+  .rcr { display:flex; justify-content:space-between; gap:12px; margin-top:8px; padding-top:8px;
+         border-top:1px solid var(--border); font-size:12.5px; color:var(--ink-2); }
+  .rtw { overflow-x:auto; margin-top:9px; }
+  .rtab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .rtab th { text-align:left; font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+             color:var(--ink-4); padding:0 12px 6px 0; font-weight:700; white-space:nowrap; }
+  .rtab td { padding:6px 12px 6px 0; border-top:1px solid var(--border); white-space:nowrap; }
+  .rtab td:first-child { white-space:normal; }
+  .rsn { display:flex; align-items:center; gap:9px; font-size:13px; margin-top:8px; color:var(--ink-2); }
+  .rsn .dot { width:6px; height:6px; border-radius:50%; flex:none; }
+  .rsn .dot.bad { background:var(--red); } .rsn .dot.warn { background:var(--amber); }
+  .rsn .dot.ok { background:var(--green); }
+  .ropp { display:flex; justify-content:space-between; align-items:center; gap:12px;
+          margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+  .ropp:first-of-type { border-top:0; padding-top:2px; }
+  .ropp b { font-size:13px; font-weight:600; display:block; }
+  .ropp span { font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-4); }
+  .ropp .worth { font-size:14px; font-weight:700; color:var(--green); text-transform:none; letter-spacing:0; }
+
+  /* The one control that changes the shop. */
+  .pact { border:1px solid var(--brand); border-radius:var(--r-sm); background:oklch(0.53 0.21 265 / .05);
+          padding:13px 15px; margin:9px 0; }
+  .pat { font-size:13.5px; line-height:1.5; }
+  .pat.ok { color:var(--green); } .pat.bad { color:var(--red); }
+  .pab { display:flex; gap:8px; margin-top:11px; }
+  .pab button { padding:7px 15px; font-size:12.5px; }
+
+  /* Composer — a surface, not an input.
+     The reference makes this the largest object on an empty screen, with the
+     tools inside it and the send button on the far right, because it is the
+     only thing on the page a merchant is meant to touch. */
+  .composer { position:sticky; bottom:0; padding:16px 0 8px; z-index:2;
+              background:linear-gradient(to bottom, transparent, var(--bg) 30%); }
+  .cbox { display:grid; grid-template-columns:1fr auto; grid-template-areas:"say say" "tools send";
+          gap:6px 8px; border:1px solid var(--border-2); border-radius:var(--r-lg);
+          background:var(--surface); padding:16px 16px 11px; box-shadow:var(--shadow-pop);
+          transition:border-color .18s, box-shadow .18s; }
+  .cbox:focus-within { border-color:var(--blue); box-shadow:var(--shadow-glow); }
+  #say { grid-area:say; border:0; outline:0; resize:none; background:transparent; font:inherit;
+         font-size:15px; line-height:1.55; color:var(--ink); max-height:150px; }
+  #say::placeholder { color:var(--ink-4); }
+  .ctools { grid-area:tools; display:flex; align-items:center; gap:2px; }
+  .ctool { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; cursor:pointer;
+           border:0; background:transparent; font-size:15px; color:var(--ink-4); }
+  .ctool:hover { background:var(--surface-2); color:var(--ink-2); }
+  .ctool.live { color:var(--red); animation:micpulse 1.1s ease-in-out infinite; }
+  @keyframes micpulse { 50% { opacity:.35; } }
+  .csend { grid-area:send; width:34px; height:34px; border-radius:50%; border:0; cursor:pointer;
+           background:var(--ink); color:var(--surface); font-size:13px; display:grid; place-items:center;
+           transition:background .18s, transform .18s; }
+  .csend:hover:not(:disabled) { transform:translateY(-1px); }
+  .csend:disabled { background:var(--surface-3); color:var(--ink-4); cursor:default; }
+  .chint { font-size:12px; color:var(--ink-4); margin:11px 0 0; text-align:center; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; justify-content:center; }
+  /* Transparent, so the openers read as suggestions floating on the page
+     rather than as another row of cards competing with the composer. The
+     border alone carries the shape; only hover fills them in. */
+  .chips button { font-size:12.5px; color:var(--ink-2); background:transparent;
+                  border:1px solid var(--border); border-radius:999px; padding:8px 15px; cursor:pointer;
+                  transition:border-color .16s, background .16s, transform .16s; }
+  .chips button:hover { color:var(--ink); border-color:var(--border-2);
+                        background:var(--surface); transform:translateY(-1px); }
+  .cnote { font-size:11.5px; color:var(--ink-4); margin:9px 0 0; text-align:center; }
+
+  @media (max-width:720px) {
+    .assistant { min-height:calc(100vh - 170px); }
+    .welcome { padding:34px 12px 22px; }
+    .welcome h2 { font-size:26px; }
+    .msg.me { max-width:88%; }
+  }
+
   .askout { padding:14px 16px; }
   .astep { display:grid; grid-template-columns:18px 1fr; gap:10px; padding:8px 0; font-size:12.5px; }
   .astep + .astep { border-top:1px solid var(--border); }
@@ -147,12 +359,16 @@
   .qchips button { font-size:11.5px; color:var(--ink-3); background:var(--surface-2);
                    border:1px solid var(--border); border-radius:999px; padding:4px 11px; }
   .qchips button:hover { color:var(--ink); border-color:var(--border-2); }
-
-  .modes { display:inline-flex; gap:3px; padding:3px; background:var(--surface-2);
-           border:1px solid var(--border); border-radius:10px; }
-  .modes button { background:none; border:0; border-radius:7px; padding:7px 15px;
-                  font-size:13px; font-weight:550; color:var(--ink-3); }
-  .modes button.on { background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
+  /* The mode switch, from the reference: a pill with the active side filled in
+     dark. It is the only navigation on this page, so it is worth the weight. */
+  .modes { display:inline-flex; gap:3px; padding:4px; background:var(--surface);
+           border:1px solid var(--border); border-radius:999px; box-shadow:var(--shadow-md); }
+  .modes button { display:inline-flex; align-items:center; gap:7px; background:none; border:0;
+                  border-radius:999px; padding:9px 17px; font-size:13px; font-weight:550;
+                  color:var(--ink-3); letter-spacing:-.01em; transition:background .18s, color .18s; }
+  .modes button:hover { color:var(--ink-2); }
+  .modes button.on { background:var(--ink); color:var(--surface); box-shadow:var(--shadow); }
+  .modes button i { font-style:normal; font-size:13px; }
 
   .clear { display:flex; align-items:center; gap:14px; padding:22px; border:1px solid var(--green-3);
            background:var(--green-2); border-radius:var(--r); }
@@ -249,6 +465,21 @@
   .rec2 .why3 { color:var(--ink-2); line-height:1.5; }
   .rec2 .why3 b { color:var(--ink); font-weight:600; }
   .rec2 .amt2 { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  /* Sits between the fixed summary and the scrolling feed, so what is in the
+     list is stated before any of it is scrolled past. */
+  .reconhead { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+               margin-top:16px; padding-bottom:7px; border-bottom:1px solid var(--border);
+               font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+               color:var(--ink-4); }
+  .reconhead .allok { color:var(--green); }
+  .recfilter { display:inline-flex; gap:2px; padding:2px; border-radius:999px;
+               background:var(--surface-2); border:1px solid var(--border); }
+  .recfilter button { font:inherit; font-size:10px; font-weight:700; letter-spacing:.05em;
+                      text-transform:uppercase; padding:4px 10px; border:0; border-radius:999px;
+                      background:transparent; color:var(--ink-4); cursor:pointer; }
+  .recfilter button.exc { color:var(--amber); }
+  .recfilter button.on  { background:var(--surface); color:var(--ink);
+                          box-shadow:0 1px 2px oklch(0 0 0 / .07); }
   .split { display:flex; height:9px; border-radius:5px; overflow:hidden; background:var(--surface-3); margin:12px 0 6px; }
   .split i { display:block; }
   .split i.exp { background:var(--green); }
@@ -398,8 +629,8 @@
     </div>
     <span class="spacer"></span>
     <div class="modes" id="modes">
-      <button data-mode="simple">Simple</button>
-      <button data-mode="deep">Deep Insight</button>
+      <button data-mode="simple"><i>💬</i>Simple</button>
+      <button data-mode="deep"><i>📊</i>Insights</button>
     </div>
     <select id="pick"></select>
   </div>
@@ -410,32 +641,36 @@
   waiting on them, and a way to ask in their own words. Everything analytical
   lives behind Deep Insight — present, but not in the way.
 -->
-<div class="wrap" id="simplewrap">
-  <div class="col">
-    <section class="askbox" style="padding:0">
-      <div style="padding:16px 16px 0">
-        <h2>Ask your shop anything</h2>
-        <p class="hint">It looks things up before answering, and shows you every lookup it made.</p>
-      </div>
-      <div class="askrow2" style="margin-top:14px">
-        <input id="askq" placeholder="What needs my attention?" />
-        <button class="btn secondary" id="askmic" title="Speak instead of typing">🎙</button>
-        <button class="btn primary" id="askgo">Ask</button>
-      </div>
-      <div class="qchips">
-        <button data-q="What needs my attention?">What needs my attention?</button>
-        <button data-q="How much did I collect today?">How much did I collect today?</button>
-        <button data-q="How many sales have I actually delivered?">How many have I delivered?</button>
-        <button data-q="Which products can an AI buyer not buy yet?">What can't agents buy?</button>
-      </div>
-      <div class="askout" id="askout" hidden></div>
-    </section>
+<div class="simplewrap" id="simplewrap">
+  <div class="assistant" id="assistant">
 
-    <section>
-      <h2>Today</h2>
-      <p class="hint">Anything here can be settled with one tap.</p>
-      <div id="simple" style="margin-top:14px"><p class="empty">Loading…</p></div>
-    </section>
+    <!-- The empty state IS the product here: a shopkeeper who has just opened
+         this should see one thing to do, not six panels to interpret. It is
+         replaced by the transcript the moment they say anything. -->
+    <div class="welcome" id="welcome">
+      <p class="hi" id="welcomehi">Good morning</p>
+      <h2>What can I help you with today?</h2>
+      <p id="welcomesub">Your shop, in plain language.</p>
+      <div class="proactive" id="proactive" hidden></div>
+    </div>
+
+    <div class="thread" id="thread" hidden></div>
+
+    <div class="composer" id="composer">
+      <div class="cbox">
+        <textarea id="say" rows="1" placeholder="Ask me anything about your shop…"></textarea>
+        <div class="ctools">
+          <button class="ctool" id="mic" title="Speak instead of typing" aria-label="Speak instead of typing">🎙</button>
+          <label class="ctool" id="uplabel" title="Upload your UPI QR" aria-label="Upload your UPI QR">📎
+            <input type="file" id="upfile" accept="image/*" hidden />
+          </label>
+          <button class="csend" id="send" aria-label="Send">➤</button>
+        </div>
+      </div>
+      <p class="chint">Type, talk, or send a photo of your UPI QR — whichever is easiest.</p>
+      <div class="chips" id="chips"></div>
+      <p class="cnote" id="cnote" hidden></p>
+    </div>
   </div>
 </div>
 
@@ -450,6 +685,31 @@
   </nav>
 
   <div class="secpane on" id="sec-today">
+    <!-- The headline row: what the shop did, and the one thing worth saying
+         about it. Both are read from the same ledger the assistant reads, so a
+         figure here and a figure in the conversation cannot disagree. -->
+    <section class="wide">
+      <div class="chead">
+        <div class="ct">
+          <h2>Your business today</h2>
+          <p class="hint">Everything the assistant is watching for you.</p>
+        </div>
+        <button class="btn secondary sm" id="askthis">Ask the assistant about this</button>
+      </div>
+      <div class="kpis" id="kpis"><p class="empty">Loading…</p></div>
+      <div class="noticed" id="noticed" hidden></div>
+      <div class="chartwrap" id="chartwrap" hidden>
+        <div class="charthead">
+          <div><b>Sales</b><span id="chartsub">the last 14 days</span></div>
+          <div class="seg" id="chartseg">
+            <button data-p="week" class="on">This week</button>
+            <button data-p="month">This month</button>
+          </div>
+        </div>
+        <div id="chart"></div>
+      </div>
+    </section>
+
     <section id="askcard">
       <h2>Needs your attention</h2>
       <p class="hint">The system asks instead of guessing. One tap is enough.</p>
@@ -609,7 +869,7 @@
 </div>
 
 <script type="module">
-import { boot, api, rupee, esc, clock, note } from "/ui.js";
+import { boot, api, rupee, esc, clock, note, settleScrollboxes } from "/ui.js";
 const $ = (id) => document.getElementById(id);
 
 let merchantId = new URLSearchParams(location.search).get("m");
@@ -700,9 +960,40 @@ const PROV = {
   merchant_entry: ["you typed this", "merchant"],
 };
 
+/**
+ * One line of what a product has done, or an honest blank.
+ *
+ * A product with no sales says so rather than showing ₹0 — zero looks like a
+ * measurement and "not sold yet" is the fact. Average selling price is shown
+ * beside the shelf price only when the two differ, which is where negotiation
+ * becomes visible to the shopkeeper.
+ */
+function soldLine(p) {
+  if (!p || p.unitsSold === 0) return `<span class="sold none">not sold yet</span>`;
+  const bits = [`${p.unitsSold} sold`, `${rupee(p.revenue)}`];
+  if (p.listPrice && p.averageSellingPrice && Math.round(p.averageSellingPrice) !== p.listPrice) {
+    bits.push(`avg ${rupee(Math.round(p.averageSellingPrice))}`);
+  }
+  // A rate measured over a single afternoon is not a rate. Shown only once
+  // there is more than a day of sales behind it.
+  if (p.salesWindowDays >= 2 && p.salesVelocity > 0) bits.push(`${p.salesVelocity}/day`);
+  const credited = Object.entries(p.byAttribution || {})
+    .filter(([k, n]) => n > 0 && k !== "organic")
+    .map(([k, n]) => `${n} ${k.replace("_", "-")}`);
+  return `<span class="sold">${bits.join(" · ")}${credited.length ? ` <em>${credited.join(", ")}</em>` : ""}</span>`;
+}
+
 async function loadCatalog() {
   const { body } = await api("/catalog");
   const mine = body.items.filter((i) => i.merchant_id === merchantId);
+  // What each row has actually sold, read from the transaction ledger rather
+  // than kept alongside the product — so a row cannot claim sales the orders
+  // do not show.
+  let sold = new Map();
+  try {
+    const { body: a } = await api(`/merchants/${merchantId}/products/analytics`);
+    sold = new Map(a.products.map((p) => [p.productId, p]));
+  } catch { /* the catalog is still worth showing without the numbers */ }
   $("edithead").hidden = mine.length === 0;
   const noPhoto = mine.filter((i) => i.photo_is_placeholder || i.photo_is_illustrative).length;
   const hint = $("items").closest("section")?.querySelector(".hint:nth-of-type(2)");
@@ -727,6 +1018,7 @@ async function loadCatalog() {
       <span class="who2">
         <input value="${esc(i.name)}" data-f="name" />
         <span class="prov ${PROV[i.source?.type]?.[1] ?? "rules"}">${PROV[i.source?.type]?.[0] ?? "extracted"}</span>
+        ${soldLine(sold.get(i.item_id))}
       </span>
       <input class="pf" type="number" value="${i.price.value || ""}" placeholder="price" data-f="price" />
       <input class="sf" type="number" value="${i.stock.confidence > 0 ? i.stock.quantity : ""}" placeholder="stock" data-f="stock" />
@@ -851,13 +1143,15 @@ async function loadOpportunities() {
       <h3>${esc(o.headline)}</h3>
       <ul class="evid">${o.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
       <div class="advice">${esc(o.recommendation)}</div>
-      ${o.change ? `<div class="delta">
-        <span class="hint">Price floor</span>
-        <span class="from">${rupee(o.change.from)}</span><span>→</span><span class="to">${rupee(o.change.to)}</span>
-      </div>
-      <div class="row" style="margin-top:13px">
-        <button class="btn go" data-approve="${o.id}">Approve</button>
-        <button class="btn secondary" data-ignore="${o.id}">Not now</button>
+      ${o.change ? `<div class="actbar">
+        <div class="delta">
+          <span class="hint">Price floor</span>
+          <span class="from">${rupee(o.change.from)}</span><span>→</span><span class="to">${rupee(o.change.to)}</span>
+        </div>
+        <div class="row">
+          <button class="btn go" data-approve="${o.id}">Approve</button>
+          <button class="btn secondary" data-ignore="${o.id}">Not now</button>
+        </div>
       </div>` : ""}
     </div>`).join("");
 
@@ -877,169 +1171,491 @@ async function loadOpportunities() {
   }
 }
 
-// ── simple view ─────────────────────────────────────────────────────────────
+// ── Insights: the headline row ──────────────────────────────────────────────
 //
-// One question answered: does anything need this shopkeeper right now? Nothing
-// on this screen requires knowing what a mandate, a confidence score or a
-// readiness metric is — those live behind the toggle, for when someone wants
-// to know why rather than what.
-const ACTION_WORD = { allow: "Fine", monitor: "Noted", verify: "Check first", hold: "Hold", block: "Do not settle" };
+// Every figure here comes from the same two endpoints the assistant calls, so
+// a number on this screen and the same number in the conversation are one
+// reading rather than two. That is the whole reason there is no separate
+// dashboard query: two sources for one figure eventually disagree, and the one
+// that is wrong is whichever the merchant happens to be looking at.
 
-async function loadSimple() {
-  const { body } = await api(`/merchants/${merchantId}/alerts`);
+let chartPeriod = "week";
 
-  markAttention(body.needs_attention ?? 0);
+const arrow = (n) => (n > 0 ? "↗" : n < 0 ? "↘" : "→");
+const dirOf = (n) => (n > 0 ? "up" : n < 0 ? "dn" : "flat");
 
-  const today = `<div class="today">
-      <div><div class="k">Collected today</div><div class="v">${rupee(body.today.collected)}</div></div>
-      <div><div class="k">Payments</div><div class="v">${body.today.payments}</div></div>
-      <div><div class="k">Needs you</div><div class="v">${body.needs_attention}</div></div>
-    </div>`;
-
-  if (body.alerts.length === 0) {
-    $("simple").innerHTML = `
-      <div class="clear"><div class="tick">✓</div>
-        <div><h3>You're all clear</h3><p>Nothing needs your attention.</p></div></div>
-      <div style="margin-top:16px">${today}</div>`;
+async function loadInsights() {
+  let trend, customers;
+  try {
+    [{ body: trend }, { body: customers }] = await Promise.all([
+      api(`/merchants/${merchantId}/trend?period=${chartPeriod}`),
+      api(`/merchants/${merchantId}/customers`),
+    ]);
+  } catch {
+    $("kpis").innerHTML = `<p class="empty">Could not load today's figures.</p>`;
     return;
   }
 
-  const cards = body.alerts.map((a) => {
-    if (a.kind === "confirm_product") {
-      return `<div class="alert attention"><span class="bar"></span>
-        <div>
-          <div class="at">${esc(a.title)}</div>
-          <div class="ad">${esc(a.detail)}</div>
-        </div>
-        <div class="acts">
-          ${(a.options ?? []).map((o) => `<button class="btn go" data-cl="${a.clarification_id}" data-v="${o}">${rupee(o)}</button>`).join("")}
-          ${a.clarification_id ? "" : `<a class="btn secondary" href="#" data-deep="1">Open catalog</a>`}
-        </div></div>`;
-    }
-    if (a.kind === "handover") {
-      return `<div class="alert normal"><span class="bar"></span>
-        <div><div class="at">${esc(a.title)}</div><div class="ad">${esc(a.detail)}</div></div>
-        <div class="acts"><button class="btn go" data-hand2="${a.transaction_id}">Confirm handover</button></div></div>`;
-    }
-    // A payment wanting a decision — the recommendation, and what it rests on.
-    return `<div class="alert ${a.urgency}"><span class="bar"></span>
-      <div>
-        <div class="at">${esc(a.title)} <span class="rec ${a.recommended}">${esc(ACTION_WORD[a.recommended] ?? a.recommended)}</span></div>
-        <div class="ad">${esc(a.detail)}</div>
-        <div class="an">${esc(a.next_step ?? "")}</div>
-        <div class="why">${(a.signals ?? []).filter((s) => s.severity !== "info")
-          .map((s) => `<b>${esc(s.label)}</b> — ${esc(s.evidence)}`).join("<br>") || "No unusual signals."}</div>
-      </div>
-      <div class="acts">
-        <button class="btn secondary" data-hand2="${a.transaction_id}">Hand over anyway</button>
-      </div></div>`;
-  }).join("");
+  const n = trend.now, b = trend.before;
+  const pc = (a, x) => (x === 0 ? null : Math.round(((a - x) / x) * 100));
+  const cells = [
+    ["Sales", rupee(n.revenue), trend.change_pct, `vs ${b.label === "the period before" ? "the week before" : b.label}`],
+    ["Orders", String(n.orders), pc(n.orders, b.orders), "vs the week before"],
+    ["Buyers", String(n.customers), pc(n.customers, b.customers), "different people"],
+    ["Average order", rupee(n.averageOrderValue), pc(n.averageOrderValue, b.averageOrderValue), "per order"],
+    ["Came back", `${Math.round(n.repeatShare * 100)}%`, pc(n.repeatCustomers, b.repeatCustomers), "bought more than once"],
+  ];
 
-  $("simple").innerHTML = `
-    <section style="padding:0;border:0;background:none;box-shadow:none">
-      <h2 style="font-size:16px">${body.needs_attention} thing${body.needs_attention === 1 ? "" : "s"} need${body.needs_attention === 1 ? "s" : ""} your attention</h2>
-      <p class="hint" style="margin-bottom:16px">What happened, why it matters, and what to do.</p>
-      ${cards}
-      <div style="margin-top:18px">${today}</div>
-    </section>`;
+  $("kpis").innerHTML = cells.map(([k, v, d, note]) => `
+    <div class="kpi2">
+      <div class="k">${esc(k)}</div>
+      <div class="v">${esc(v)}</div>
+      <div class="d ${d === null ? "flat" : dirOf(d)}">${d === null ? "—" : `${arrow(d)} ${Math.abs(d)}%`}
+        <span style="color:var(--ink-4);font-weight:400">${esc(note)}</span></div>
+    </div>`).join("");
 
-  for (const b of document.querySelectorAll("[data-cl]")) {
-    b.onclick = async () => {
-      b.disabled = true;
-      await api(`/clarifications/${b.dataset.cl}/reply`, { method: "POST", body: JSON.stringify({ reply: Number(b.dataset.v) }) });
-      refresh();
-    };
+  /**
+   * The one thing worth saying, or nothing at all.
+   *
+   * Taken from the largest measured contributor rather than composed here — if
+   * nothing moved enough to register, the panel stays hidden. A dashboard that
+   * always has an insight is a dashboard whose insights nobody believes.
+   */
+  const top = (trend.contributors ?? [])[0];
+  const lapsed = (customers.lapsed ?? []).length;
+  if (!top && lapsed === 0) {
+    $("noticed").hidden = true;
+  } else {
+    $("noticed").hidden = false;
+    /**
+     * Say only what the comparison actually supports.
+     *
+     * The server reports `unknown` when the previous period took nothing at
+     * all, because there is no percentage to compute against zero. This branch
+     * used to fall through to "Takings are level" — so a shop that went from
+     * ₹0 to ₹5,000 would have been told its takings were unchanged. Every other
+     * figure in this panel is measured; one sentence quietly asserting a
+     * comparison that was never made would undo that.
+     */
+    const WORD = { down: "Takings are down", up: "Takings are up", flat: "Takings are level" };
+    const headline = !top
+      ? `${lapsed} buyer${lapsed === 1 ? "" : "s"} who used to come regularly have stopped.`
+      : trend.direction === "unknown" || trend.change_pct === null
+        ? `${rupee(trend.now.revenue)} over ${esc(trend.period)} — there is nothing in the period before it to compare against.`
+        : `${WORD[trend.direction]} ${Math.abs(trend.change_pct)}% over ${esc(trend.period)}.`;
+    const detail = top
+      ? `The biggest change is ${esc(top.what)} — ${esc(top.detail)}.`
+      : "They bought more than once before, so they are worth asking about.";
+    $("noticed").innerHTML = `
+      <div class="lab">✦ I noticed something</div>
+      <h3>${headline}</h3>
+      <p>${detail}${top && lapsed > 0 ? ` ${lapsed} buyer${lapsed === 1 ? " has" : "s have"} also stopped coming.` : ""}</p>
+      <div class="row">
+        <button class="btn go sm" id="noticedwhy">Ask why</button>
+        ${lapsed > 0 ? `<button class="btn secondary sm" id="noticedwho">See who stopped</button>` : ""}
+      </div>`;
+    $("noticedwhy").onclick = () => askInSimple("Why did my sales change this week?");
+    const who = $("noticedwho");
+    if (who) who.onclick = () => askInSimple("Which buyers stopped coming?");
   }
-  for (const b of document.querySelectorAll("[data-hand2]")) {
-    b.onclick = async () => {
-      b.disabled = true;
-      await api(`/transactions/${b.dataset.hand2}/confirm-fulfillment`, {
-        method: "POST", body: JSON.stringify({ evidence_note: "Handed over in person at the shop" }),
-      });
-      refresh();
-    };
-  }
-  for (const b of document.querySelectorAll("[data-deep]")) b.onclick = (e) => { e.preventDefault(); setMode("deep"); };
+
+  drawChart(trend);
 }
 
-// ── ask ─────────────────────────────────────────────────────────────────────
+/**
+ * A sparkline of the days behind the headline.
+ *
+ * Inline SVG rather than a charting library: it is one series over fourteen
+ * points, and the page has no build step to hang a dependency on. The bars
+ * carry a title so the figure behind any day is one hover away — a chart whose
+ * numbers cannot be read is decoration.
+ */
+function drawChart(trend) {
+  api(`/merchants/${merchantId}/analytics`).then(({ body }) => {
+    const days = (body.revenueByDay ?? []).slice(0, chartPeriod === "month" ? 30 : 14).reverse();
+    if (days.length < 2) { $("chartwrap").hidden = true; return; }
+    $("chartwrap").hidden = false;
+    $("chartsub").textContent = `the last ${days.length} days`;
+
+    const peak = Math.max(...days.map((d) => d.revenue), 1);
+    const w = 100 / days.length;
+    $("chart").innerHTML = `
+      <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:150px;overflow:visible">
+        ${days.map((d, i) => {
+          const h = Math.max(0.6, (d.revenue / peak) * 30);
+          return `<rect x="${(i * w + w * 0.16).toFixed(2)}" y="${(32 - h).toFixed(2)}"
+            width="${(w * 0.68).toFixed(2)}" height="${h.toFixed(2)}" rx="0.5" fill="var(--blue)" opacity="0.85">
+            <title>${esc(d.day)} — ${rupee(d.revenue)} from ${d.orders} order(s)</title></rect>`;
+        }).join("")}
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-4);margin-top:8px">
+        <span>${esc(days[0].day)}</span><span>${rupee(peak)} peak</span><span>${esc(days[days.length - 1].day)}</span>
+      </div>`;
+  }).catch(() => { $("chartwrap").hidden = true; });
+}
+
+/** Hand a question to the assistant, and switch to where it answers. */
+function askInSimple(question) {
+  setMode("simple");
+  askAgent(question);
+}
+
+for (const b of document.querySelectorAll("#chartseg button")) {
+  b.onclick = () => {
+    for (const o of document.querySelectorAll("#chartseg button")) o.classList.toggle("on", o === b);
+    chartPeriod = b.dataset.p;
+    loadInsights();
+  };
+}
+$("askthis").onclick = () => askInSimple("How did I do this week, and what changed?");
+
+// ── Simple Mode: the assistant is the screen ────────────────────────────────
 //
-// The activity trail is not decoration: each row is a tool that actually ran,
-// and the answer is only ever phrased from what those returned. An assistant
-// that produced the same paragraph without looking would be indistinguishable
-// on screen, which is exactly why the lookups are shown.
-async function askAgent(question) {
-  $("askq").value = question;
-  $("askgo").disabled = true;
-  $("askout").hidden = false;
-  $("askout").innerHTML = `<div class="astep"><span class="ic">🔎</span><div class="sm">Looking it up…</div></div>`;
+// Not a dashboard with a chat box bolted on. A shopkeeper opening this sees one
+// thing to do — say what they want — and the panels they would have had to
+// interpret arrive as answers to questions they actually asked.
+//
+// Everything below draws on what the server sends back. No figure is computed
+// here, no sentence is composed here, and no button does anything the backend
+// has not agreed to: a press sends an action id, and the answer decides what
+// the merchant is told. That is the difference between an assistant that
+// operated the shop and one that animated a plausible story about it.
+
+const conversationId = `conv_${Date.now().toString(36)}`;
+let busy = false;
+let spokenAsk = false;   // asked by voice → answer aloud
+
+function greetingWord() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
+
+/**
+ * The welcome state gives way to the transcript the first time they speak.
+ *
+ * `.empty` is what centres the greeting and the composer together. Once there
+ * is a conversation the composer belongs at the bottom and the thread takes the
+ * room above it, so the class comes off and the layout stops being centred —
+ * which is the correct behaviour for both states and was wrong for one of them.
+ */
+function openThread() {
+  if (!$("thread").hidden) return;
+  $("welcome").hidden = true;
+  document.querySelector(".chint")?.setAttribute("hidden", "");
+  $("chips").hidden = true;
+  $("assistant").classList.remove("empty");
+  $("thread").hidden = false;
+}
+
+function bubble(who, html) {
+  openThread();
+  $("thread").insertAdjacentHTML("beforeend", `<div class="msg ${who}">${html}</div>`);
+  $("thread").scrollTop = $("thread").scrollHeight;
+}
+
+/**
+ * The lookups, ticked off as they land.
+ *
+ * Each line is a lookup that really ran. A spinner that is not tied to actual
+ * work is decoration, and this panel's whole claim is that the assistant went
+ * and looked — so it shows what it looked at.
+ */
+function activityBlock(rows) {
+  if (!rows?.length) return "";
+  return `<div class="acts">${rows.map((a) => `
+    <div class="act ${a.ok ? "" : "no"}"><span class="tick">${a.ok ? "✓" : "✕"}</span>
+      <span>${esc(a.label)}</span>${a.domain ? `<em>${esc(a.domain)}</em>` : ""}</div>`).join("")}</div>`;
+}
+
+const cardHTML = {
+  stat: (c) => `<div class="rcard">
+    <div class="rct">${esc(c.title)}</div>
+    <div class="rcv">${esc(c.value)}</div>
+    ${c.sub ? `<div class="rcs">${esc(c.sub)}</div>` : ""}
+    ${c.delta ? `<div class="rcd ${String(c.delta).startsWith("↓") ? "dn" : "up"}">${esc(c.delta)}</div>` : ""}
+    ${(c.rows ?? []).map((r) => `<div class="rcr"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join("")}
+  </div>`,
+
+  table: (c) => `<div class="rcard">
+    <div class="rct">${esc(c.title)}</div>
+    <div class="rtw"><table class="rtab">
+      <thead><tr>${c.columns.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+      <tbody>${c.rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table></div>
+    ${c.footer ? `<div class="rcs">${esc(c.footer)}</div>` : ""}
+  </div>`,
+
+  reasons: (c) => `<div class="rcard">
+    <div class="rct">${esc(c.title)}</div>
+    ${c.rows.map((r) => `<div class="rsn ${esc(r.tone)}"><span class="dot ${esc(r.tone)}"></span>${esc(r.label)}</div>`).join("")}
+  </div>`,
+
+  opportunities: (c) => `<div class="rcard">
+    <div class="rct">${esc(c.title)}</div>
+    ${c.rows.map((r) => `<div class="ropp">
+      <div><b>${esc(r.headline)}</b><span>${esc(r.kind)}</span></div>
+      ${r.worth ? `<span class="worth">${esc(r.worth)}</span>` : ""}
+    </div>`).join("")}
+  </div>`,
+};
+
+/**
+ * Something that will change the shop, waiting on a press.
+ *
+ * Nothing here is optimistic. The row does not say "done" until the server has
+ * said so, and when the server refuses it says that instead — an assistant
+ * whose confirmations are sometimes fiction is worse than one that cannot act
+ * at all.
+ */
+function actionBlock(action) {
+  const id = `a_${action.action_id}`;
+  return `<div class="pact" id="${id}">
+    <div class="pat">${esc(action.summary)}</div>
+    <div class="pab">
+      <button class="btn go" data-do="${esc(action.action_id)}">${action.confirm ? "Yes, do it" : "Confirm"}</button>
+      <button class="btn secondary" data-undo="${esc(action.action_id)}">No</button>
+    </div>
+  </div>`;
+}
+
+function wireActions() {
+  for (const b of $("thread").querySelectorAll("[data-do]")) {
+    b.onclick = async () => {
+      const box = b.closest(".pact");
+      box.innerHTML = `<div class="pat">Working…</div>`;
+      try {
+        const { status, body } = await api(
+          `/merchants/${merchantId}/actions/${b.dataset.do}/confirm`, { method: "POST", body: "{}" });
+        box.innerHTML = status >= 400 || !body.ok
+          ? `<div class="pat bad">✕ ${esc(body.message ?? body.error ?? "That did not go through.")}</div>`
+          : `<div class="pat ok">✓ ${esc(body.message)}</div>`;
+        if (body.ok) refresh();
+      } catch (err) {
+        box.innerHTML = `<div class="pat bad">✕ Could not reach the server — ${esc(err?.message ?? err)}</div>`;
+      }
+    };
+  }
+  for (const b of $("thread").querySelectorAll("[data-undo]")) {
+    b.onclick = async () => {
+      const box = b.closest(".pact");
+      await api(`/merchants/${merchantId}/actions/${b.dataset.undo}/cancel`, { method: "POST", body: "{}" }).catch(() => {});
+      box.innerHTML = `<div class="pat">Left it as it was.</div>`;
+    };
+  }
+}
+
+async function askAgent(message) {
+  if (busy || !message) return;
+  busy = true;
+  $("send").disabled = true;
+  $("say").value = "";
+  $("chips").hidden = true;
+  bubble("me", esc(message));
+
+  const holder = `w_${Date.now()}`;
+  bubble("it", `<div id="${holder}" class="waiting">Let me check.</div>`);
 
   let body;
   try {
-    ({ body } = await api(`/merchants/${merchantId}/ask`, { method: "POST", body: JSON.stringify({ question }) }));
+    ({ body } = await api(`/merchants/${merchantId}/agent`, {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: conversationId, message }),
+    }));
   } catch (err) {
-    $("askout").innerHTML = note("bad", `Could not reach the server — ${esc(err?.message ?? String(err))}`);
-    $("askgo").disabled = false;
+    document.getElementById(holder).outerHTML =
+      `<div class="bad">I could not reach the shop's records — ${esc(err?.message ?? err)}</div>`;
+    busy = false; $("send").disabled = false;
     return;
   }
 
-  const steps = (body.steps ?? []).map((s) => `
-    <div class="astep"><span class="ic">${s.error ? "⚠" : "🔎"}</span>
-      <div><div class="tn">${esc(s.tool)}</div><div class="sm">${esc(s.error ?? s.summary)}</div></div>
-    </div>`).join("");
+  const cards = (body.cards ?? []).map((c) => (cardHTML[c.kind] ?? (() => ""))(c)).join("");
+  const acts = (body.actions ?? []).map(actionBlock).join("");
+  document.getElementById(holder).outerHTML =
+    activityBlock(body.activity) +
+    `<div class="said">${esc(body.answer)}</div>` +
+    cards + acts +
+    (body.note ? `<div class="rcs">${esc(body.note)}</div>` : "");
 
-  const proposals = (body.proposals ?? []).map((p, i) => `
-    <div class="aprop"><span class="pl">${esc(p.label)}</span>
-      <button class="btn go" data-prop="${i}">Approve</button></div>`).join("");
-
-  $("askout").innerHTML = steps +
-    `<div class="aans">${esc(body.answer ?? "")}</div>` + proposals +
-    `<div class="asrc">${body.answered_by === "model" ? "Answered from the lookups above" : "Answered without the model"}${body.note ? ` — ${esc(body.note)}` : ""} · ${body.elapsed_ms}ms</div>`;
-
-  for (const b of document.querySelectorAll("[data-prop]")) {
-    b.onclick = async () => {
-      const p = body.proposals[Number(b.dataset.prop)];
-      b.disabled = true;
-      const { status, body: r } = await api(p.endpoint, { method: p.method, body: JSON.stringify(p.body) });
-      b.closest(".aprop").innerHTML = status < 300
-        ? `<span class="pl">✓ Done — ${esc(p.label)}</span>`
-        : `<span class="pl">Could not apply: ${esc(r.error ?? status)}</span>`;
-      if (status < 300) refresh();
-    };
-  }
-  $("askgo").disabled = false;
-  if (speak && body.answer) say(body.answer);
+  wireActions();
+  $("thread").scrollTop = $("thread").scrollHeight;
+  if (spokenAsk) speakOut(body.answer);
+  busy = false;
+  $("send").disabled = false;
 }
 
-$("askgo").onclick = () => { const q = $("askq").value.trim(); if (q) askAgent(q); };
-$("askq").addEventListener("keydown", (e) => { if (e.key === "Enter") $("askgo").click(); });
-for (const b of document.querySelectorAll(".qchips button")) b.onclick = () => askAgent(b.dataset.q);
+/** Openers drawn from what is true for this shop right now. */
+async function loadSimple() {
+  $("welcomehi").textContent = `${greetingWord()} 👋`;
+  if (!$("thread").hidden) return;   // mid-conversation: leave the screen alone
+  $("assistant").classList.add("empty");
+  try {
+    const { body } = await api(`/merchants/${merchantId}/agent/openers`);
+    $("chips").innerHTML = (body.openers ?? []).map((q) => `<button>${esc(q)}</button>`).join("");
+    for (const b of $("chips").querySelectorAll("button")) b.onclick = () => askAgent(b.textContent);
+    // Openers belong to the empty state. `refresh()` runs after every action,
+    // and without this a completed handover put the starter questions back
+    // underneath a conversation already three turns deep.
+    $("chips").hidden = !$("thread").hidden;
+  } catch { $("chips").hidden = true; }
 
-// Voice, using what the browser already has. No infrastructure for a demo.
-let speak = false;
+  // One observation, unasked, when there is genuinely one to make. Silence is
+  // the right output when the shop is simply fine.
+  try {
+    const { body: a } = await api(`/merchants/${merchantId}/alerts`);
+    if ((a.needs_attention ?? 0) > 0) {
+      $("proactive").hidden = false;
+      $("proactive").innerHTML =
+        `<b>One thing worth knowing.</b> ${a.needs_attention} thing${a.needs_attention === 1 ? "" : "s"} ` +
+        `need${a.needs_attention === 1 ? "s" : ""} you — ask me "what needs my attention?" and I will go through them.`;
+    } else { $("proactive").hidden = true; }
+  } catch { $("proactive").hidden = true; }
+}
+
+$("send").onclick = () => askAgent($("say").value.trim());
+$("say").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askAgent($("say").value.trim()); }
+});
+// Grows with what is typed rather than scrolling a one-line box.
+$("say").addEventListener("input", () => {
+  $("say").style.height = "auto";
+  $("say").style.height = `${Math.min(140, $("say").scrollHeight)}px`;
+});
+
+/* ── voice, using what the browser already has ─────────────────────────────
+   No speech service to run, nothing to configure, and it degrades to typing
+   where the browser has none. Voice and text go through the same call, so a
+   spoken question and a typed one cannot diverge. */
 const Recog = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-$("askmic").onclick = () => {
-  if (!Recog) { $("askq").placeholder = "This browser has no speech recognition — type instead."; return; }
+$("mic").onclick = () => {
+  if (!Recog) {
+    $("cnote").hidden = false;
+    $("cnote").textContent = "This browser cannot listen — type instead and everything still works.";
+    return;
+  }
   const rec = new Recog();
   rec.lang = "en-IN";
   rec.interimResults = false;
-  $("askmic").textContent = "●";
-  rec.onresult = (e) => {
-    const said = e.results[0][0].transcript;
-    speak = true;               // asked by voice, answered by voice
-    askAgent(said);
-  };
-  rec.onend = () => { $("askmic").textContent = "🎙"; };
-  rec.onerror = () => { $("askmic").textContent = "🎙"; };
+  $("mic").classList.add("live");
+  $("mic").textContent = "●";
+  rec.onresult = (e) => { spokenAsk = true; askAgent(e.results[0][0].transcript); };
+  rec.onend = () => { $("mic").classList.remove("live"); $("mic").textContent = "🎙"; };
+  rec.onerror = () => { $("mic").classList.remove("live"); $("mic").textContent = "🎙"; };
   rec.start();
 };
 
-function say(text) {
+function speakOut(text) {
+  spokenAsk = false;
   if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(text.slice(0, 400));
+  const u = new SpeechSynthesisUtterance(String(text).slice(0, 400));
   u.lang = "en-IN";
   window.speechSynthesis.speak(u);
-  speak = false;
+}
+
+/* ── the QR they already have on the counter ────────────────────────────────
+   Decoded here, in the browser, because it already has a JPEG decoder and a
+   canvas full of pixels — the image never needs to leave the shop's phone for
+   this. The server checks the string that comes out, since a decoded QR is
+   still only what somebody pointed a camera at. */
+/**
+ * One way in: the paperclip in the composer.
+ *
+ * There used to be a second door — a QR drop-card under the composer on the
+ * empty screen — and it was removed because it repeated an affordance the
+ * composer already offers. `handleUpload` stays shared rather than inlined:
+ * whatever adds a second entry point later gets the same clearing, decoding
+ * and error handling instead of a near-copy that drifts.
+ */
+$("upfile").onchange = () => handleUpload($("upfile").files?.[0], $("upfile"));
+
+async function handleUpload(file, input) {
+  if (!file) return;
+  if (input) input.value = "";
+  bubble("me", `📎 ${esc(file.name)}`);
+  const holder = `q_${Date.now()}`;
+  bubble("it", `<div id="${holder}" class="waiting">Reading that…</div>`);
+
+  let decoded = "";
+  try {
+    decoded = await decodeQR(file);
+  } catch (err) {
+    document.getElementById(holder).outerHTML =
+      `<div class="said">I could not open that image — ${esc(err?.message ?? err)}</div>`;
+    return;
+  }
+  if (!decoded) {
+    document.getElementById(holder).outerHTML =
+      `<div class="said">I could not find a QR code in that picture. A straight-on photo of the whole sticker usually works.</div>`;
+    return;
+  }
+
+  try {
+    const { status, body } = await api(`/merchants/${merchantId}/upi-qr`, {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: conversationId, decoded }),
+    });
+    if (status >= 400 || !body.ok) {
+      document.getElementById(holder).outerHTML = `<div class="said">${esc(body.problem ?? "I could not read that code.")}</div>`;
+      return;
+    }
+    document.getElementById(holder).outerHTML =
+      `<div class="said">${esc(body.message)}</div>` +
+      cardHTML.stat({
+        title: "Payment details", value: body.details.upi_id,
+        sub: body.details.merchant_name ?? "", rows: [],
+      }) +
+      (body.warning ? `<div class="rcs">${esc(body.warning)}</div>` : "") +
+      actionBlock(body.action);
+    wireActions();
+  } catch (err) {
+    document.getElementById(holder).outerHTML = `<div class="said">Could not reach the server — ${esc(err?.message ?? err)}</div>`;
+  }
+}
+
+/**
+ * Pixels in, QR text out.
+ *
+ * Downscaled first: a modern phone photo is far larger than jsQR needs, and
+ * scanning twelve megapixels takes long enough to look broken. Tried at full
+ * width too, because a small QR in a large photo can survive downscaling
+ * badly.
+ */
+/**
+ * Load jsQR once, on the first upload.
+ *
+ * A classic script rather than a dynamic import: the package ships UMD, which
+ * has no ES exports to import — in a browser its wrapper falls through to
+ * assigning `window.jsQR`. Loaded lazily because most merchants never upload a
+ * QR, and there is no reason for everyone else to fetch a scanner.
+ */
+let qrLoading = null;
+function loadQRLib() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = "/vendor/jsQR.js";
+    el.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("the QR reader did not load")));
+    el.onerror = () => reject(new Error("could not load the QR reader"));
+    document.head.append(el);
+  });
+  return qrLoading;
+}
+
+async function decodeQR(file) {
+  const [bitmap, jsQR] = await Promise.all([createImageBitmap(file), loadQRLib()]);
+
+  for (const width of [Math.min(1000, bitmap.width), bitmap.width]) {
+    const scale = width / bitmap.width;
+    const c = document.createElement("canvas");
+    c.width = Math.round(bitmap.width * scale);
+    c.height = Math.round(bitmap.height * scale);
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+    const px = ctx.getImageData(0, 0, c.width, c.height);
+    const found = jsQR(px.data, px.width, px.height, { inversionAttempts: "attemptBoth" });
+    if (found?.data) return found.data;
+    if (scale === 1) break;
+  }
+  return "";
 }
 
 // ── adding a product ────────────────────────────────────────────────────────
@@ -1093,22 +1709,6 @@ $("addsave").onclick = async () => {
   refresh();
 };
 
-/**
- * A scroll box that has nothing to scroll should not look like one.
- *
- * The bottom fade means "there is more below". On a panel whose four rows
- * already fit it means nothing, and a fade under the last row reads as a row
- * cut in half. Measured after every render rather than guessed from a count,
- * because how much fits depends on the window.
- */
-function settleScrollboxes() {
-  for (const el of document.querySelectorAll(".scrollbox")) {
-    el.classList.remove("fits");
-    if (el.scrollHeight <= el.clientHeight + 1) el.classList.add("fits");
-  }
-}
-addEventListener("resize", settleScrollboxes);
-
 // ── which screen ────────────────────────────────────────────────────────────
 //
 // Remembered per shop, so a merchant who lives on Orders is not returned to
@@ -1133,7 +1733,10 @@ function markAttention(n) {
 
 // ── mode ────────────────────────────────────────────────────────────────────
 function setMode(mode) {
-  $("simplewrap").style.display = mode === "simple" ? "grid" : "none";
+  // block, not grid: this is one centred column. It used to carry .wrap — the
+  // dashboard's two-column grid — which put the whole assistant in the left
+  // column and left it visibly off-centre with an empty half beside it.
+  $("simplewrap").style.display = mode === "simple" ? "block" : "none";
   // grid, not block: #deepwrap is the sidebar-plus-pane layout, and an inline
   // "block" here would silently flatten it back into one column.
   $("deepwrap").style.display = mode === "deep" ? "grid" : "none";
@@ -1150,8 +1753,32 @@ const GROWTH_ROWS = [
   ["products_an_agent_can_buy", "Ready to buy", (n) => n],
   ["negotiable_products", "Open to negotiation", (n) => n],
   ["buyers_reached", "AI buyers reached", (n) => n],
-  ["verified_value", "Verified value", (n) => rupee(n)],
+  ["sales", "Sales paid for", (n) => n],
+  ["revenue", "Revenue taken", (n) => rupee(n)],
+  // Deliberately below revenue and separately labelled. These two used to sit
+  // beside a sale count with nothing to say which was which, and the smaller
+  // one read as the shop's whole takings.
+  ["verified_value", "Of that, confirmed handed over", (n) => rupee(n)],
 ];
+
+/**
+ * What the shop's own suggestions brought in.
+ *
+ * Only shown when there is something to show. A row of zeros beside a working
+ * cross-sell panel would say the panel does not work, when it means nobody has
+ * taken one up yet — and a growth screen is exactly where that misreading
+ * costs the most.
+ */
+function attributedRow(attr) {
+  if (!attr) return "";
+  const earned = Object.entries(attr).filter(([k, v]) => k !== "organic" && v.revenue > 0);
+  if (earned.length === 0) return "";
+  const total = earned.reduce((s, [, v]) => s + v.revenue, 0);
+  return `<p class="hint" style="margin-top:8px">
+    <b>${rupee(total)}</b> of that came from what the shop suggested —
+    ${earned.map(([k, v]) => `${rupee(v.revenue)} ${esc(k.replace("_", "-"))} (${v.units} item${v.units === 1 ? "" : "s"})`).join(", ")}.
+    Credited when the buyer agreed, not worked out afterwards.</p>`;
+}
 
 async function loadGrowth() {
   const { body: g } = await api(`/merchants/${merchantId}/growth`);
@@ -1171,7 +1798,8 @@ async function loadGrowth() {
           <span class="gv">${fmt(a)}</span></div>
       </div>
     </div>`;
-  }).join("") + `<p class="hint" style="margin-top:4px">${esc(g.before.detail)} → ${esc(g.after.detail)}</p>`;
+  }).join("") + `<p class="hint" style="margin-top:4px">${esc(g.before.detail)} → ${esc(g.after.detail)}</p>`
+    + attributedRow(g.attributed_revenue);
 
   const top = Math.max(...g.funnel.map((f) => f.count), 1);
   $("funnel").innerHTML = g.funnel.map((f, i) => {
@@ -1459,6 +2087,16 @@ async function loadRecon() {
     return;
   }
   const pct = Math.round(body.explained_share * 100);
+  /**
+   * The rows that are not simply "matched".
+   *
+   * Counted here so the header can say it before the list is scrolled. A
+   * settlement feed is mostly uneventful — with 158 credits behind a fixed
+   * frame, the four that need attention are exactly the ones a merchant would
+   * never find by scrolling, and the summary above must not imply they are all
+   * fine.
+   */
+  const exceptions = body.rows.filter((r) => r.kind !== "matched").length;
   $("recon").innerHTML = `
     <div class="growth" style="grid-template-columns:1fr 1fr 1fr; display:grid; gap:12px">
       <div><div class="k">Money in</div><div class="v">${rupee(body.banked)}</div></div>
@@ -1468,13 +2106,44 @@ async function loadRecon() {
     <div class="split"><i class="exp" style="width:${pct}%"></i></div>
     <div class="keys"><span class="a">${pct}% explained now</span><span class="b">0% before — a QR code cannot say what it sold</span></div>
     <p class="hint" style="margin:12px 0 0">${esc(body.statement_source)}.</p>
-    <div style="margin-top:8px">${body.rows.map((r) => `
+    <div class="reconhead">
+      <span>${body.rows.length} credit${body.rows.length === 1 ? "" : "s"} in the feed</span>
+      ${exceptions > 0
+        ? `<span class="recfilter"><button data-only="0" class="on">All ${body.rows.length}</button><button data-only="1" class="exc">${exceptions} need${exceptions === 1 ? "s" : ""} a look</button></span>`
+        : `<span class="allok">all accounted for</span>`}
+    </div>
+    <div class="scrollbox tall" id="reconrows" style="margin-top:2px"></div>`;
+
+  /**
+   * Draw the feed, optionally down to just the rows that are not routine.
+   *
+   * A settlement feed is mostly uneventful — 145 of these 150 credits matched a
+   * sale cleanly. The five that did not are the entire reason a shopkeeper
+   * opens this panel, and inside a fixed frame they are the five they would
+   * never reach by scrolling. The filter keeps the feed in its own order rather
+   * than reshuffling exceptions to the top: a statement whose rows move around
+   * stops being a statement.
+   */
+  const drawRows = (onlyExceptions) => {
+    const rows = onlyExceptions ? body.rows.filter((r) => r.kind !== "matched") : body.rows;
+    $("reconrows").innerHTML = rows.map((r) => `
       <div class="rec2">
         <span class="kind ${r.kind}">${RECON_LABEL[r.kind] ?? r.kind}</span>
         <span class="why3">${r.item_name ? `<b>${esc(r.item_name)}</b> — ` : ""}${esc(r.because)}${
           r.delivered === false ? " Not handed over yet." : ""}</span>
         <span class="amt2">${rupee(r.amount_banked ?? r.amount_agreed ?? 0)}</span>
-      </div>`).join("")}</div>`;
+      </div>`).join("");
+    $("reconrows").scrollTop = 0;
+    settleScrollboxes();
+  };
+
+  for (const b of $("recon").querySelectorAll("[data-only]")) {
+    b.onclick = () => {
+      for (const o of $("recon").querySelectorAll("[data-only]")) o.classList.toggle("on", o === b);
+      drawRows(b.dataset.only === "1");
+    };
+  }
+  drawRows(false);
 }
 
 // ── performance ─────────────────────────────────────────────────────────────
@@ -1504,7 +2173,7 @@ async function loadTrust() {
 }
 
 const refresh = () =>
-  Promise.all([loadSimple(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps(), loadRevenueAgent()])
+  Promise.all([loadSimple(), loadInsights(), loadAsks(), loadCatalog(), loadScore(), loadHistory(), loadOpportunities(), loadTrust(), loadRecovery(), loadPerf(), loadOrders(), loadGrowth(), loadRecon(), loadCurves(), loadCaps(), loadRevenueAgent()])
     .then((r) => { settleScrollboxes(); return r; });
 
 /**

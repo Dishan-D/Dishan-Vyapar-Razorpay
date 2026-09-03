@@ -76,10 +76,8 @@
   .sec.split .inner2 { display:grid; grid-template-columns:minmax(260px,1fr) minmax(0,1.25fr);
                        gap:44px; align-items:center; }
   .sec.split .sech { max-width:28ch; }
-  .sec.split .chain, .sec.split .pay2 { margin:0; max-width:none; }
   @media (max-width:900px) {
     .sec.split .inner2 { grid-template-columns:1fr; gap:26px; }
-    .sec.split .chain, .sec.split .pay2 { margin:0 auto; max-width:520px; }
   }
   .sech h2 .dim { color:var(--ink-3); }
   @media (max-width:720px){ .sec { padding:56px 0; } }
@@ -100,33 +98,26 @@
   .bignum .n .was { color:var(--ink-3); }
   .bignum .n .ar { color:var(--blue); margin:0 18px; }
 
-  /* 04 — the decision chain */
-  .chain { max-width:560px; margin:32px auto 0; }
-  .chain .link { display:flex; justify-content:space-between; align-items:center; gap:14px;
-                 background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
-                 padding:11px 16px; box-shadow:var(--shadow); }
-  .chain .link .l { font-family:var(--display); font-size:15px; font-weight:600; letter-spacing:-.02em; }
-  .chain .link .l.mono2 { font-family:var(--mono); font-size:14px; }
-  .chain .link .n2 { font-family:var(--mono); font-size:10.5px; color:var(--ink-3); text-align:right; }
-  .chain .down { display:flex; flex-direction:column; align-items:center; padding:3px 0; }
-  .chain .down .flow-line { width:1px; height:14px; }
-  .chain .down span { font-size:11px; color:var(--blue); }
+  /* 04 — decision, then money */
+  /* Five steps across, wrapping to two rows on a narrow screen and to a
+     single column on a phone. Each step keeps a readable measure rather than
+     being squeezed — the failure mode of every horizontal flow. */
+  .flow { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px;
+          list-style:none; margin:26px 0 0; padding:0; counter-reset:f; }
+  .flow li { position:relative; background:var(--surface); border:1px solid var(--border);
+             border-radius:var(--r-sm); padding:14px 15px; min-width:0; }
+  .flow li.hit { border-color:var(--blue-3); background:var(--blue-2); }
+  .flow li.done { border-color:var(--green-3); background:var(--green-2); }
+  .flow .fw { display:block; font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+              color:var(--ink-4); font-weight:650; }
+  .flow .fv { display:block; font-family:var(--mono); font-size:13px; color:var(--ink);
+              margin:6px 0 8px; overflow-wrap:anywhere; }
+  .flow li.hit .fv { font-family:var(--display); font-size:21px; font-weight:600; color:var(--blue-ink); }
+  .flow li.done .fv { color:var(--green); }
+  .flow p { margin:0; font-size:11.5px; line-height:1.5; color:var(--ink-3); }
+  @media (max-width:560px){ .flow { grid-template-columns:1fr; } }
 
-  /* 05 — money movement */
-  .pay2 { max-width:520px; margin:32px auto 0; border:1px solid var(--border); border-radius:var(--r);
-          background:var(--surface); overflow:hidden; box-shadow:var(--shadow-md); }
-  .pay2 .prow { padding:14px 20px; }
-  .pay2 .prow.done { background:var(--green-2); }
-  .pay2 .prow .top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-  .pay2 .prow .who { font-family:var(--display); font-size:12.5px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; }
-  .pay2 .prow .val { font-family:var(--mono); font-size:12px; color:var(--ink-2); word-break:break-all; }
-  .pay2 .prow .val.big2 { font-size:17px; color:var(--ink); }
-  .pay2 .prow p { margin:5px 0 0; font-size:11.5px; color:var(--ink-3); }
-  .pay2 .sep2 { display:flex; flex-direction:column; align-items:center; }
-  .pay2 .sep2 .flow-line { width:1px; height:12px; }
-  .pay2 .sep2 span { font-size:11px; color:var(--blue); }
-
-  /* 06 — closing */
+  /* 05 — closing */
   .final { text-align:center; padding:72px var(--gutter); position:relative; overflow:hidden;
            border-top:1px solid var(--border); }
   .final h2 { font-size:clamp(30px,5vw,54px); font-weight:600; letter-spacing:-.04em; line-height:1.05;
@@ -146,8 +137,8 @@
   .stat-cell .v { font-size:28px; font-weight:650; letter-spacing:-.032em; margin-top:6px; font-variant-numeric:tabular-nums; line-height:1.1; }
   .stat-cell .n { font-size:11.5px; color:var(--ink-3); margin-top:2px; }
 
-  .loop { max-width:var(--page); margin:0 auto; padding:44px var(--gutter); }
-  .loopgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:10px; }
+  .loop { max-width:var(--page); margin:0 auto; padding:36px var(--gutter); }
+  .loopgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(232px,1fr)); gap:12px; }
   .lcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:13px 14px; }
   .lcard .step { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
   .lcard h3 { font-size:13px; font-weight:600; margin:6px 0 4px; letter-spacing:-.015em; }
@@ -425,57 +416,49 @@
 </div>
 
 <section class="sec split">
-  <div class="inner2">
-    <div class="sech">
-      <span class="eyebrow">04 / trust</span>
-      <h2>The model understands. <span class="text-gradient">Rules decide.</span></h2>
-    </div>
-
-    <div class="chain">
-      <div class="link"><span class="l">Shopper</span><span class="n2">intent + budget</span></div>
-      <div class="down"><div class="flow-line"></div><span>▾</span></div>
-      <div class="link"><span class="l">Model</span><span class="n2">reads the ask, sets no limits</span></div>
-      <div class="down"><div class="flow-line"></div><span>▾</span></div>
-      <div class="link"><span class="l">Rules</span><span class="n2">ceiling · floor · stock · category</span></div>
-      <div class="down"><div class="flow-line"></div><span>▾</span></div>
-      <div class="link"><span class="l mono2">₹423</span><span class="n2">agreed, inside both limits</span></div>
-      <div class="down"><div class="flow-line"></div><span>▾</span></div>
-      <div class="link"><span class="l">Razorpay</span><span class="n2">order, checkout, capture</span></div>
-      <div class="down"><div class="flow-line"></div><span>▾</span></div>
-      <div class="link panel-glow"><span class="l">Merchant confirms</span><span class="n2">signed fulfilment</span></div>
-    </div>
-  </div>
-</section>
-
-<section class="sec split">
   <div class="dot-grid dots"></div>
   <div class="inner2">
     <div class="sech">
-      <span class="eyebrow">05 / payment</span>
-      <h2>From agent decision to <span class="text-gradient">real payment.</span></h2>
+      <span class="eyebrow">04 / decision, then money</span>
+      <h2>The model understands. <span class="text-gradient">Rules decide.</span></h2>
+      <p class="sub">
+        One request, from what the shopper asked for to money the shop can bank. The model reads
+        the ask and sets no limits; every number below it is checked in code before anything moves.
+      </p>
     </div>
 
-    <div class="pay2">
-      <div class="prow">
-        <div class="top"><span class="who">Vyapar</span><span class="val big2">₹423</span></div>
-        <p>Agreed by the rules, inside the buyer's ceiling and above the shop's floor.</p>
-      </div>
-      <div class="sep2"><div class="flow-line"></div><span>▾</span></div>
-      <div class="prow">
-        <div class="top"><span class="who">Razorpay</span><span class="val">order_TWrGatHK1MTst4</span></div>
-        <p>A real order, created against the API in test mode.</p>
-      </div>
-      <div class="sep2"><div class="flow-line"></div><span>▾</span></div>
-      <div class="prow">
-        <div class="top"><span class="who">Checkout</span><span class="val">handed to a person</span></div>
-        <p>A payment id cannot be created server-side. Someone has to pay.</p>
-      </div>
-      <div class="sep2"><div class="flow-line"></div><span>▾</span></div>
-      <div class="prow done">
-        <div class="top"><span class="who">✓ Verified</span><span class="val">signature checked</span></div>
-        <p>Checked server-side before anything is signed. Paid is still not delivered.</p>
-      </div>
-    </div>
+    <!-- One flow, left to right, replacing two stacked vertical chains.
+         They told one story — decide, then pay, then verify — as two tall
+         columns of six and four rows, which read as filler and pushed
+         everything under them off the screen. Across, they are one story and
+         one screenful. -->
+    <ol class="flow">
+      <li>
+        <span class="fw">Shopper</span>
+        <span class="fv">intent + budget</span>
+        <p>Signed before the agent starts. This is the ceiling everything else is checked against.</p>
+      </li>
+      <li>
+        <span class="fw">Rules</span>
+        <span class="fv">ceiling · floor · stock</span>
+        <p>The model may phrase a haggle. It never picks the number.</p>
+      </li>
+      <li class="hit">
+        <span class="fw">Agreed</span>
+        <span class="fv num">₹423</span>
+        <p>Inside the shopper's ceiling and above the shop's floor. Both are hard limits.</p>
+      </li>
+      <li>
+        <span class="fw">Razorpay</span>
+        <span class="fv">order_TWrGat…</span>
+        <p>A real order against the API in test mode, on the shop's own UPI ID.</p>
+      </li>
+      <li class="done">
+        <span class="fw">Merchant confirms</span>
+        <span class="fv">signed handover</span>
+        <p>A payment id cannot be made server-side, and nothing marks itself delivered.</p>
+      </li>
+    </ol>
   </div>
 </section>
 
@@ -534,16 +517,10 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
 }
 
 const LOOP = [
-  ["01", "The merchant sends what they have", "Photos, a voice note in Hinglish, a sentence. No forms, no formatting.", "Merchant"],
-  ["02", "AI reads it into a catalog", "Products, prices, stock — with a confidence score on every field.", "Model"],
-  ["03", "Anything doubtful is asked, not guessed", "A price that looks wrong goes back to the shopkeeper as a question.", "Merchant"],
-  ["04", "Buyer-agents discover the shop", "One request, every shop searched, each haggled with separately.", "Agent"],
-  ["05", "Negotiation inside both parties' bounds", "The shop's floor and the shopper's ceiling are both hard limits.", "Deterministic"],
-  ["06", "Authority checked before money moves", "Price, product, attributes, delivery — all verified against what was signed.", "Deterministic"],
-  ["07", "Razorpay takes the payment", "Test-mode orders and Checkout, landing on the same UPI ID as always.", "Razorpay"],
-  ["08", "The shopkeeper confirms handover", "Nothing marks itself delivered. Only their signature closes it.", "Merchant"],
-  ["09", "The whole sale becomes evidence", "Four signed mandates, hash-linked, re-verified on every read.", "Cryptography"],
-  ["10", "Lost demand comes back as advice", "What buyers wanted and walked away from — with a change they can approve.", "Merchant"],
+  ["01", "The merchant sends what they have", "Photos, a voice note in Hinglish, a sentence. No forms.", "Merchant"],
+  ["02", "It becomes a catalog — and anything doubtful is asked", "Every field carries a confidence score. A price that looks wrong goes back as a question.", "Model + Merchant"],
+  ["03", "Buyer-agents find it, and haggle inside both bounds", "The shop's floor and the shopper's ceiling are hard limits, enforced in code.", "Deterministic"],
+  ["04", "Payment, handover, and a signed record of both", "Razorpay takes the money on the same UPI ID. Only the shopkeeper closes the sale.", "Razorpay + Merchant"],
 ];
 
 $("loop").innerHTML = LOOP.map(([n, h, p, who]) => `

@@ -220,7 +220,7 @@ export async function extractLive(raw: RawProduct, governor?: RateGovernor): Pro
  * These are hand-authored fixtures, NOT recorded model output — nobody has run
  * the live extractor against these samples yet. They exist so the pipeline below
  * Stage 1 is runnable and demonstrable without an API key, and so the demo video
- * does not hinge on a live call behaving on camera (PRESENTATION_GUIDE.md §2).
+ * does not hinge on a live call behaving on camera.
  * Anything reported from this path is labelled as fixture-sourced.
  */
 export async function extractFromFixture(

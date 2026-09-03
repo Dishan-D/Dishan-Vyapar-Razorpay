@@ -130,11 +130,29 @@ export function compareMerchants(
 
   const reasoning: string[] = [];
   if (offers.length === 0 && withheld.length > 0) {
-    // A shop that has the thing but has not priced it is a different answer
-    // from a shop that does not have it, and the shopper deserves the real one.
-    reasoning.push(
-      `${withheld.length} shop(s) stock something matching "${want}", but it is not on sale yet — the shopkeeper has not confirmed a price.`,
-    );
+    /**
+     * Say which kind of "no" this is, using the reason already recorded.
+     *
+     * A shop that has the thing but has not priced it is a different answer
+     * from one that has sold out, which is different again from one that does
+     * not stock it — and the shopper deserves the real one. This used to
+     * announce the unpriced case for every withholding, so a sold-out cake was
+     * reported as "the shopkeeper has not confirmed a price" while the entry
+     * directly beside it in the same response read "out of stock". Two
+     * contradictory answers to one question, from one object.
+     */
+    const sold = withheld.filter((w) => /stock/i.test(w.reason)).length;
+    const unpriced = withheld.length - sold;
+    if (sold > 0) {
+      reasoning.push(
+        `${sold} shop(s) stock ${want} but ${sold === 1 ? "it is" : "they are"} out of stock right now.`,
+      );
+    }
+    if (unpriced > 0) {
+      reasoning.push(
+        `${unpriced} shop(s) stock something matching "${want}", but it is not on sale yet — the shopkeeper has not confirmed a price.`,
+      );
+    }
   } else if (offers.length === 0) {
     reasoning.push(`Nobody stocks anything matching "${want}".`);
   } else {

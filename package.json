@@ -20,7 +20,11 @@
     "milestone-k": "tsx --env-file-if-exists=.env scripts/milestone-k.ts",
     "milestone-i": "tsx --env-file-if-exists=.env scripts/milestone-i.ts",
     "audit": "tsx --env-file-if-exists=.env scripts/audit.ts",
-    "check:frontend": "node scripts/check-frontend.mjs"
+    "check:frontend": "node scripts/check-frontend.mjs",
+    "check:analytics": "tsx --env-file-if-exists=.env scripts/check-attribution.ts",
+    "demo:reset": "node scripts/demo-reset.mjs",
+    "seed:history": "tsx --env-file-if-exists=.env scripts/seed-history.ts",
+    "check:demo": "tsx --env-file-if-exists=.env scripts/check-demo-data.ts"
   },
   "engines": {
     "node": ">=20"
@@ -30,6 +34,7 @@
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "jose": "^6.2.10",
+    "jsqr": "^1.4.0",
     "multer": "^2.3.0",
     "openai": "^6.49.0",
     "qrcode": "^1.5.4",

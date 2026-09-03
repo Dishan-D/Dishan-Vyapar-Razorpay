@@ -26,13 +26,18 @@ Two commands prove the system works without opening a browser:
 
 ```bash
 npm run demo           # the seven-stage walkthrough, narrated
-npx tsx scripts/audit.ts   # 29 claims re-derived from the running system
+npx tsx scripts/audit.ts   # 60 claims re-derived from the running system
 ```
 
 The audit is the one to run in front of a judge. It re-checks every headline
 claim against live state and fuzzes the negotiation invariants over 500
 randomised policies, so "the agent never pays above its ceiling" is a checked
-statement rather than a confident one.
+statement rather than a confident one. Its last stage buys something and then
+proves the shelf, the product's statistics and the shop's revenue all moved
+together.
+
+With the server already running, `npm run check:analytics` does the same six
+checks in more detail against whatever state the database is in.
 
 ---
 
@@ -117,11 +122,11 @@ curl -s -XPOST localhost:3000/revenue-agent/basket -H 'content-type: application
 
 ### 3 · Upsell that respects the ceiling
 
-**Same cake, ceiling ₹800.** The shop has a ₹620 Red Velvet *and* a ₹760
-Celebration Cake — both fit. It recommends the **₹620**:
+**Same cake, ceiling ₹800.** The shop has a ₹599 Red Velvet *and* a ₹760
+Celebration Cake — both fit. It recommends the **₹599**:
 
 ```
-Red Velvet Cake 1kg   ₹620
+Red Velvet Cake 1kg   ₹599
 Serves 8-10 where Chocolate Cake 500g serves 4-6.
 ```
 
@@ -133,15 +138,15 @@ that cannot name its benefit is not offered at all.
 **Merchant → Deep Insight → Grow.**
 
 ```
-[100/100]  DEAD STOCK   +₹1,992    Blueberry Muffin — 24 in stock, moving slowly
-  ✓ Stock is sitting idle          24 on the shelf, flagged slow-moving
-  ✓ Buyers have asked for it       recent searches matched breakfast, tea snack
+[100/100]  DEAD STOCK   +₹2,175    Butter Puff — 25 in stock, moving slowly
+  ✓ Stock is sitting idle          25 on the shelf, against a shop median of 12
+  ✓ Buyers have asked for it       19 recent searches matched breakfast, pastry, tea snack
   ✓ Merchant allows promotions     enabled, up to 8%
-  ✓ Offer stays above your floor   ₹83 against your floor of ₹72
+  ✓ Offer stays above your floor   ₹87 against your floor of ₹85
 ```
 
-The offer lands at ₹83, not the ₹75 you might expect, because Sri Balaji's
-policy caps discounts at 8%. The agent obeyed the merchant. Every factor is a
+The offer lands at ₹87, not the ₹80 you might expect, because Sri Balaji's
+policy caps discounts at 8% — ₹95 less 8% is ₹87.40. The agent obeyed the merchant. Every factor is a
 sentence that can be checked, including any that fail.
 
 ### 5 · No deal — nothing moves
@@ -156,6 +161,57 @@ money     ₹0
 
 No Razorpay order is created at all. This is the safety demo: the failure is
 clean, and there is nothing to refund because nothing happened.
+
+---
+
+## Every number traces to an order
+
+There is no revenue counter anywhere in this system, and no sales figure stored
+next to a product. A statistic is recomputed from the signed chains each time it
+is asked for, so a dashboard cannot quietly drift away from the transactions it
+claims to summarise.
+
+```bash
+curl -s localhost:3000/merchants/mer_hazel/analytics          # revenue, orders, AOV, by day, by category
+curl -s localhost:3000/merchants/mer_hazel/products/analytics # every product's own units and revenue
+curl -s localhost:3000/products/itm_hazel_001/analytics       # one product, and the orders behind it
+curl -s localhost:3000/analytics/transactions                 # the rows themselves, unaggregated
+curl -s localhost:3000/analytics/integrity                    # does any of it contradict itself?
+```
+
+The last two are the point. Any figure on any screen can be checked against the
+rows it came from without opening the database, and `integrity` re-checks that
+line totals sum to their transaction, that no payment id appears on two sales,
+and that no sale is credited to a shop that does not stock the product. `ok:
+true` with an empty `faults` list is the healthy answer.
+
+**Stock comes off the shelf when money is captured** — once, on the deduped
+capture path, so a webhook and a browser callback for the same payment do not
+take two units. Sell a product down to zero and the shop stops offering it:
+
+```
+sale 1 → paid, stock now 2
+sale 2 → paid, stock now 1
+sale 3 → paid, stock now 0
+sale 4 → no_match          ← the shelf is empty, and it says so
+```
+
+Inventory never goes negative. If two sales ever race for the last unit that is
+a real oversell for a human to sort out, and the log says so rather than the
+catalog recording "−1 on the shelf".
+
+**Why a sale happened is recorded when it happens.** A cross-sold packet of
+candles and one the shopper asked for by name produce identical orders, so the
+storefront states which it was at the moment the buyer agrees and the ledger
+stores it verbatim. Working it out afterwards from product names would be a
+guess dressed up as a statistic. The growth panel shows the split, and it shows
+nothing at all when nothing has been taken up — a row of zeros beside a working
+cross-sell panel reads as a broken panel.
+
+One thing worth knowing when reading these screens: a cart mandate carries a
+single item, so **one order is one product**. A basket bought in conversation
+becomes several orders, each separately signed. "Orders containing this product"
+therefore counts chains, and for this schema it equals units sold.
 
 ---
 
@@ -184,11 +240,17 @@ read-only calls against the account:
 ✅ Payment Links   GET /payment_links → 200
 ✅ Invoices        GET /invoices → 200
 ✅ Settlements     GET /settlements → 200
-⛔ QR Codes        GET /payments/qr_codes → 400, not enabled on this account
-⛔ Smart Collect   GET /virtual_accounts → 400, not enabled
+✅ QR Codes        GET /payments/qr_codes → 200
+⛔ Smart Collect   GET /virtual_accounts → 400, not enabled on this account
 ```
 
-The two unavailable products show the call and the status code that proved it.
+The unavailable product shows the call and the status code that proved it, and
+says whose problem it is: Razorpay refuses a product an account has not
+activated with `400 "The requested URL was not found on the server"`, while a
+genuinely wrong path is refused by the gateway with `404 "no Route matched"`.
+Smart Collect is an opt-in product — the integration is correct and the account
+has not enabled it. It is not on the purchase path; Orders and Checkout are.
+
 Mocking them would have been easy and would have been the one thing this project
 cannot afford.
 
@@ -234,12 +296,22 @@ is spent.
 | The mandate chain, signatures, hashes | **real** ES256, re-verified at read time |
 | Negotiation, ceilings, floors, stock, categories | **real**, deterministic, no model |
 | Revenue Agent scoring | **real** arithmetic over stored state |
+| Merchant and product statistics, stock counts | **real**, recomputed from signed chains on every read |
 | The `sim_` rail | simulated, and labelled `Gateway · Simulated` |
 | The UPI settlement feed | generated, and every screen says so |
 | Seeded buyer demand | generated — but outcomes are played by the live engine |
 
 Nothing is presented as measured when it is modelled. Anything estimated carries
 the word **estimate** on screen.
+
+---
+
+## Presenting it
+
+`docs/DEMO_10MIN.md` is the run sheet — the prompts in order, what each one
+proves, and what to do when the language model is rate-limited mid-demo. Run
+`npm run demo:reset` before each rehearsal: stock is real now, so buying the
+same cake six times genuinely sells it out.
 
 ---
 

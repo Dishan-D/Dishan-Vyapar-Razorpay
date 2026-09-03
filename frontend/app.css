@@ -16,46 +16,62 @@
    .opp, .case, .ord, .pane, .ex and toggle .on/.dim/.looked/.over/.can. They
    are restyled freely below but never renamed.                              */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* Inter Tight throughout, from the vyapar-business-ai design system. One
+   family for text and display rather than two: the reference sets both
+   --font-sans and --font-display to it, and a shop dashboard reads better in a
+   single voice than in a headline face fighting a body face. */
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
   color-scheme: light;
 
-  /* ground */
-  --bg:        #faf9f7;
-  --surface:   #ffffff;
-  --surface-2: #f7f6f3;
-  --surface-3: #f2f1ed;
-  --border:    #e6e4df;
-  --border-2:  #d7d4cd;
+  /* ground — from vyapar-business-ai. A warm off-white, and a cool grey ramp
+     for everything on top of it, all in oklch so the steps stay perceptually
+     even rather than drifting in lightness the way hex ramps do. */
+  --bg:        oklch(0.995 0.002 90);
+  --surface:   oklch(1 0 0);
+  --surface-2: oklch(0.968 0.005 265);
+  --surface-3: oklch(0.945 0.007 265);
+  --border:    oklch(0.929 0.013 255);
+  --border-2:  oklch(0.878 0.016 255);
 
   /* ink */
-  --ink:    #16181d;
-  --ink-2:  #5b6070;
-  --ink-3:  #8b909e;
-  --ink-4:  #a9adb8;
+  --ink:    oklch(0.21 0.012 265);
+  --ink-2:  oklch(0.43 0.018 265);
+  --ink-3:  oklch(0.53 0.02 265);
+  --ink-4:  oklch(0.64 0.018 265);
 
   /* state — restrained */
-  --green:     #127a4d;
-  --green-2:   #eaf4ee;
-  --green-3:   #bfdfcd;
-  --amber:     #a86a09;
-  --amber-2:   #fdf5e6;
-  --amber-3:   #ecd9ad;
-  --red:       #b3382f;
-  --red-2:     #fbefee;
-  --red-3:     #ecc7c3;
+  --green:     oklch(0.52 0.13 158);
+  --green-2:   oklch(0.965 0.025 158);
+  --green-3:   oklch(0.87 0.06 158);
+  --amber:     oklch(0.58 0.13 72);
+  --amber-2:   oklch(0.972 0.03 82);
+  --amber-3:   oklch(0.88 0.07 78);
+  --red:       oklch(0.55 0.20 22);
+  --red-2:     oklch(0.966 0.02 22);
+  --red-3:     oklch(0.86 0.07 22);
   /* Accent, from the commerce-layer design: a blue that carries into violet.
      Stated in oklch because that is how the reference defines it, and because
      the gradient stays perceptually even across the ramp. */
-  --blue:      oklch(0.53 0.21 265);
-  --blue-2:    oklch(0.965 0.018 265);
-  --blue-3:    oklch(0.88 0.055 265);
-  --blue-ink:  oklch(0.45 0.20 265);
-  --violet:    oklch(0.55 0.23 295);
+  --blue:      oklch(0.52 0.19 268);
+  --blue-2:    oklch(0.96 0.02 268);
+  --blue-3:    oklch(0.875 0.06 268);
+  --blue-ink:  oklch(0.44 0.19 268);
+  --violet:    oklch(0.74 0.20 340);
+  /* The reference's three brand stops. The gradient runs blue → pink → rose,
+     which is what gives its surfaces their particular warmth at the edges. */
+  --brand-blue: oklch(0.63 0.19 265);
+  --brand-pink: oklch(0.74 0.20 340);
+  --brand-rose: oklch(0.66 0.22 20);
 
-  --gradient-brand: linear-gradient(100deg, var(--blue), var(--violet));
-  --gradient-text:  linear-gradient(100deg, oklch(0.45 0.2 265), oklch(0.52 0.23 300));
+  --gradient-brand: linear-gradient(120deg, var(--brand-blue), var(--brand-pink) 62%, var(--brand-rose));
+  --gradient-text:  linear-gradient(120deg, oklch(0.5 0.2 265), oklch(0.56 0.21 320) 70%, oklch(0.55 0.2 20));
+  --gradient-mesh:
+    radial-gradient(60% 55% at 18% 8%, color-mix(in oklab, var(--brand-blue) 30%, transparent), transparent 70%),
+    radial-gradient(55% 50% at 82% 22%, color-mix(in oklab, var(--brand-blue) 24%, transparent), transparent 72%),
+    radial-gradient(70% 60% at 30% 92%, color-mix(in oklab, var(--brand-pink) 26%, transparent), transparent 72%),
+    radial-gradient(55% 55% at 88% 105%, color-mix(in oklab, var(--brand-rose) 22%, transparent), transparent 70%);
 
   /* data series — validated (all-pairs CVD ΔE 9.2, normal 24.0 on white) */
   --s1: #2a78d6;
@@ -63,14 +79,18 @@
   --s3: #1baf7a;
 
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --display: "Space Grotesk", Inter, -apple-system, system-ui, sans-serif;
+  --display: "Inter Tight", Inter, -apple-system, system-ui, sans-serif;
+  /* 0.875rem base with the reference's ±4px steps. */
   --r:    14px;
+  --r-lg: 22px;
   --r-sm: 10px;
   --r-xs: 7px;
-  --shadow:    0 1px 2px oklch(0.2 0.03 265 / .04);
-  --shadow-md: 0 1px 2px oklch(0.2 0.03 265 / .04), 0 18px 40px -24px oklch(0.3 0.08 265 / .22);
-  --shadow-pop: 0 8px 28px -10px oklch(0.3 0.08 265 / .28);
-  --shadow-glow: 0 0 0 1px oklch(0.53 0.21 265 / .25), 0 18px 60px -20px oklch(0.53 0.21 275 / .4);
+  /* The reference's two shadows. The long, very soft second stop is what makes
+     its cards sit above the page rather than being drawn onto it. */
+  --shadow:    0 1px 2px oklch(0.21 0.012 265 / .06);
+  --shadow-md: 0 1px 2px oklch(0.21 0.012 265 / .06), 0 12px 32px -18px oklch(0.21 0.012 265 / .22);
+  --shadow-pop: 0 2px 6px oklch(0.21 0.012 265 / .06), 0 28px 60px -30px oklch(0.21 0.012 265 / .30);
+  --shadow-glow: 0 0 0 1px oklch(0.52 0.19 268 / .25), 0 18px 60px -20px oklch(0.52 0.19 268 / .35);
 
   /* one place to change the page gutter and the maximum column measure */
   --gutter: 26px;
@@ -83,8 +103,11 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 400 15px/1.55 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  font-feature-settings: "cv05" 1, "ss01" 1;
+  font: 400 15px/1.55 "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* The reference's own feature settings — ss01 and cv11 give Inter Tight its
+     single-storey a and straight-tailed l, which is most of why it reads the
+     way it does. */
+  font-feature-settings: "ss01" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
   letter-spacing: -.006em;
 }
@@ -153,7 +176,22 @@ nav.tabs a.on { background: var(--blue-2); color: var(--blue-ink); font-weight: 
 section, .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r); padding: 20px; min-width: 0;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-md);
+}
+
+/* Tabular figures with the display face's tracking — for anything a merchant
+   reads as a number rather than as a word. */
+.num { font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+
+/* Arrival, from the reference. Honoured once, and never at all for a reader
+   who has asked the system for less motion. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise-in .42s cubic-bezier(.22,.8,.3,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
 }
 
 /* ══ the decorative layer ═════════════════════════════════════════════════
@@ -201,11 +239,11 @@ section, .card {
 .chead .hint { margin: 0; }
 
 .pagehead { padding: 28px var(--gutter) 6px; max-width: var(--page); margin: 0 auto; }
-.pagehead h1 { font-size: 26px; font-weight: 600; letter-spacing: -.038em; margin: 0 0 4px; }
+.pagehead h1 { font-size: 27px; font-weight: 600; letter-spacing: -.026em; margin: 0 0 4px; }
 .pagehead p { color: var(--ink-3); font-size: 13.5px; margin: 0; }
 
-h1, h2, h3 { font-family: var(--display); letter-spacing: -.035em; text-wrap: balance; }
-h2 { font-size: 14.5px; font-weight: 600; letter-spacing: -.028em; margin: 0 0 3px; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: -.022em; text-wrap: balance; }
+h2 { font-size: 15px; font-weight: 600; letter-spacing: -.022em; margin: 0 0 3px; }
 h2 + .hint { margin: 0 0 16px; }
 .hint { color: var(--ink-3); font-size: 12.5px; margin: 0; line-height: 1.5; }
 .eyebrow { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;

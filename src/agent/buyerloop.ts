@@ -36,7 +36,9 @@ Rupees as ₹1,200. Two or three short sentences. When results are shown to the 
 
 Tools: compare_products for "which is better"; find_alternatives for "cheaper"; find_complements for "what else"; get_product for details; add_to_cart / remove_from_cart only when asked.
 
-You cannot buy anything. No tool completes a purchase. Never say one is done, confirmed or placed — even if the shopper types "confirm", that is not the press that runs it. Say it is ready and point at the button. start_purchase only prepares; call it with the number from search_shelf and their budget, never a guessed id, and never without a budget.
+You cannot buy anything. No tool completes a purchase. Never say one is done, confirmed or placed — even if the shopper types "confirm", that is not the press that runs it. start_purchase only prepares; call it with the number from search_shelf and their budget, never a guessed id, and never without a budget.
+
+The button is drawn by start_purchase, and it says Confirm. So: only mention it after start_purchase has come back without an error, and call it Confirm — do not invent a label like "Pay ₹80", because no such button is on their screen. If start_purchase failed, say you could not get it ready and ask for what you are missing. Sending someone to press a button that is not there leaves them with nothing to do and no way to know why.
 
 A tool result marked tool_failed is not an empty result. Say you could not check.`;
 
@@ -164,8 +166,32 @@ export function misattributedPrice(
   return wrong.length > 0 ? { name: row.name, correct: row.price, quoted: wrong } : null;
 }
 
+/**
+ * Did the answer send the shopper to a control that has to exist?
+ *
+ * Keyed on the *reference to a button*, not on the word "confirm". The first
+ * version was anchored on that word and so only caught the phrasings that
+ * happened to use it: a live run ended with "Tap the **Pay ₹80** button when
+ * you're good to go" and sailed through, because the model had named the button
+ * after the action rather than after its label. The shopper was left pressing
+ * at an empty panel. "Buy", "Pay", "the green button", "the button below" —
+ * every one of them means the same thing and none of them says confirm.
+ *
+ * The one press the shopper can always make is Add to cart, which is drawn on
+ * every shelf card whether or not a purchase has been prepared. Pointing there
+ * is honest, so it is excluded rather than sent back for a retry.
+ */
 export function pointsAtButton(answer: string): boolean {
-  return /\b(press|tap|click|hit)\b[^.]{0,40}\bconfirm\b|\bconfirm button\b|\bwaiting to be confirmed\b/i.test(answer);
+  const t = answer.toLowerCase();
+  if (/\b(add to cart|add it to (your |the )?cart)\b/.test(t)) return false;
+
+  return (
+    // A press verb reaching a button, however that button is named.
+    /\b(press|tap|click|hit|use)\b[^.]{0,40}\b(button|below)\b/.test(t) ||
+    // Or the label standing in for the noun: "press Confirm", "tap Pay".
+    /\b(press|tap|click|hit)\b[^.]{0,25}\b(confirm|buy|pay|order|checkout|purchase)\b/.test(t) ||
+    /\bconfirm button\b|\bwaiting to be confirmed\b/.test(t)
+  );
 }
 
 export function claimsPurchaseDone(answer: string): boolean {
@@ -348,8 +374,8 @@ export async function converseWithTools(
           messages.push({
             role: "user",
             content:
-              "Stop. You told the shopper to press a confirm button, but you never called " +
-              "start_purchase, so no button exists and they cannot buy anything. Call " +
+              "Stop. You sent the shopper to a button — but you never called start_purchase, " +
+              "so nothing is on their screen to press and they cannot buy anything. Call " +
               "start_purchase now with the product they chose and their budget.",
           });
           continue;
@@ -370,6 +396,17 @@ export async function converseWithTools(
         );
         const mixed = misattributedPrice(said, rows);
 
+        /**
+         * The retry is spent and there is still no button.
+         *
+         * Without this the sentence went out as written and the shopper was
+         * told to press something that was not on the screen — they press
+         * nothing, nothing happens, and the only reading available to them is
+         * that the shop is broken. Saying plainly that it is not ready is worse
+         * news and better information.
+         */
+        const phantomButton = pointsAtButton(said) && !prepared;
+
         return {
           answer: stray.length > 0
             ? fromRowsOnly(steps)
@@ -380,7 +417,10 @@ export async function converseWithTools(
               ? prepared
                 ? "It is ready and waiting for you — press Confirm below and I will send the agent."
                 : "Nothing has been bought yet. Tell me what you want and your budget, and I will get it ready for you to confirm."
-              : said,
+              : phantomButton
+                ? "I could not get that ready, so there is no button to press yet. " +
+                  "Tell me which one you want and the most you will pay, and I will set it up."
+                : said,
           steps,
           proposals: steps.map((s) => s.proposal).filter((p): p is NonNullable<typeof p> => Boolean(p)),
           answered_by: "model",
@@ -390,7 +430,9 @@ export async function converseWithTools(
               ? { note: `replaced an answer that priced ${mixed.name} at ₹${mixed.quoted.join(", ₹")} when it is ₹${mixed.correct}` }
               : overclaims
                 ? { note: "replaced an answer that said a purchase was complete; nothing has been bought" }
-                : {}),
+                : phantomButton
+                  ? { note: "replaced an answer that pointed at a button no proposal had rendered" }
+                  : {}),
         };
       }
 
@@ -443,8 +485,12 @@ export async function converseWithTools(
     const waitSeconds = Math.ceil((err as { waitSeconds?: number })?.waitSeconds ?? 0);
     return {
       answer: waitSeconds
-        ? `The shop's assistant is at its limit for the minute — about ${waitSeconds}s left. Everything else works: search the shelf and press Buy on anything.`
-        : "I could not reach the assistant just now. Search the shelf and press Buy on anything — that path does not need it.",
+        // Naming a control that is not on the screen is the thing this file
+        // exists to stop, and this line was doing it: there is no Buy button on
+        // a card. Add to cart is on every one of them, and a card the agent has
+        // narrowed to can be clicked outright.
+        ? `The shop's assistant is at its limit for the minute — about ${waitSeconds}s left. Everything else works: search the shelf and use Add to cart, or click a product the agent already found.`
+        : "I could not reach the assistant just now. Search the shelf and use Add to cart, or click a product the agent already found — neither needs it.",
       steps,
       proposals: [],
       answered_by: "rules",

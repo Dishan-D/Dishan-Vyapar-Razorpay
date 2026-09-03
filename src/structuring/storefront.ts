@@ -79,6 +79,38 @@ ${CATEGORIES.join(", ")}`;
  * instructions, where the printed text IS the evidence rather than a hint about
  * a picture that is missing.
  */
+/**
+ * When the shopkeeper sent words and no pictures at all.
+ *
+ * The main SYSTEM prompt is built around looking: *"every distinct product you
+ * can SEE in the photos"*, *"if there are three photos of goods, there are at
+ * least three products"*, *"if you can see goods, there are products"*. Hand it
+ * zero images and every one of those instructions is about something that is
+ * not there, and it answers accordingly — a typed line naming two products
+ * came back with a perfectly accurate store summary and an **empty catalog**.
+ *
+ * `TEXT_ONLY_SYSTEM` is the wrong substitute here: it opens with "their photos
+ * could not be looked at", which is untrue and invites the model to hedge about
+ * missing evidence. This one says plainly that words are the whole input, and
+ * that they are enough.
+ */
+const WORDS_ONLY_SYSTEM = `A small Indian shopkeeper is putting their shop online for the first time. They have described their stock in their own words — typed, or spoken and transcribed. There are no photographs, and none are needed.
+
+Their words are the whole of the evidence, and they are enough. Read them and list what the shop sells.
+
+WHAT TO LIST
+- Every product they name. "Butter biscuits 40 rupees ten packets, masala chai powder 120 rupees five packets" is TWO products, and both must be listed.
+- A shopkeeper listing stock speaks in a run-on: quantities, prices and names run together without punctuation. Separate them yourself.
+- Returning an empty list when they have named products is always wrong. There are no photos to be missing — nothing is absent that should stop you.
+- One entry per product. Do not merge two products into one because they were said in the same breath.
+
+PRICES AND STOCK
+- A price they said out loud is a real price — use it, and score it high.
+- A count they said out loud is a real count. "Ten packets" is stock of 10.
+- Anything they did NOT say is null with a confidence near zero. It gets shown back to them as a question, which is exactly right. Never invent a price from what such a thing usually costs.
+
+`;
+
 const TEXT_ONLY_SYSTEM = `A small Indian shopkeeper is putting their shop online. Their photos could not be looked at this time, but the text physically printed in those photos has been read by OCR, character by character, and is given to you below along with anything they typed or said.
 
 Build the catalog from that text. It is real evidence, not a hint: a line reading "COTTON BATH TOWEL / Pack of 3 - Pink / MRP Rs. 450/-" describes a product you can list with a price, and you should.
@@ -289,7 +321,19 @@ async function extractBatch(
       groq.chat.completions
         .create({
           model: GROQ_MODEL,
-          messages: [{ role: "system", content: SYSTEM }, { role: "user", content }],
+          messages: [
+            {
+              role: "system",
+              // No pictures means the looking prompt does not apply. Categories
+              // live in the main prompt and must stay identical either way, so
+              // that section is carried across rather than restated.
+              content:
+                images.length === 0
+                  ? WORDS_ONLY_SYSTEM + SYSTEM.slice(SYSTEM.indexOf("Categories are a fixed list"))
+                  : SYSTEM,
+            },
+            { role: "user", content },
+          ],
           response_format: {
             type: "json_schema",
             json_schema: {

@@ -80,6 +80,57 @@ async function call(
 }
 
 /**
+ * Read what a failed probe actually means.
+ *
+ * Razorpay answers a product a merchant has not enabled with
+ * **400 `BAD_REQUEST_ERROR` · "The requested URL was not found on the server."**
+ * Taken at face value that sentence says we called the wrong URL, which is the
+ * one reading it cannot mean — and it is the reading anyone looking at the
+ * capability panel reaches first. Two of our six products showed it, and it
+ * made a correct integration look broken.
+ *
+ * The two cases are distinguishable, and this is how:
+ *
+ * ```
+ * GET /definitely_not_a_real_product  → 404  {"message":"no Route matched with those values"}
+ * GET /payments/qr_codes              → 400  BAD_REQUEST_ERROR · "The requested URL was not found…"
+ * ```
+ *
+ * A path that does not exist is refused by the gateway in front of the API and
+ * never reaches it — that is the 404. A path that *does* exist but belongs to a
+ * product this account has not activated gets through the gateway and is turned
+ * away by the application — that is the 400. So a 404 here is our bug and a 400
+ * here is an account setting, and the panel should not report them the same way.
+ */
+export function readProbe(
+  path: string,
+  r: { status: number; body: { error?: { description?: string; code?: string } } },
+): [CapabilityStatus, string] {
+  const said = r.body?.error?.description ?? "";
+
+  if (r.status === 200) return ["real", `GET ${path} → 200. Enabled on these test keys.`];
+
+  if (r.status === 401 || r.status === 403) {
+    return ["unknown", `GET ${path} → ${r.status}. These keys were refused; check RAZORPAY_KEY_ID and secret.`];
+  }
+
+  // The gateway never routed it — that is a wrong path, and it is ours to fix.
+  if (r.status === 404) {
+    return ["unknown", `GET ${path} → 404, no route. The path is wrong on our side, not a setting on the account.`];
+  }
+
+  if (r.status === 400 && /requested URL was not found/i.test(said)) {
+    return [
+      "unavailable",
+      `GET ${path} → 400 "${said}" — the route exists (a wrong path answers 404 "no Route matched"), ` +
+        `so this is a product not activated on the account rather than a bad call. Enable it in the Razorpay Dashboard.`,
+    ];
+  }
+
+  return ["unavailable", `GET ${path} → ${r.status}: ${said || "not enabled on this account"}`];
+}
+
+/**
  * Ask the account what it can actually do.
  *
  * Deliberately read-only. An earlier version probed by *creating* a payment
@@ -113,18 +164,8 @@ export async function probeCapabilities(
     try {
       const r = await call(keyId, keySecret, "GET", path);
       const ok = r.status === 200;
-      out.push({
-        id,
-        label,
-        role,
-        status: ok ? "real" : "unavailable",
-        probe_status: r.status,
-        detail: ok
-          ? `GET ${path.split("?")[0]} → 200. Enabled on these test keys.`
-          : `GET ${path.split("?")[0]} → ${r.status}: ${
-              r.body?.error?.description ?? "not enabled on this account"
-            }`,
-      });
+      const [status, detail] = readProbe(path.split("?")[0]!, r);
+      out.push({ id, label, role, status: ok ? "real" : status, probe_status: r.status, detail });
     } catch (err) {
       out.push({
         id, label, role, status: "unknown",

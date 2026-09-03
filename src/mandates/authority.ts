@@ -37,6 +37,32 @@ const KEY_SYNONYMS: Record<string, string> = {
   dimensions: "size",
   shade: "color",
   type: "type",
+
+  /**
+   * The same British/American split as colour, on the key this catalog uses most.
+   *
+   * Six of these products state a `flavour`; the intent parser writes `flavor`
+   * about half the time. The gate compared the raw keys, found nothing, and
+   * refused the sale with "the shop did not state a flavor" — about a chocolate
+   * cake whose attributes say `flavour: chocolate`. A buyer was turned away from
+   * a shop that had answered the question, for a reason that was not true.
+   *
+   * Everything below is the same class of thing: two names for one fact, where
+   * the shop wrote one and the model wrote the other.
+   */
+  flavour: "flavor",
+  flavor: "flavor",
+  taste: "flavor",
+  weight: "weight",
+  grams: "weight",
+  gram: "weight",
+  scent: "scent",
+  fragrance: "scent",
+  smell: "scent",
+  serves: "serves",
+  servings: "serves",
+  serving: "serves",
+  feeds: "serves",
 };
 
 export const normaliseKey = (key: string): string => {

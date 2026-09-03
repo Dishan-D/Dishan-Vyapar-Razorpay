@@ -63,12 +63,40 @@ for (const page of pages) {
     }
   }
 
+  /**
+   * The stylesheet has to close every rule it opens.
+   *
+   * An unbalanced brace does not fail loudly — the browser swallows the rest of
+   * the block and the page renders with a handful of rules silently missing,
+   * which looks like a layout bug in whatever happened to be next. It has
+   * happened here from deleting a multi-line rule by its first line and leaving
+   * the closing brace behind.
+   */
+  for (const [, css] of src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    let depth = 0;
+    let line = 1;
+    let firstExtra = 0;
+    for (const ch of clean) {
+      if (ch === "\n") line++;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth < 0 && !firstExtra) { firstExtra = line; depth = 0; }
+    }
+    if (depth !== 0 || firstExtra) {
+      console.log(
+        `  ✗ ${page}: <style> braces do not balance` +
+          (firstExtra ? ` — first stray "}" at style line ${firstExtra}` : ` — ${depth} rule(s) left open`),
+      );
+      problems++;
+    }
+  }
+
   // Every id the module reaches for must exist in the markup.
   const html = src.slice(0, src.indexOf('<script type="module">'));
   const ids = new Set([...html.matchAll(/id="([\w-]+)"/g)].map((x) => x[1]));
   // Created by a render and used immediately after, so they are never in the
   // static markup. Each is read through a null-guard at its use site.
-  const runtime = new Set(["twinapply", "twincancel", "retry", "pay", "paynote", "clearfilter", "cbgo"]);
+  const runtime = new Set(["twinapply", "twincancel", "retry", "pay", "paynote", "clearfilter", "cbgo", "reconrows", "noticedwhy", "noticedwho"]);
   for (const [, id] of js.matchAll(/\$\("([\w-]+)"\)/g)) {
     if (!ids.has(id) && !runtime.has(id)) {
       console.log(`  ✗ ${page}: $("${id}") has no element in the markup`);
@@ -77,5 +105,47 @@ for (const page of pages) {
   }
 }
 
-console.log(problems === 0 ? `\n  ${pages.length} pages clean` : `\n  ${problems} problem(s)`);
+/**
+ * The shelf highlight, checked against sentences the assistant really produced.
+ *
+ * Pulled out of the page and run rather than read, because the failure it had
+ * was invisible in the source: reading "6 cakes under ₹800, ranging ₹450–₹750"
+ * as four product mentions is only obviously wrong once you see which cards
+ * light up.
+ */
+{
+  const src = readFileSync(new URL("../frontend/store.html", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function pricesNaming"), src.indexOf("function clearHighlights"));
+  const pricesNaming = new Function(`${fn}; return pricesNaming;`)();
+
+  const cases = [
+    ["a summary with a ceiling and a range",
+     "I found 6 cakes under ₹800, ranging for ₹450–₹750. The most affordable is the Chocolate Cake 500g at ₹450, while you get more size with Red Velvet Cake 1kg (₹599) or Chocolate Cake 1kg (₹750).",
+     [450, 599, 750]],
+    ["two products named plainly", "The 500g Chocolate Cake is ₹450 and the Truffle is ₹490.", [450, 490]],
+    ["a ceiling and nothing else", "I found 6 cakes under ₹800. Which would you like?", []],
+    ["a range and nothing else", "They run from ₹450 to ₹750.", []],
+    ["\"up to\" is a ceiling too", "Nothing up to ₹300, but the Butter Puff is ₹95.", [95]],
+  ];
+
+  for (const [name, answer, want] of cases) {
+    const got = [...pricesNaming(answer)].sort((a, b) => a - b);
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      console.log(`  ✗ store.html: highlight — ${name}: got [${got}], wanted [${want}]`);
+      problems++;
+    }
+  }
+}
+
+{
+  const css = readFileSync(new URL("../frontend/app.css", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const depth = css.split("{").length - css.split("}").length;
+  if (depth !== 0) {
+    console.log(`  ✗ app.css: braces do not balance (${depth > 0 ? `${depth} left open` : `${-depth} extra`})`);
+    problems++;
+  }
+}
+
+console.log(problems === 0 ? `\n  ${pages.length} pages clean, css balanced, highlight checks pass` : `\n  ${problems} problem(s)`);
 process.exit(problems === 0 ? 0 : 1);

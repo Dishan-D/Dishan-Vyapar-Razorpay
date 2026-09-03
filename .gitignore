@@ -9,3 +9,6 @@ data/keys.local.json
 .env.backup
 data/uploads/
 data/sample_products/generic/
+
+# Demo recording — far over GitHub's 100MB file limit
+*.mp4

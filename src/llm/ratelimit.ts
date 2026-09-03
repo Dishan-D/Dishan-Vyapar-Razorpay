@@ -45,12 +45,14 @@ export interface GovernorOptions {
 
 export interface RunOptions {
   /**
-   * Give up rather than wait longer than this.
+   * Give up rather than spend longer than this waiting, in total.
    *
-   * A batch catalog build is happy to sit out a minute. An interactive call —
-   * parsing what a shopper just typed, phrasing a haggle — is not: a demo that
-   * freezes for sixty seconds reads as broken, and both of those callers have a
-   * deterministic fallback that is instant and honest about being used.
+   * A ceiling on the whole call — every wait before every attempt added
+   * together — not on each one separately. A batch catalog build is happy to
+   * sit out a minute. An interactive call — parsing what a shopper just typed,
+   * phrasing a haggle — is not: a demo that freezes for sixty seconds reads as
+   * broken, and both of those callers have a deterministic fallback that is
+   * instant and honest about being used.
    */
   maxWaitSeconds?: number;
 }
@@ -83,8 +85,12 @@ export class RateGovernor {
     };
   }
 
-  /** Wait if the next call would not fit in what is left of this minute. */
-  private async waitIfShort(estimatedTokens: number, maxWaitSeconds?: number): Promise<void> {
+  /**
+   * Wait if the next call would not fit in what is left of this minute.
+   *
+   * `deadline` is absolute, not a per-wait allowance — see `run`.
+   */
+  private async waitIfShort(estimatedTokens: number, deadline: number | null): Promise<void> {
     const { remainingTokens, resetSeconds, observedAt } = this.state;
     if (remainingTokens === null || resetSeconds === null) return;
     if (remainingTokens >= estimatedTokens) return;
@@ -92,7 +98,9 @@ export class RateGovernor {
     const elapsed = (Date.now() - observedAt) / 1000;
     const wait = Math.max(0, resetSeconds - elapsed) + 0.5;
     if (wait <= 0) return;
-    if (maxWaitSeconds !== undefined && wait > maxWaitSeconds) throw new RateBudgetExceeded(wait);
+    if (deadline !== null && Date.now() + wait * 1000 > deadline) {
+      throw new RateBudgetExceeded(wait);
+    }
 
     this.onWait?.(wait, `${remainingTokens} tokens left, need ~${estimatedTokens}`);
     await sleep(wait * 1000);
@@ -113,8 +121,25 @@ export class RateGovernor {
   ): Promise<T> {
     const maxRetries = this.opts.maxRetries ?? 4;
 
+    /**
+     * One deadline for the whole call, not a fresh allowance per attempt.
+     *
+     * `maxWaitSeconds` used to cap each individual sleep, so a caller asking to
+     * wait at most 25 seconds could sit through five of them: a shopper's
+     * question was observed taking **218 seconds** to come back, against a
+     * setting whose own comment says a demo that freezes for sixty reads as
+     * broken. Nobody waits out a 429 storm — they reload, and then it looks
+     * like the page is broken as well as slow.
+     *
+     * Every caller that passes this has a deterministic fallback that answers
+     * instantly and says it is being used, so giving up early is strictly
+     * better than arriving late.
+     */
+    const deadline =
+      runOpts.maxWaitSeconds === undefined ? null : Date.now() + runOpts.maxWaitSeconds * 1000;
+
     for (let attempt = 0; ; attempt++) {
-      await this.waitIfShort(estimatedTokens, runOpts.maxWaitSeconds);
+      await this.waitIfShort(estimatedTokens, deadline);
       try {
         const { data, response } = await call();
         this.observe(response.headers);
@@ -125,7 +150,7 @@ export class RateGovernor {
 
         const headers = (err as { headers?: { get(n: string): string | null } }).headers;
         const retryAfter = parseDuration(headers?.get("retry-after") ?? null) ?? 20;
-        if (runOpts.maxWaitSeconds !== undefined && retryAfter > runOpts.maxWaitSeconds) {
+        if (deadline !== null && Date.now() + retryAfter * 1000 > deadline) {
           throw new RateBudgetExceeded(retryAfter);
         }
         this.onWait?.(retryAfter, "rate limited, honouring retry-after");

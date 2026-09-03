@@ -3,6 +3,12 @@
 
 **Read this whole document before writing any code.** It contains the problem framing, the research that grounds it, the full pipeline design, exact data schemas, tech stack, build sequencing, and acceptance criteria. Treat this as the spec. Ask clarifying questions before making architectural decisions not covered here — don't silently improvise on the schemas or pipeline order.
 
+> **Kept as originally written**, because the code cites its section numbers
+> throughout. One correction: the "~65–90 million merchants" figure below was
+> never sourced. The sourced number is **~13 million kirana stores, 88% of
+> Indian retail** (Invest India) — see `docs/PITCH.md` for that and every other
+> figure with its source. Use the sourced one when presenting.
+
 ---
 
 ## 1. One-paragraph pitch

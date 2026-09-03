@@ -47,9 +47,24 @@
 
   /* Agent states, painted onto the same cards a human browses. */
   .card.dim      { opacity:.34; }
-  .card.looked   { opacity:1; border-color:oklch(0.53 0.21 265 / .35); box-shadow:var(--shadow-glow); }
+  /* Emphasis is added, never taken away from the others — see
+     highlightMentioned. The ring has to carry the whole signal on its own. */
+  .card.looked   { opacity:1; border-color:oklch(0.53 0.21 265 / .55);
+                   box-shadow:var(--shadow-glow), 0 0 0 3px oklch(0.53 0.21 265 / .13); }
   .card.passed   { opacity:.46; border-color:var(--border-2); }
   .card.chosen   { opacity:1; border-color:var(--green); box-shadow:0 0 0 3px var(--green-2); }
+  /* While the agent has the shelf narrowed, a card is a way of answering it. */
+  .pickcue { color:var(--ink-3); font-weight:600; }
+  .card.pickable { cursor:pointer; }
+  .card.pickable:hover  { border-color:oklch(0.53 0.21 265 / .5); transform:translateY(-2px);
+                          box-shadow:var(--shadow-md); }
+  .card.pickable:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+  .card .pickhint { display:none; margin-top:9px; font-size:11px; font-weight:700; text-align:center;
+                    padding:7px 9px; border-radius:8px; border:1px dashed var(--border-2);
+                    color:var(--ink-3); background:var(--surface-2); }
+  .card.pickable .pickhint     { display:block; }
+  .card.pickable:hover .pickhint { border-style:solid; border-color:oklch(0.53 0.21 265 / .45);
+                                   color:var(--brand); background:oklch(0.53 0.21 265 / .07); }
   .agentnote { font-size:11px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--border);
                color:var(--ink-3); line-height:1.45; }
   .card.chosen .agentnote { color:var(--green); }
@@ -79,6 +94,11 @@
   .st .who { font-family:var(--mono); font-size:10px; color:var(--ink-4); margin-top:3px; }
 
   .empty2 { color:var(--ink-4); font-size:12.5px; }
+  .ordhead { display:flex; gap:14px; align-items:baseline; margin-top:14px; padding-bottom:8px;
+            border-bottom:1px solid var(--border); font-size:11px; font-weight:700;
+            letter-spacing:.05em; text-transform:uppercase; color:var(--ink-4); }
+  .ordhead .w { color:var(--amber); }
+  .ordhead .u { color:var(--ink-3); }
   .ord { display:flex; gap:12px; align-items:center; border:1px solid var(--border);
          border-radius:var(--r-sm); padding:11px 13px; background:var(--surface); margin-bottom:9px; }
   .ord .th { width:46px; height:46px; border-radius:8px; background:var(--surface-2); flex:none;
@@ -238,7 +258,8 @@
       <h2 style="font-size:16px">Your orders</h2>
       <p class="hint">Status changes when the shop acts, never on its own. "Delivered" appears
         the moment the shopkeeper confirms handover — you do not have to reload.</p>
-      <div id="orders" style="margin-top:14px"><p class="empty2">No orders yet.</p></div>
+      <div class="ordhead" id="ordhead" hidden></div>
+      <div id="orders" class="scrollbox tall" style="margin-top:6px"><p class="empty2">No orders yet.</p></div>
     </section>
   </div>
 
@@ -272,7 +293,7 @@
 </div>
 
 <script type="module">
-import { boot, api, rupee, esc } from "/ui.js";
+import { boot, api, rupee, esc, settleScrollboxes } from "/ui.js";
 const $ = (id) => document.getElementById(id);
 
 let config = {}, items = [], merchants = {}, cat = "all", runId = null;
@@ -328,6 +349,7 @@ function cardHTML(i) {
           : `<span class="tag held">${esc(i.held_because ? "awaiting shopkeeper" : "not buyable yet")}</span>`}
       </div>
       ${buyable ? `<button class="btn secondary" data-add="${esc(i.item_id)}" style="margin-top:9px">Add to cart</button>` : ""}
+      ${buyable ? `<div class="pickhint">Pick this one →</div>` : ""}
       <div class="agentnote" hidden></div>
     </div>
   </article>`;
@@ -348,10 +370,37 @@ function render() {
       b.disabled = !added;
     };
   }
+
+  /**
+   * While the agent has narrowed the shelf, the cards are the answer sheet.
+   *
+   * The shopper was being asked "which would you like?" beside six cards they
+   * could look at and not choose from — the only way to answer was to type the
+   * name of a thing already on the screen. Now the card is the reply: click it
+   * and the agent takes that product and carries on.
+   *
+   * Only while a filter is up. On the open shelf a whole-card click meaning
+   * "buy this" would be a trap next to a button that means "add to cart".
+   */
+  if (agentFilter) {
+    for (const el of document.querySelectorAll(".card[data-item]")) {
+      const item = items.find((i) => i.item_id === el.dataset.item);
+      if (!item || !item.transactable || item.price.value <= 0) continue;
+      el.classList.add("pickable");
+      el.tabIndex = 0;
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", `Pick ${item.name} — ${rupee(item.price.value)}`);
+      el.onclick = () => pickFromShelf(item);
+      el.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickFromShelf(item); }
+      };
+    }
+  }
   const ready = shown.filter((i) => i.transactable && i.price.value > 0).length;
   if (agentFilter) {
     $("count").innerHTML =
       `<b>Showing the ${shown.length} the agent found.</b> ` +
+      `<span class="pickcue">Click any one to pick it — the agent takes it from there.</span> ` +
       `<button class="btn ghost sm" id="clearfilter">Show the whole shelf</button>`;
     const b = $("clearfilter");
     if (b) b.onclick = clearShelfFilter;
@@ -416,7 +465,15 @@ function onStep(e) {
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
-async function run(goal, itemId) {
+/**
+ * `why` is how the sale gets credited, and only this page knows it.
+ *
+ * A cross-sold packet of candles and one the shopper searched for by name
+ * produce identical orders, so if it is not said here it can never be
+ * recovered — and the shop's growth figures would either miss the suggestions
+ * that worked or claim credit for sales that were nothing to do with them.
+ */
+async function run(goal, itemId, why = "organic") {
   $("send").disabled = true;
   runId = `run_${Date.now().toString(36)}`;
   $("rb").innerHTML = "";
@@ -433,7 +490,16 @@ async function run(goal, itemId) {
   let status, body;
   try {
     ({ status, body } = await api("/agent/run", {
-      method: "POST", body: JSON.stringify({ goal, settle, run_id: runId }),
+      method: "POST",
+      // item_id pins the run to the exact product that was proposed.
+      //
+      // It was being accepted by this function and then dropped on the floor:
+      // the server has always supported pinning, and the storefront has always
+      // known which card the shopper picked, but the two were never connected.
+      // So pressing Confirm on one cake re-searched every shop for the goal
+      // *text* and bought whatever came back first — usually the right thing,
+      // by luck, and with no way to tell the times it was not.
+      body: JSON.stringify({ goal, settle, run_id: runId, attribution: why, ...(itemId ? { item_id: itemId } : {}) }),
     }));
   } catch (err) {
     beacon(false, "failed");
@@ -535,26 +601,64 @@ function offerPayment(r) {
  * that matters: every significant word of "Chocolate Cake 500g" also appears in
  * "500g Chocolate Truffle Cake", so a token match would light both when the
  * assistant meant one. The prices in this catalog are distinct, and the
- * assistant quotes them. Where it quotes none, nothing is highlighted — an
- * empty highlight is better than a confident wrong one.
+ * assistant quotes them.
  */
-function highlightMentioned(answer) {
-  if (!agentFilter) return;
-  const said = new Set(
-    [...String(answer).matchAll(/₹\s?([\d,]+)/g)].map((m) => Number(m[1].replace(/,/g, ""))),
+
+/**
+ * The rupee figures that name a product, not the ones that bound a search.
+ *
+ * "I found 6 cakes under ₹800, ranging ₹450–₹750" contains four numbers and
+ * points at no products at all: ₹800 is the shopper's own ceiling and the other
+ * two are the ends of a span. Read literally — which is what the first version
+ * did — that sentence lit up whichever products happened to sit on the
+ * boundaries and dimmed the four in between, so a summary of six results looked
+ * like a selection of two.
+ */
+function pricesNaming(answer) {
+  const cleaned = String(answer)
+    // The shopper's limit, however it is phrased.
+    .replace(/\b(under|below|within|up to|less than|at most|budget of|max(?:imum)? of)\s*₹\s?[\d,]+/gi, " ")
+    // A span between two figures: "₹450–₹750", "₹450 to ₹750".
+    .replace(/₹\s?[\d,]+\s*(?:[–—-]|to)\s*₹?\s?[\d,]+/gi, " ");
+
+  return new Set(
+    [...cleaned.matchAll(/₹\s?([\d,]+)/g)]
+      .map((m) => Number(m[1].replace(/,/g, "")))
+      .filter((n) => Number.isFinite(n) && n > 0),
   );
+}
+
+function clearHighlights() {
+  for (const el of document.querySelectorAll(".card[data-item]")) {
+    el.classList.remove("looked", "dim");
+  }
+}
+
+function highlightMentioned(answer) {
+  // Always clear first. Every early return below used to leave the previous
+  // turn's marks on the shelf, so a highlight from three questions ago sat
+  // there looking like an answer to the current one — the shelf appeared
+  // frozen while the conversation moved on.
+  clearHighlights();
+  if (!agentFilter) return;
+
+  const said = pricesNaming(answer);
   if (said.size === 0) return;
 
   const hits = items.filter((i) => agentFilter.ids.has(i.item_id) && said.has(i.price.value));
   // If it named everything, or nothing on the shelf, there is nothing to
-  // narrow and dimming would only be noise.
+  // narrow and marking would only be noise.
   if (hits.length === 0 || hits.length === agentFilter.ids.size) return;
 
   const hitIds = new Set(hits.map((i) => i.item_id));
   for (const el of document.querySelectorAll(".card[data-item]")) {
     const on = hitIds.has(el.dataset.item);
+    // Emphasis by addition, never by subtraction. The old version dropped the
+    // rest to 34% opacity, which is the same thing this page does to a product
+    // the shopkeeper has not confirmed — so three perfectly buyable cakes read
+    // as out of stock. A ring around what was mentioned says "these two" without
+    // saying anything untrue about the other four.
     el.classList.toggle("looked", on);
-    el.classList.toggle("dim", !on);
   }
 }
 
@@ -746,6 +850,24 @@ async function loadOrders() {
   if (rows.length === 0) { $("orders").innerHTML = `<p class="empty2">No orders yet.</p>`; return; }
 
   const nowDelivered = new Set(rows.filter((o) => o.delivered).map((o) => o.transaction_id));
+
+  /**
+   * Say what is in the list before any of it is scrolled past.
+   *
+   * This list grows with every purchase and had no ceiling, so after an
+   * afternoon of demos it was 175 orders long and the page below it was
+   * unreachable. Inside a fixed frame the counts have to be stated, because the
+   * one order a shopper actually came back to check — the one still waiting on
+   * the shop — is otherwise somewhere in the scroll.
+   */
+  const waiting = rows.filter((o) => !o.delivered && o.payment_id).length;
+  const unpaid = rows.filter((o) => !o.payment_id).length;
+  $("ordhead").hidden = false;
+  $("ordhead").innerHTML =
+    `<span>${rows.length} order${rows.length === 1 ? "" : "s"}</span>` +
+    (waiting > 0 ? `<span class="w">${waiting} awaiting handover</span>` : "") +
+    (unpaid > 0 ? `<span class="u">${unpaid} not paid</span>` : "");
+
   $("orders").innerHTML = rows.map((o) => {
     const [cls, label] = PILL[o.status] ?? ["due", o.status];
     const fresh = o.delivered && lastDelivered.size > 0 && !lastDelivered.has(o.transaction_id);
@@ -773,6 +895,7 @@ async function loadOrders() {
       <div class="gwout"></div>
     </div>`;
   }).join("");
+  settleScrollboxes();
 
   /**
    * Ask the gateway, rather than re-reading our own record.
@@ -919,10 +1042,12 @@ async function offerBasket(prop) {
         // Each item is its own run: its own negotiation, order and signed
         // chain. The rules layer checks every one against the ceiling.
         if (choice === "up") {
-          await run(`${u.suggestions[0].name} under ₹${prop.max_price}`, u.suggestions[0].item_id);
+          await run(`${u.suggestions[0].name} under ₹${prop.max_price}`, u.suggestions[0].item_id, "upsell");
         } else {
-          await run(prop.goal, prop.item_id);
-          for (const s of x.suggestions) await run(`${s.name} under ₹${s.price}`, s.item_id);
+          // The anchor is what they came for; only the additions are credited
+          // to the suggestion.
+          await run(prop.goal, prop.item_id, "organic");
+          for (const s of x.suggestions) await run(`${s.name} under ₹${s.price}`, s.item_id, "cross_sell");
         }
         resolve(true);
       };
@@ -1050,30 +1175,79 @@ async function say(text) {
 
   // Nothing has been bought. A proposal is a sentence the shopper has to agree
   // to, and the agent only runs on the press.
-  for (const [i, prop] of (body.proposals ?? []).entries()) {
-    $("rb").insertAdjacentHTML("beforeend",
-      `<div class="prop2"><span>${esc(prop.label)}</span>
-        <button class="btn go" data-buy="${i}" data-live="1">Confirm</button>
-        <button class="btn secondary" data-nobuy="${i}">No</button></div>`);
-    // The latest proposal is the one "confirm" refers to.
-    pendingProposal = prop;
-  }
+  for (const prop of body.proposals ?? []) showProposal(prop);
   $("rb").scrollTop = $("rb").scrollHeight;
+}
 
-  for (const b of $("rb").querySelectorAll("[data-buy]")) {
-    b.onclick = async () => {
-      const prop = body.proposals[Number(b.dataset.buy)];
-      pendingProposal = null;
-      b.closest(".prop2").innerHTML = `<span>Confirmed.</span>`;
-      // Before running, ask whether anything genuinely goes with this. The
-      // shopper answers; nothing is added on their behalf.
-      const took = await offerBasket(prop);
-      if (!took) await run(prop.goal, prop.item_id);
-    };
+/**
+ * Draw the one control that spends money.
+ *
+ * Shared by both routes to a purchase — the assistant preparing one, and the
+ * shopper picking a card off the shelf — because two renderings of the same
+ * decision would eventually disagree about what pressing it does. Whatever
+ * prepared it, the shopper sees the same sentence and the same press.
+ */
+function showProposal(prop) {
+  const id = `pp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  $("rb").insertAdjacentHTML("beforeend",
+    `<div class="prop2" id="${id}"><span>${esc(prop.label)}</span>
+      <button class="btn go" data-live="1">Confirm</button>
+      <button class="btn secondary">No</button></div>`);
+  // The latest proposal is the one a typed "confirm" refers to.
+  pendingProposal = prop;
+
+  const box = document.getElementById(id);
+  const [yes, no] = box.querySelectorAll("button");
+  yes.onclick = async () => {
+    pendingProposal = null;
+    box.innerHTML = `<span>Confirmed.</span>`;
+    // Before running, ask whether anything genuinely goes with this. The
+    // shopper answers; nothing is added on their behalf.
+    const took = await offerBasket(prop);
+    if (!took) await run(prop.goal, prop.item_id);
+  };
+  no.onclick = () => { pendingProposal = null; box.innerHTML = `<span>Left it.</span>`; };
+  $("rb").scrollTop = $("rb").scrollHeight;
+}
+
+/**
+ * The shopper answered by pointing rather than typing.
+ *
+ * Built here from the card's own data instead of asking the model to prepare
+ * it. The card already carries everything a proposal needs — the id, the name,
+ * the shop, the price — so a round trip could only introduce a mistake, and it
+ * would cost a turn of the minute's token budget to make one. Clicking a
+ * product is also the one action in this interface that should never fail
+ * because a language model is busy.
+ *
+ * The ceiling is the shelf price. The shopper chose the thing at the price
+ * shown, and the agent may negotiate below it but never above — so this is the
+ * ceiling they actually agreed to, not one invented for them.
+ */
+function pickFromShelf(item) {
+  const shop = merchants[item.merchant_id]?.name ?? item.merchant_id;
+  const price = item.price.value;
+
+  // It goes into the transcript as the shopper's own turn, because that is what
+  // it is. Leaving the click out of the thread would let the next question be
+  // answered as though they had never chosen anything.
+  const said = `I'll take the ${item.name} from ${shop} at ${rupee(price)}.`;
+  thread.push({ role: "user", content: said });
+  bubble("user", said);
+
+  clearHighlights();
+  const card = cardOf(item.item_id);
+  if (card) {
+    card.classList.add("looked");
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  for (const b of $("rb").querySelectorAll("[data-nobuy]")) {
-    b.onclick = () => { pendingProposal = null; b.closest(".prop2").innerHTML = `<span>Left it.</span>`; };
-  }
+
+  showProposal({
+    label: `Buy ${item.name} from ${shop}, up to ${rupee(price)}`,
+    goal: `${item.name} under ₹${price}`,
+    item_id: item.item_id,
+    max_price: price,
+  });
 }
 
 $("send").onclick = () => say($("goal").value.trim());

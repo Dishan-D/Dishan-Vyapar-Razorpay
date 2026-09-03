@@ -282,6 +282,50 @@ export function publishableKeyId(gateway: PaymentGateway): string | null {
  * exactly one place to audit, and a simulated gateway simply has nothing to
  * give — so no caller can accidentally reach the live API on a simulated run.
  */
+/**
+ * Render something that was thrown into something a person can act on.
+ *
+ * The Razorpay SDK rejects with a **plain object** — `{ statusCode, error: {
+ * code, description, reason } }` — not an `Error`. So the usual
+ * `err instanceof Error ? err.message : String(err)` renders it as the literal
+ * string **"[object Object]"**, which is what a webhook failure reported: no
+ * status, no code, no description, nothing to look up.
+ *
+ * Every path that can touch the gateway should use this rather than `String`.
+ */
+export function describeThrown(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string") return err;
+
+  if (err && typeof err === "object") {
+    const e = err as {
+      statusCode?: number;
+      error?: { code?: string; description?: string; reason?: string; field?: string };
+      message?: string;
+    };
+    const inner = e.error;
+    if (inner?.description) {
+      // Razorpay's own shape, said the way their dashboard says it.
+      return [
+        e.statusCode ? `Razorpay ${e.statusCode}` : "Razorpay",
+        inner.code,
+        inner.description,
+        inner.field ? `(field: ${inner.field})` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    if (e.message) return e.message;
+    try {
+      // Anything else: at least show its contents rather than its type name.
+      return JSON.stringify(err).slice(0, 300);
+    } catch {
+      /* circular — fall through */
+    }
+  }
+  return String(err);
+}
+
 export function razorpayCredentials(
   gateway: PaymentGateway,
 ): { keyId: string; keySecret: string } | null {

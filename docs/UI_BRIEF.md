@@ -8,10 +8,14 @@ should look.
 
 ## What the product is
 
-65–90 million Indian merchants take payment through a UPI QR code and nothing
-else — no website, no catalog, no API. An AI shopping agent cannot buy from
-them, because there is nothing to buy *from*: a QR code accepts money and says
-nothing about what is for sale.
+India has around **13 million kirana stores** — 88% of its retail — and
+**678 million UPI QR codes** are deployed. Roughly **93%** of Tier-2 kirana
+stores take digital payments. But they have no website, no catalog and no API.
+An AI shopping agent cannot buy from them, because there is nothing to buy
+*from*: a QR code accepts money and says nothing about what is for sale.
+
+*(Sources in `docs/PITCH.md`. The earlier "65–90 million" figure here was
+unsourced and inconsistent with the rest of the docs.)*
 
 Vyapar turns what those merchants already have — a photo of a shelf, a voice
 note in Hinglish, a line of text — into a storefront an AI buyer-agent can

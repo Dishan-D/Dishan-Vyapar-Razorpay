@@ -61,6 +61,33 @@ import { buildStatement } from "./finance/statement.js";
 import { buildDemandHistory } from "./revenue/dataset.js";
 import { priceElasticity } from "./revenue/elasticity.js";
 import { crossSell, upsell, deadStock, type Opportunity } from "./revenue/agent.js";
+import OpenAI from "openai";
+import { GROQ_BASE_URL, GROQ_MODEL } from "./llm/provider.js";
+import { INTERACTIVE_MAX_WAIT_SECONDS, sharedGroqGovernor } from "./llm/ratelimit.js";
+import { buyersFor as demoBuyers } from "./demo/buyers.js";
+import * as merchantActions from "./merchant/actions.js";
+import { readUpiUri, fixedAmountWarning } from "./merchant/upi-qr.js";
+import { describeThrown } from "./payments/gateway.js";
+import {
+  MERCHANT_TOOLS,
+  toolByName as merchantToolByName,
+  asFunctionSchemas as merchantFunctionSchemas,
+  unheld,
+  activityFor,
+} from "./agent/merchant-tools.js";
+import { route as routeMerchant, DOMAIN_LABEL, suggestions as merchantOpeners } from "./agent/supervisor.js";
+import {
+  toTransactions,
+  merchantStats,
+  productStats,
+  checkIntegrity,
+  customerStats,
+  lapsedCustomers,
+  summarise,
+  contributors,
+  type Txn,
+  type Attribution,
+} from "./analytics/ledger.js";
 import { productTile } from "./catalog/tile.js";
 import { priceSanity } from "./structuring/sanity.js";
 import { EventBus, ROOM_ALL } from "./events/bus.js";
@@ -270,7 +297,7 @@ export async function createApp(options: AppOptions = {}) {
     if (!merchant) return;
     const sent = await notifier
       .send(merchant.whatsapp, saleConfirmationMessage(itemName, price))
-      .catch((err) => ({ sent: false, error: err instanceof Error ? err.message : String(err) }));
+      .catch((err) => ({ sent: false, error: describeThrown(err) }));
     console.log(
       `[sale] ${txn} ${merchant.name} · ${itemName} ₹${price} · ${notifier.channel} ` +
         ((sent as { sent: boolean }).sent ? "sent" : `not sent: ${(sent as { error?: string }).error ?? "unknown"}`),
@@ -286,13 +313,72 @@ export async function createApp(options: AppOptions = {}) {
    * them is worse than none. Deduplicated per transaction, since the webhook
    * and the callback routinely both land.
    */
+  /**
+   * Read the caller's stated reason for this purchase.
+   *
+   * The storefront knows it and nothing else does: a run started from the
+   * search results is organic, one started from the "add these too" panel is a
+   * cross-sell, one from the bigger-size suggestion is an upsell. An unstated
+   * or unrecognised value is recorded as organic rather than guessed at —
+   * under-crediting the Revenue Agent is a much smaller sin than a growth
+   * figure that counts sales it had nothing to do with.
+   */
+  const ATTRIBUTIONS: readonly Attribution[] = ["organic", "cross_sell", "upsell", "revenue_agent"];
+  function statedAttribution(body: unknown): Attribution {
+    const said = String((body as { attribution?: unknown } | null)?.attribution ?? "").trim();
+    return (ATTRIBUTIONS as readonly string[]).includes(said) ? (said as Attribution) : "organic";
+  }
+
   const announced = new Set<string>();
   function announceSale(transactionId: string, itemId: string, price: number): void {
     if (announced.has(transactionId)) return;
     announced.add(transactionId);
     const item = catalogItems.find((i) => i.item_id === itemId);
     if (!item) return;
+    sellStock(item, transactionId);
     void confirmSale(item.merchant_id, item.name, price, transactionId);
+  }
+
+  /**
+   * Take the sold unit off the shelf.
+   *
+   * This had been missing entirely: a product could be bought repeatedly and
+   * still report the stock it shipped with, so "3 in stock" meant "3 when we
+   * seeded it" and the shop could sell its last saree four times over. Stock
+   * is the one number a shopkeeper checks against the physical shelf, and a
+   * dashboard that disagrees with the shelf is worse than no dashboard.
+   *
+   * Only on money actually captured — the caller is the deduped capture point,
+   * so an abandoned checkout, a failed payment or a webhook arriving twice all
+   * leave the count alone. It floors at zero rather than going negative:
+   * negative inventory is never true, and if two sales race for the last unit
+   * that is a real oversell for a human to sort out, not something to record as
+   * "-1 on the shelf".
+   */
+  function sellStock(item: CatalogItem, transactionId: string, qty = 1): void {
+    const before = item.stock.quantity;
+    const after = Math.max(0, before - qty);
+    if (after === before) return;
+
+    item.stock = { ...item.stock, quantity: after };
+    // Persist through the same path a merchant's own edit takes, so the new
+    // count survives a restart instead of being restored from the seed.
+    onboarding.saveItem({
+      item,
+      policy: policies.get(item.item_id),
+      photo_url: photoUrlFor.get(item.item_id),
+    });
+
+    if (before - qty < 0) {
+      console.warn(`[stock] ${transactionId} sold ${item.name} with ${before} on the shelf — oversold, floored at 0`);
+    }
+    bus.emit({
+      type: "stock.changed",
+      merchant_id: item.merchant_id,
+      item_id: item.item_id,
+      message: `${item.name}: ${before} → ${after} after a sale`,
+      data: { before, after, transaction_id: transactionId },
+    });
   }
 
   await openClarifications();
@@ -409,10 +495,16 @@ export async function createApp(options: AppOptions = {}) {
         res.json({ status: "settled", transaction_id: transactionId, payment_id: paid.payment_id });
       } catch (err) {
         if (err instanceof PaymentRefused) {
+          console.warn(`[webhook] ${transactionId} refused: ${err.reasons.join("; ")}`);
           res.status(402).json({ error: "payment refused", reasons: err.reasons });
           return;
         }
-        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        // Razorpay retries a webhook that does not return 2xx, so a failure
+        // that is never logged is one that will happen again, silently, for as
+        // long as they keep trying.
+        const why = describeThrown(err);
+        console.error(`[webhook] ${transactionId} (order ${orderId}) failed: ${why}`);
+        res.status(500).json({ error: why });
       }
     },
   );
@@ -436,6 +528,27 @@ export async function createApp(options: AppOptions = {}) {
   // someone else's CDN being up.
   app.use("/generic", express.static(path.resolve("data", "sample_products", "generic")));
   app.use("/uploads", express.static(path.resolve("data", "uploads")));
+
+  /**
+   * jsQR, served from node_modules rather than a CDN.
+   *
+   * A shop's connection is not something to depend on mid-demo, and a merchant
+   * uploading their payment QR should not need the page to reach a third party
+   * to read it. The decode happens in their browser; the image never leaves the
+   * device for this.
+   */
+  app.use(
+    "/vendor",
+    express.static(path.resolve("node_modules", "jsqr", "dist"), {
+      // The page imports it as an ES module; the package ships UMD, so the one
+      // file is aliased to the name the page asks for.
+      index: false,
+      setHeaders: (res) => res.setHeader("cache-control", "public, max-age=86400"),
+    }),
+  );
+  app.get("/vendor/jsQR.js", (_req: Request, res: Response) => {
+    res.type("application/javascript").sendFile(path.resolve("node_modules", "jsqr", "dist", "jsQR.js"));
+  });
 
   app.get("/health", (_req, res) => {
     res.json({
@@ -643,6 +756,7 @@ export async function createApp(options: AppOptions = {}) {
         merchant_id: item.merchant_id,
         buyer_agent_id,
       });
+      store.recordAttribution(transaction_id, statedAttribution(req.body));
 
       const intent = await buildIntentMandate(
         {
@@ -718,7 +832,7 @@ export async function createApp(options: AppOptions = {}) {
         res.status(402).json({ error: "payment refused", reasons: err.reasons });
         return;
       }
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: describeThrown(err) });
     }
   });
 
@@ -784,7 +898,7 @@ export async function createApp(options: AppOptions = {}) {
         res.status(402).json({ error: "payment refused", reasons: err.reasons });
         return;
       }
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: describeThrown(err) });
     }
   });
 
@@ -1089,20 +1203,33 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
 
+      /**
+       * A pinned purchase carries no category or attribute filter.
+       *
+       * The shopper has already picked the product; re-applying a constraint
+       * the model inferred could only exclude the very thing they confirmed.
+       *
+       * This reasoning was written for the search and then applied only there,
+       * while the authorization gate below went on testing the same inferred
+       * adjectives — so a run could find the confirmed cake and then refuse it.
+       * The money ceiling is untouched either way: that is the shopper's own
+       * number and the only one the gate exists to enforce. An adjective a
+       * model guessed from a sentence is not authorization, and it has no
+       * business overruling a product the shopper pointed at.
+       */
+      const filters = pinnedItemId ? {} : attributes;
+
       const comparison = compareMerchants(
         intent.want,
         { buyer_agent_id: "agent_xyz", max_price: intent.max_price, opening_offer: intent.opening_offer },
         views,
         shoppable,
         policies,
-        // A pinned purchase carries no category or attribute filter. The
-        // shopper has already picked the product; re-applying a constraint the
-        // model inferred could only exclude the very thing they confirmed.
         pinnedItemId
           ? {}
           : {
               ...(intent.category ? { category: intent.category } : {}),
-              ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+              ...(Object.keys(filters).length > 0 ? { attributes: filters } : {}),
             },
       );
       // Recorded per shop, not per search: a merchant needs to know that buyers
@@ -1208,7 +1335,7 @@ export async function createApp(options: AppOptions = {}) {
               max_price: intent.max_price,
               category: intent.category ?? "",
               ttl_seconds: 600,
-              ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+              ...(Object.keys(filters).length > 0 ? { attributes: filters } : {}),
               ...(intent.deliver_within_days >= 0 ? { deliver_within_days: intent.deliver_within_days } : {}),
             },
             prompt_playback: goal,
@@ -1298,6 +1425,7 @@ export async function createApp(options: AppOptions = {}) {
         merchant_id: item.merchant_id,
         buyer_agent_id: "agent_xyz",
       });
+      store.recordAttribution(transaction_id, statedAttribution(req.body));
       store.appendMandate(transaction_id, mandateIntent);
       store.appendMandate(transaction_id, cart);
 
@@ -1397,7 +1525,7 @@ export async function createApp(options: AppOptions = {}) {
         res.status(402).json({ run_id: runId, goal, status: "refused", reasons: err.reasons, trace });
         return;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeThrown(err);
       console.error(`[agent ${runId}] failed after ${Date.now() - startedAt}ms:`, message);
       step("failed", `The run stopped: ${message}`);
       res.status(500).json({ run_id: runId, error: message, trace });
@@ -1427,6 +1555,258 @@ export async function createApp(options: AppOptions = {}) {
     res.json(
       await buildCommerceHistory(merchant, chains, structuring.policies, keyring, { from, to }),
     );
+  });
+
+  /**
+   * Every merchant and product statistic on one path.
+   *
+   * Nothing below counts anything itself. Each endpoint asks this for the
+   * transactions and then asks the ledger for the summary, so the revenue on
+   * the dashboard, the units against a product row and the figures the Revenue
+   * Agent reasons over cannot disagree with each other — they are three
+   * readings of one list.
+   */
+  function transactionsNow(): Txn[] {
+    const attributions = store.attributions();
+    const ids = new Set<string>();
+    for (const m of merchants.keys()) {
+      for (const id of store.listTransactionIdsForMerchant(m)) ids.add(id);
+    }
+    const chains = [...ids]
+      .map((id) => store.loadChain(id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    return toTransactions(chains, catalogItems, {
+      // The catalog price is today's shelf price, which is what a discount on
+      // an old sale should be measured against — the shop wants to know what
+      // it is giving away now, not what it charged last month.
+      listPriceFor: (itemId) => catalogItems.find((i) => i.item_id === itemId)?.price.value ?? null,
+      attributionFor: (txnId) => (attributions.get(txnId) as Attribution | undefined) ?? "organic",
+    });
+  }
+
+  /**
+   * Who an agent id belongs to.
+   *
+   * Regenerated from the same deterministic seed that produced the demo
+   * history rather than stored, so there is no second table to fall out of step
+   * with the mandates — the id in the signed intent is the key, and the name is
+   * derived from it the same way every time. An id nobody recognises comes back
+   * as itself, which is the honest answer for a genuinely anonymous agent.
+   */
+  const buyerNames = new Map<string, string>();
+  for (const m of merchants.keys()) {
+    for (const b of demoBuyers(m, 182)) buyerNames.set(b.agent_id, b.name);
+  }
+  const nameForAgent = (agentId: string): string | null => buyerNames.get(agentId) ?? null;
+
+  /** The window a question is about, and the one before it to compare against. */
+  function windowsFor(period: string): { now: [Date, Date]; before: [Date, Date]; label: string } {
+    const end = new Date();
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const back = (d: Date, n: number) => new Date(d.getTime() - n * 86_400_000);
+
+    if (period === "today") {
+      const a = startOfDay(end);
+      return { now: [a, end], before: [back(a, 1), a], label: "today" };
+    }
+    if (period === "yesterday") {
+      const a = back(startOfDay(end), 1);
+      return { now: [a, startOfDay(end)], before: [back(a, 1), a], label: "yesterday" };
+    }
+    if (period === "month") {
+      const a = back(end, 30);
+      return { now: [a, end], before: [back(end, 60), a], label: "the last 30 days" };
+    }
+    const a = back(end, 7);
+    return { now: [a, end], before: [back(end, 14), a], label: "the last 7 days" };
+  }
+
+  /**
+   * How much of this shop's past was generated.
+   *
+   * Asked by the interface so it can say so. A shop somebody onboards during
+   * the demo has a real, empty history and must not be labelled as fiction —
+   * and the shops that were seeded should not pretend otherwise.
+   */
+  app.get("/merchants/:id/history-source", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const ids = store.listTransactionIdsForMerchant(id);
+    const generated = ids.filter((t) => t.startsWith("txn_h"));
+    const oldest = transactionsNow()
+      .filter((t) => t.merchantId === id)
+      .map((t) => t.paidAt ?? t.createdAt)
+      .sort()[0];
+    res.json({
+      merchant_id: id,
+      total: ids.length,
+      generated: generated.length,
+      real: ids.length - generated.length,
+      since: oldest ? new Date(oldest).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : null,
+      note: "Generated orders run through the real negotiation engine and are signed like any other.",
+    });
+  });
+
+  /** Ranked buyers, and the ones who have stopped coming. */
+  app.get("/merchants/:id/customers", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const all = customerStats(id, transactionsNow(), nameForAgent);
+    const quiet = Number(req.query.quiet_days ?? 30);
+    res.json({
+      merchant_id: id,
+      customers: all,
+      lapsed: lapsedCustomers(all, { quietDays: quiet }),
+      totals: {
+        buyers: all.length,
+        repeat: all.filter((c) => c.repeat).length,
+        repeat_share: all.length === 0 ? 0 : all.filter((c) => c.repeat).length / all.length,
+        top5_share: all.slice(0, 5).reduce((s, c) => s + c.contribution, 0),
+      },
+      note: "Buyers are AI shopping agents acting for people. These are demo identities.",
+    });
+  });
+
+  /**
+   * One period against the one before it, with what moved.
+   *
+   * The endpoint behind "why are sales down". It measures; it does not
+   * conclude — `contributors` returns what changed, ordered by how much, and
+   * whatever is said about it upstream has to be one of those lines.
+   */
+  app.get("/merchants/:id/trend", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const period = String(req.query.period ?? "week");
+    const w = windowsFor(period);
+    const txns = transactionsNow();
+
+    const now = summarise(id, txns, w.now[0], w.now[1], w.label);
+    const before = summarise(id, txns, w.before[0], w.before[1], "the period before");
+
+    // Product movement, measured the same way, so a single line's collapse can
+    // be named rather than left inside the total.
+    const revBy = (from: Date, to: Date) => {
+      const m = new Map<string, number>();
+      for (const t of txns) {
+        if (t.merchantId !== id) continue;
+        const at = Date.parse(t.paidAt ?? t.createdAt);
+        if (at < from.getTime() || at >= to.getTime()) continue;
+        if (t.status === "awaiting_payment") continue;
+        for (const l of t.items) m.set(l.productName, (m.get(l.productName) ?? 0) + l.lineTotal);
+      }
+      return m;
+    };
+    const nowP = revBy(w.now[0], w.now[1]);
+    const beforeP = revBy(w.before[0], w.before[1]);
+    const products = [...new Set([...nowP.keys(), ...beforeP.keys()])].map((name) => ({
+      name, now: nowP.get(name) ?? 0, before: beforeP.get(name) ?? 0,
+    }));
+
+    const changePct = before.revenue === 0 ? null
+      : Math.round(((now.revenue - before.revenue) / before.revenue) * 100);
+
+    res.json({
+      merchant_id: id,
+      period: w.label,
+      now, before,
+      change_pct: changePct,
+      direction: changePct === null ? "unknown" : changePct > 2 ? "up" : changePct < -2 ? "down" : "flat",
+      contributors: contributors(now, before, { products }),
+    });
+  });
+
+  /** When the shop actually trades, by hour and by weekday. */
+  app.get("/merchants/:id/patterns", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const txns = transactionsNow().filter((t) => t.merchantId === id && t.status !== "awaiting_payment");
+    const hours = new Array(24).fill(0);
+    const days = new Array(7).fill(0);
+    for (const t of txns) {
+      const d = new Date(t.paidAt ?? t.createdAt);
+      hours[d.getHours()] += t.amount;
+      days[(d.getDay() + 6) % 7] += t.amount;
+    }
+    const best = hours.indexOf(Math.max(...hours));
+    const DAYNAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    res.json({
+      merchant_id: id,
+      by_hour: hours.map((revenue, hour) => ({ hour, revenue })),
+      by_weekday: days.map((revenue, i) => ({ day: DAYNAMES[i], revenue })),
+      busiest_hour: best,
+      busiest_day: DAYNAMES[days.indexOf(Math.max(...days))],
+    });
+  });
+
+  /** Merchant-level: revenue, orders, by day, by category, by attribution. */
+  app.get("/merchants/:id/analytics", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    res.json(merchantStats(id, transactionsNow(), catalogItems));
+  });
+
+  /** Every product in one shop, so the catalog screen can show real numbers. */
+  app.get("/merchants/:id/products/analytics", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const txns = transactionsNow();
+    res.json({
+      merchant_id: id,
+      products: catalogItems
+        .filter((i) => i.merchant_id === id)
+        .map((i) => productStats(i, txns, i.price.value))
+        .sort((a, b) => b.revenue - a.revenue),
+    });
+  });
+
+  /** One product, including which transactions it came from. */
+  app.get("/products/:itemId/analytics", (req: Request, res: Response) => {
+    const item = catalogItems.find((i) => i.item_id === String(req.params.itemId));
+    if (!item) {
+      res.status(404).json({ error: `no such product: ${req.params.itemId}` });
+      return;
+    }
+    res.json(productStats(item, transactionsNow(), item.price.value));
+  });
+
+  /**
+   * The transactions themselves, unaggregated.
+   *
+   * Here so that any figure on any screen can be checked against the rows it
+   * came from without opening the database. A statistic nobody can audit is
+   * indistinguishable from one that is made up.
+   */
+  app.get("/analytics/transactions", (req: Request, res: Response) => {
+    const merchantId = typeof req.query.merchant_id === "string" ? req.query.merchant_id : null;
+    const all = transactionsNow();
+    res.json({ transactions: merchantId ? all.filter((t) => t.merchantId === merchantId) : all });
+  });
+
+  /** Does the data hold together? Empty `faults` is the healthy answer. */
+  app.get("/analytics/integrity", (_req: Request, res: Response) => {
+    const txns = transactionsNow();
+    const faults = checkIntegrity(txns, catalogItems);
+    res.status(faults.length === 0 ? 200 : 409).json({
+      checked: txns.length,
+      ok: faults.length === 0,
+      faults,
+    });
   });
 
   /**
@@ -1526,7 +1906,7 @@ export async function createApp(options: AppOptions = {}) {
         const result = await transcribe(path.join(UPLOAD_DIR, file.filename));
         res.json({ ...result, file: file.filename });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = describeThrown(err);
         console.error("[transcribe] failed:", message);
         res.status(502).json({ error: message, model: TRANSCRIBE_MODEL });
       }
@@ -1787,7 +2167,7 @@ export async function createApp(options: AppOptions = {}) {
         })),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeThrown(err);
       console.error(`[onboarding ${id}] structuring failed:`, message);
 
       // A spent token quota is not a broken app, and saying "could not read the
@@ -2324,6 +2704,40 @@ export async function createApp(options: AppOptions = {}) {
     /** Everything below resolves what the shopper meant the same way. */
     const pick = (key = "product") =>
       resolveProduct(String((args as Record<string, unknown>)[key] ?? ""), st, catalogItems);
+
+    /**
+     * Say why the reference did not land, not just that it did not.
+     *
+     * "I could not tell which product that is" is true and useless: the model
+     * gets no idea what to try instead, and a live run answered it by giving up
+     * on the lookup and inventing a button. The common failure is a bare number
+     * that is not a position in the list — a model that has just been shown
+     * three rows will hand back "80" because that was the *price* — and naming
+     * the range it may actually refer to is enough for it to recover on its own.
+     */
+    function unresolved(key = "product"): BuyerToolResult {
+      const said = String((args as Record<string, unknown>)[key] ?? "").trim();
+      const shown = st.shown.length;
+
+      if (/^\d+$/.test(said) && (Number(said) < 1 || Number(said) > shown)) {
+        return {
+          tool,
+          summary: `There is no #${said} in what I showed you.`,
+          error:
+            shown > 0
+              ? `${said} is not a row number — the list has ${shown} (1 to ${shown}). ` +
+                `If ${said} was a price, pass the product's name or its row number instead.`
+              : `Nothing has been listed yet, so ${said} refers to nothing. Call search_shelf first.`,
+        };
+      }
+      return {
+        tool,
+        summary: said ? `I could not tell which product "${said}" is.` : "I could not tell which product that is.",
+        error:
+          `"${said}" did not match any product. Pass the row number from search_shelf, ` +
+          `or the product's exact name. Never a price and never an invented id.`,
+      };
+    }
     try {
       if (tool === "search_shelf") {
         const want = String(args.want ?? "").trim();
@@ -2409,7 +2823,7 @@ export async function createApp(options: AppOptions = {}) {
 
       if (tool === "get_product") {
         const item = pick();
-        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        if (!item) return unresolved();
         st.selected = item.item_id;
         const sizes = variantsOf(item, catalogItems);
         const goes = complementsOf(item, catalogItems).slice(0, 3);
@@ -2460,7 +2874,7 @@ export async function createApp(options: AppOptions = {}) {
 
       if (tool === "find_alternatives") {
         const item = pick();
-        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        if (!item) return unresolved();
         const cap = Number((args as Record<string, unknown>).max_price ?? 0) || null;
         const alts = alternativesTo(item, catalogItems)
           .filter((a) => cap === null || a.price.value <= cap)
@@ -2486,7 +2900,7 @@ export async function createApp(options: AppOptions = {}) {
 
       if (tool === "find_complements") {
         const item = pick();
-        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        if (!item) return unresolved();
         st.selected = item.item_id;
         // Never suggest something they already have.
         const inCart = new Set(st.cart.map((l) => l.item_id));
@@ -2515,7 +2929,7 @@ export async function createApp(options: AppOptions = {}) {
 
       if (tool === "add_to_cart") {
         const item = pick();
-        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        if (!item) return unresolved();
         // Stock is checked before the cart changes, not after — a cart that
         // holds more than the shop has is a promise nobody can keep.
         const want = Math.max(1, Math.round(Number((args as Record<string, unknown>).qty ?? 1)));
@@ -2547,7 +2961,7 @@ export async function createApp(options: AppOptions = {}) {
 
       if (tool === "remove_from_cart") {
         const item = pick();
-        if (!item) return { tool, summary: "I could not tell which product that is.", error: "unresolved product" };
+        if (!item) return unresolved();
         const before = st.cart.length;
         st.cart = st.cart.filter((l) => l.item_id !== item.item_id);
         st.updated_at = new Date().toISOString();
@@ -2629,7 +3043,7 @@ export async function createApp(options: AppOptions = {}) {
 
       return { tool, summary: `No such tool: ${tool}`, error: "unknown tool" };
     } catch (err) {
-      return { tool, summary: "That lookup failed.", error: err instanceof Error ? err.message : String(err) };
+      return { tool, summary: "That lookup failed.", error: describeThrown(err) };
     }
   }
 
@@ -3089,7 +3503,7 @@ export async function createApp(options: AppOptions = {}) {
       });
     } catch (err) {
       // A refused link is a refused link. It must never read as a payment.
-      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: describeThrown(err) });
     }
   });
 
@@ -3112,7 +3526,7 @@ export async function createApp(options: AppOptions = {}) {
           : `Razorpay reports this link as "${live.status}". No money has moved.`,
       });
     } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: describeThrown(err) });
     }
   });
 
@@ -3128,7 +3542,7 @@ export async function createApp(options: AppOptions = {}) {
       store.savePaymentLink(String(req.params.id), saved.link_id, saved.short_url, status);
       res.json({ link_id: saved.link_id, status });
     } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: describeThrown(err) });
     }
   });
 
@@ -3177,7 +3591,7 @@ export async function createApp(options: AppOptions = {}) {
       store.saveInvoice(id, inv.id, inv.short_url, inv.status);
       res.status(201).json({ transaction_id: id, ...inv });
     } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: describeThrown(err) });
     }
   });
 
@@ -3211,7 +3625,7 @@ export async function createApp(options: AppOptions = {}) {
     } catch (err) {
       // A gateway that cannot be reached is not a payment that did not happen.
       // Say which one this is.
-      error = err instanceof Error ? err.message : String(err);
+      error = describeThrown(err);
     }
 
     const agrees =
@@ -3563,6 +3977,17 @@ export async function createApp(options: AppOptions = {}) {
     const delivered = paid.filter((c) => c.fulfillment);
     const verifiedValue = delivered.reduce((sum, c) => sum + (c.cart?.final_price.value ?? 0), 0);
 
+    /**
+     * Both money figures, because one alone was being read as the other.
+     *
+     * This panel showed "96 sales" beside "₹5,672 verified" and left the two
+     * next to each other, which reads as ₹59 a sale. It is not: ₹5,672 is the
+     * subset the shopkeeper has signed a handover for, and the 96 paid sales
+     * took ₹9,581. Both are true and neither answers the other's question, so
+     * both are named.
+     */
+    const led = merchantStats(id, transactionsNow(), catalogItems);
+
     // A structured record carries roughly eight machine-readable facts: name,
     // category, two attributes, price, stock, availability, and a floor.
     const FIELDS_PER_PRODUCT = 8;
@@ -3594,7 +4019,11 @@ export async function createApp(options: AppOptions = {}) {
         negotiable_products: withPolicy.length,
         buyers_reached: searches,
         sales: paid.length,
+        revenue: led.revenue,
+        units_sold: led.unitsSold,
+        average_order_value: led.averageOrderValue,
         verified_value: verifiedValue,
+        verified_sales: delivered.length,
         detail: `${mine.length} structured products, ${withPolicy.length} of them open to negotiation, on the same UPI ID.`,
       },
       // Every buyer who reached this shop, and where they stopped.
@@ -3610,7 +4039,12 @@ export async function createApp(options: AppOptions = {}) {
         held_stock: events.filter((e) => e.outcome === "held").length,
         no_match: events.filter((e) => e.outcome === "no_match").length,
       },
-      note: "Counted from stored state. Nothing here is projected, sampled or estimated.",
+      // Where the suggestions the shop made actually landed. Recorded when the
+      // buyer agreed, never inferred afterwards.
+      attributed_revenue: led.byAttribution,
+      note:
+        "Counted from stored state. Nothing here is projected, sampled or estimated. " +
+        "`revenue` is every captured payment; `verified_value` is the part the shopkeeper has confirmed delivered.",
     });
   });
 
@@ -3843,10 +4277,1199 @@ export async function createApp(options: AppOptions = {}) {
   }
 
   /** Read one of our own endpoints without going over the network. */
-  async function fetchLocal(path: string): Promise<any> {
-    const res = await fetch(`http://127.0.0.1:${localPort}${path}`);
-    return res.json();
+  async function fetchLocal(
+    path: string,
+    opts: { method?: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown } = {},
+  ): Promise<any> {
+    const method = opts.method ?? "GET";
+    const res = await fetch(`http://127.0.0.1:${localPort}${path}`, {
+      method,
+      ...(method === "GET"
+        ? {}
+        : { headers: { "content-type": "application/json" }, body: JSON.stringify(opts.body ?? {}) }),
+    });
+    const body = await res.json().catch(() => ({}));
+    // A write that failed must not read as one that worked. The assistant's
+    // whole value is that its confirmations are true, so the status travels
+    // with the body rather than being dropped here.
+    if (!res.ok) {
+      throw new Error(
+        (body as { error?: string })?.error ?? `${method} ${path} failed with ${res.status}`,
+      );
+    }
+    return body;
   }
+
+
+  /* ══ the merchant's assistant ═══════════════════════════════════════════ */
+
+  /**
+   * One turn of a shopkeeper's conversation, kept server-side.
+   *
+   * The follow-up is the whole reason this exists. "How much did I sell
+   * yesterday" then "why was it lower" — the second question is unanswerable
+   * without the first, and a merchant should never have to repeat themselves to
+   * their own assistant. Held here rather than in the browser because the
+   * answers are about money and the browser is not where the money is.
+   */
+  interface MerchantTurn {
+    role: "merchant" | "assistant";
+    text: string;
+    at: string;
+  }
+  interface MerchantConversation {
+    merchant_id: string;
+    turns: MerchantTurn[];
+    /** What the last answer was about, so "it" and "that" have a referent. */
+    focus: { tool: string; label: string; data: unknown } | null;
+    updated_at: string;
+  }
+  const MAX_CONVERSATIONS = 100;
+  const conversations = new Map<string, MerchantConversation>();
+
+  function conversationFor(id: string, merchantId: string): MerchantConversation {
+    let c = conversations.get(id);
+    if (!c || c.merchant_id !== merchantId) {
+      c = { merchant_id: merchantId, turns: [], focus: null, updated_at: new Date().toISOString() };
+      conversations.set(id, c);
+      if (conversations.size > MAX_CONVERSATIONS) {
+        const oldest = conversations.keys().next().value;
+        if (oldest) conversations.delete(oldest);
+      }
+    }
+    return c;
+  }
+
+  /** What a tool hands back: a sentence, the rows behind it, and what to draw. */
+  interface MerchantToolOutput {
+    summary: string;
+    data: unknown;
+    /** The interface renders this rather than parsing the sentence. */
+    card?: Record<string, unknown>;
+    /** Set when the tool prepared something a person has to approve. */
+    action?: ReturnType<typeof proposeAction>;
+    error?: string;
+  }
+
+  const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
+  /** Sales for a window, from the ledger — never a counter. */
+  function salesFor(merchantId: string, period: string) {
+    const txns = transactionsNow().filter((t) => t.merchantId === merchantId);
+    const paid = txns.filter((t) => t.status === "paid" || t.status === "delivered");
+    const day = (iso: string) => iso.slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const since = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+
+    const pick = (rows: typeof paid) => ({
+      revenue: rows.reduce((s, t) => s + t.amount, 0),
+      orders: rows.length,
+      units: rows.reduce((s, t) => s + t.items.reduce((n, l) => n + l.quantity, 0), 0),
+    });
+
+    const on = (d: string) => paid.filter((t) => day(t.paidAt ?? t.createdAt) === d);
+    const after = (d: string) => paid.filter((t) => day(t.paidAt ?? t.createdAt) >= d);
+
+    switch (period) {
+      case "today": return { label: "today", now: pick(on(today)), before: pick(on(yesterday)), beforeLabel: "yesterday" };
+      case "yesterday": return { label: "yesterday", now: pick(on(yesterday)), before: pick(on(since(2))), beforeLabel: "the day before" };
+      case "week": return { label: "the last 7 days", now: pick(after(since(7))), before: pick(after(since(14)).filter((t) => day(t.paidAt ?? t.createdAt) < since(7))), beforeLabel: "the 7 days before" };
+      case "month": return { label: "the last 30 days", now: pick(after(since(30))), before: pick(after(since(60)).filter((t) => day(t.paidAt ?? t.createdAt) < since(30))), beforeLabel: "the 30 days before" };
+      default: return { label: "all time", now: pick(paid), before: null, beforeLabel: "" };
+    }
+  }
+
+  function proposeAction(row: {
+    merchant_id: string; conversation_id: string; tool: string;
+    args: Record<string, unknown>; summary: string; confirm: boolean;
+  }) {
+    return merchantActions.propose(row);
+  }
+
+  /**
+   * Run one merchant tool.
+   *
+   * Reads go through the endpoints that already serve the dashboard, so the
+   * assistant and the screens cannot disagree about a number — they are reading
+   * one source. Writes never happen here: they return a proposal carrying an
+   * action id, and only the merchant pressing turns that into work.
+   */
+  async function runMerchantTool(
+    merchantId: string,
+    conversationId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<MerchantToolOutput> {
+    const def = merchantToolByName(name);
+    if (!def) return { summary: `I do not have a way to do that.`, data: null, error: `no such tool: ${name}` };
+
+    const mine = () => catalogItems.filter((i) => i.merchant_id === merchantId);
+    const shop = merchants.get(merchantId);
+
+    switch (name) {
+      case "get_today": {
+        const s = salesFor(merchantId, "today");
+        const alerts = await fetchLocal(`/merchants/${merchantId}/alerts`);
+        const orders = await fetchLocal(`/merchants/${merchantId}/orders`);
+        // `paid` and `delivered` are booleans on this row. The status *string*
+        // says "awaiting_handover" for an order that has been paid for, so
+        // filtering on status === "paid" found none of them and counted every
+        // one as unpaid — money already in the bank, reported as owed.
+        const pending = (orders.orders ?? []).filter((o: { paid?: boolean; delivered?: boolean }) => o.paid && !o.delivered);
+        const waiting = pending.length;
+        const worth = pending.reduce((sum: number, o: { amount: number }) => sum + o.amount, 0);
+
+        /**
+         * Offer the thing it just told them about.
+         *
+         * Saying "48 waiting to be handed over" and then making the shopkeeper
+         * start a fresh request to do anything about it is the interface being
+         * a report rather than an assistant. The proposal is minted here so the
+         * answer arrives with a button on it — and it still does nothing until
+         * that button is pressed.
+         */
+        const offer = waiting === 0 ? undefined : proposeAction({
+          merchant_id: merchantId, conversation_id: conversationId,
+          tool: "propose_bulk_handover", args: {}, confirm: true,
+          summary: `Mark all ${waiting} paid order(s) — ${rupees(worth)} — as handed to their buyers`,
+        });
+
+        return {
+          summary: s.now.orders === 0
+            ? `Nothing has sold yet today.${waiting > 0 ? ` ${waiting} paid order(s) are still waiting to be handed over.` : ""}`
+            : `${rupees(s.now.revenue)} today across ${s.now.orders} order(s).${
+                waiting > 0 ? ` ${waiting} waiting to be handed over — say "hand these over" and I will do all of them.` : ""}`,
+          data: { ...s, waiting_handover: waiting, needs_attention: alerts.needs_attention ?? 0 },
+          card: {
+            kind: "stat", title: "Today", value: rupees(s.now.revenue),
+            sub: `${s.now.orders} order(s)`,
+            delta: deltaOf(s.now.revenue, s.before?.revenue ?? null, s.beforeLabel),
+            rows: waiting > 0 ? [{ label: "Waiting to hand over", value: String(waiting) }] : [],
+          },
+          ...(offer ? { action: offer } : {}),
+        };
+      }
+
+      case "get_sales": {
+        const period = String(args.period ?? "today");
+        const s = salesFor(merchantId, period);
+        return {
+          summary: s.now.orders === 0
+            ? `Nothing sold ${s.label}.`
+            : `${rupees(s.now.revenue)} ${s.label}, across ${s.now.orders} order(s).`,
+          data: s,
+          card: {
+            kind: "stat", title: `Sales — ${s.label}`, value: rupees(s.now.revenue),
+            sub: `${s.now.orders} order(s) · ${s.now.units} item(s)`,
+            delta: deltaOf(s.now.revenue, s.before?.revenue ?? null, s.beforeLabel),
+          },
+        };
+      }
+
+      case "get_product_performance": {
+        const r = await fetchLocal(`/merchants/${merchantId}/products/analytics`);
+        const rows = (r.products ?? []) as Array<{ name: string; unitsSold: number; revenue: number; currentStock: number; averageSellingPrice: number; listPrice: number | null }>;
+        const sold = rows.filter((p) => p.unitsSold > 0);
+        const idle = rows.filter((p) => p.unitsSold === 0);
+        return {
+          // The four that have never sold are more actionable than the one
+          // that sells best, and counting them without naming them leaves the
+          // merchant to go and find out which — so they are named while the
+          // list is short enough to read.
+          summary: sold.length === 0
+            ? `Nothing has sold yet, so there is no ranking to give you.`
+            : `${sold[0]!.name} earns the most — ${rupees(sold[0]!.revenue)} from ${sold[0]!.unitsSold} sold.` +
+              (idle.length === 0
+                ? ""
+                : idle.length <= 4
+                  ? ` These have never sold: ${idle.map((p) => p.name).join(", ")}.`
+                  : ` ${idle.length} products have never sold.`),
+          data: rows,
+          card: {
+            kind: "table", title: "What each product earned",
+            columns: ["Product", "Sold", "Earned", "Left"],
+            rows: rows.slice(0, 8).map((p) => [p.name, String(p.unitsSold), rupees(p.revenue), String(p.currentStock)]),
+            footer: idle.length > 0 ? `${idle.length} product(s) have not sold at all.` : "",
+          },
+        };
+      }
+
+      case "diagnose_sales": {
+        // The measured comparison comes first: whether sales are actually down
+        // is a fact to establish, not an assumption to explain. A shop that is
+        // up must not be handed reasons for a decline that did not happen.
+        const trend = await fetchLocal(`/merchants/${merchantId}/trend?period=week`);
+        const [lost, opps, r] = await Promise.all([
+          fetchLocal(`/merchants/${merchantId}/recovery`),
+          fetchLocal(`/merchants/${merchantId}/revenue-agent`),
+          fetchLocal(`/merchants/${merchantId}/products/analytics`),
+        ]);
+        const held = mine().filter((i) => i.needs_merchant_confirmation);
+        const out = mine().filter((i) => !i.needs_merchant_confirmation && i.stock.quantity === 0);
+        const idle = ((r.products ?? []) as Array<{ name: string; unitsSold: number; currentStock: number }>)
+          .filter((p) => p.unitsSold === 0 && p.currentStock > 0);
+
+        const causes: string[] = [];
+        if (out.length > 0) causes.push(`${out.length} product(s) are out of stock — an agent cannot buy what is not there`);
+        if (held.length > 0) causes.push(`${held.length} product(s) are still waiting for you to confirm a price or a count, so they are in no offers`);
+        if ((lost.cases ?? []).length > 0) causes.push(`${lost.cases.length} buyer(s) walked away, mostly on price`);
+        if (idle.length > 0) causes.push(`${idle.length} product(s) have never sold`);
+
+        const headline =
+          trend.change_pct === null
+            ? `There is not enough history to compare ${trend.period} with the period before.`
+            : trend.direction === "down"
+              ? `Takings are down ${Math.abs(trend.change_pct)}% over ${trend.period} — ${rupees(trend.now.revenue)} against ${rupees(trend.before.revenue)}.`
+              : trend.direction === "up"
+                ? `Takings are actually up ${trend.change_pct}% over ${trend.period} — ${rupees(trend.now.revenue)} against ${rupees(trend.before.revenue)}.`
+                : `Takings are level over ${trend.period} — ${rupees(trend.now.revenue)} against ${rupees(trend.before.revenue)}.`;
+
+        const moved = (trend.contributors ?? []) as Array<{ what: string; detail: string; change: number }>;
+        const measured = moved.slice(0, 3).map((c) => `${c.what} (${c.detail})`);
+
+        return {
+          summary:
+            headline +
+            (measured.length > 0 ? ` The biggest changes: ${measured.join("; ")}.` : "") +
+            (causes.length > 0 ? ` Also worth knowing: ${causes.join("; ")}.` : ""),
+          data: { trend, out_of_stock: out.map((i) => i.name), held: held.map((i) => i.name), lost: lost.cases ?? [], idle },
+          card: {
+            kind: "reasons", title: "What changed",
+            rows: [
+              ...moved.slice(0, 4).map((c) => ({
+                label: `${c.what}: ${c.detail}`,
+                tone: c.change < 0 ? "bad" : "ok",
+              })),
+              ...out.map((i) => ({ label: `${i.name} is out of stock`, tone: "bad" })),
+              ...held.map((i) => ({ label: `${i.name} is waiting on you`, tone: "warn" })),
+              ...idle.slice(0, 3).map((p) => ({ label: `${p.name} has never sold`, tone: "warn" })),
+              ...(causes.length === 0 ? [{ label: "Nothing obvious is wrong", tone: "ok" }] : []),
+            ],
+          },
+        };
+      }
+
+      case "get_pending_payments": {
+        const r = await fetchLocal(`/merchants/${merchantId}/orders`);
+        const due = ((r.orders ?? []) as Array<{ transaction_id: string; item_name: string; amount: number; paid: boolean }>)
+          .filter((o) => !o.paid);
+        const total = due.reduce((s, o) => s + o.amount, 0);
+        return {
+          summary: due.length === 0
+            ? `Everything agreed has been paid for.`
+            : `${due.length} order(s) were agreed but never paid — ${rupees(total)} in total. These are AI buyers who dropped out at checkout, so there is nobody to chase; you can send a payment link instead.`,
+          data: due,
+          card: due.length === 0 ? { kind: "stat", title: "Unpaid", value: "None", sub: "everything agreed has been paid" } : {
+            kind: "table", title: `Agreed but not paid — ${rupees(total)}`,
+            columns: ["Order", "Item", "Amount"],
+            rows: due.slice(0, 8).map((o) => [o.transaction_id.slice(0, 14), o.item_name, rupees(o.amount)]),
+            footer: "A payment link can be sent for any of these — ask me for one.",
+          },
+        };
+      }
+
+      case "get_payment_status": {
+        const txn = String(args.transaction_id ?? "");
+        const chain = store.loadChain(txn);
+        if (!chain) return { summary: `I could not find order ${txn}.`, data: null, error: "no such order" };
+        const paid = Boolean(chain.payment);
+        return {
+          summary: !chain.cart ? `Order ${txn} never reached an agreed price.`
+            : paid
+              ? `${rupees(chain.cart.final_price.value)} was paid${chain.fulfillment ? " and you have confirmed handover" : ", and it is waiting for you to hand it over"}.`
+              : `${rupees(chain.cart.final_price.value)} was agreed but never paid.`,
+          data: { transaction_id: txn, paid, delivered: Boolean(chain.fulfillment), amount: chain.cart?.final_price.value ?? 0 },
+        };
+      }
+
+      case "get_reconciliation": {
+        const r = await fetchLocal(`/merchants/${merchantId}/reconciliation`);
+        const rows = (r.rows ?? []) as Array<{ kind: string; because: string; amount_banked?: number }>;
+        const odd = rows.filter((x) => x.kind !== "matched");
+        return {
+          summary: rows.length === 0
+            ? `No money has come in yet, so there is nothing to match.`
+            : `${Math.round((r.explained_share ?? 0) * 100)}% of the ${rupees(r.banked ?? 0)} that reached your account is tied to a specific sale.${odd.length > 0 ? ` ${odd.length} credit(s) do not match anything.` : ""}`,
+          data: r,
+          card: {
+            kind: "stat", title: "Money in, matched to sales",
+            value: `${Math.round((r.explained_share ?? 0) * 100)}%`,
+            sub: `${rupees(r.explained ?? 0)} of ${rupees(r.banked ?? 0)} explained`,
+            rows: odd.slice(0, 4).map((x) => ({ label: x.because.slice(0, 68), value: rupees(x.amount_banked ?? 0) })),
+          },
+        };
+      }
+
+      case "list_products": {
+        const items = mine();
+        const held = items.filter((i) => i.needs_merchant_confirmation);
+        const out = items.filter((i) => !i.needs_merchant_confirmation && i.stock.quantity === 0);
+        return {
+          summary: `${items.length} product(s).${held.length > 0 ? ` ${held.length} cannot be sold until you confirm a price or a count.` : ""}${out.length > 0 ? ` ${out.length} out of stock.` : ""}`,
+          data: items.map((i) => ({
+            item_id: i.item_id, name: i.name, price: i.price.value, stock: i.stock.quantity,
+            sellable: !i.needs_merchant_confirmation, held_because: gateReasons(i, sanityFor(i)),
+          })),
+          card: {
+            kind: "table", title: "Your catalog",
+            columns: ["Product", "Price", "Stock", "Status"],
+            rows: items.slice(0, 10).map((i) => [
+              i.name, rupees(i.price.value), String(i.stock.quantity),
+              i.needs_merchant_confirmation ? "Waiting on you" : i.stock.quantity === 0 ? "Out of stock" : "On sale",
+            ]),
+          },
+        };
+      }
+
+      case "get_orders": {
+        const r = await fetchLocal(`/merchants/${merchantId}/orders`);
+        const rows = (r.orders ?? []) as Array<{ transaction_id: string; item_name: string; amount: number; paid: boolean; delivered: boolean }>;
+        const waiting = rows.filter((o) => o.paid && !o.delivered);
+        return {
+          summary: rows.length === 0 ? `No orders yet.`
+            : `${rows.length} order(s).${waiting.length > 0 ? ` ${waiting.length} paid and waiting for you to hand over.` : " All handed over."}`,
+          data: rows,
+          card: {
+            kind: "table", title: "Recent orders",
+            columns: ["Item", "Amount", "State"],
+            rows: rows.slice(0, 8).map((o) => [o.item_name, rupees(o.amount),
+              o.delivered ? "Handed over" : o.paid ? "Waiting on you" : "Not paid"]),
+          },
+        };
+      }
+
+      case "get_opportunities": {
+        const r = await fetchLocal(`/merchants/${merchantId}/revenue-agent`);
+        const opps = (r.opportunities ?? []) as Array<{ id: string; headline: string; kind: string; incremental_revenue?: number; score: number }>;
+        return {
+          summary: opps.length === 0
+            ? `No suggestions right now — that needs some buyer activity to work from.`
+            : `${opps.length} suggestion(s). The strongest: ${opps[0]!.headline}.`,
+          data: opps,
+          card: {
+            kind: "opportunities", title: "Ways to earn more",
+            rows: opps.slice(0, 4).map((o) => ({
+              id: o.id, headline: o.headline, kind: o.kind.replace("_", " "),
+              worth: o.incremental_revenue ? rupees(o.incremental_revenue) : "", score: o.score,
+            })),
+          },
+        };
+      }
+
+      case "get_lost_sales": {
+        const r = await fetchLocal(`/merchants/${merchantId}/recovery`);
+        const cases = (r.cases ?? []) as Array<{ headline?: string; at_risk?: number }>;
+        return {
+          summary: cases.length === 0 ? `No buyers walked away recently.`
+            : `${cases.length} buyer(s) wanted something and did not buy it.`,
+          data: cases,
+        };
+      }
+
+      case "get_customers": {
+        const r = await fetchLocal(`/merchants/${merchantId}/customers`);
+        const cs = (r.customers ?? []) as Array<{ name: string; revenue: number; orders: number; contribution: number; daysSinceLast: number }>;
+        const t = r.totals ?? {};
+        if (cs.length === 0) return { summary: `Nobody has bought from you yet.`, data: [] };
+        return {
+          summary:
+            `${cs[0]!.name} spends the most — ${rupees(cs[0]!.revenue)} over ${cs[0]!.orders} order(s). ` +
+            `Your top five are ${Math.round((t.top5_share ?? 0) * 100)}% of everything you take, and ` +
+            `${Math.round((t.repeat_share ?? 0) * 100)}% of your ${t.buyers ?? cs.length} buyers have come back more than once.`,
+          data: cs,
+          card: {
+            kind: "table", title: "Your buyers, by what they spent",
+            columns: ["Buyer", "Spent", "Orders", "Share", "Last seen"],
+            rows: cs.slice(0, 8).map((c) => [
+              c.name, rupees(c.revenue), String(c.orders),
+              `${Math.round(c.contribution * 100)}%`,
+              c.daysSinceLast === 0 ? "today" : `${c.daysSinceLast}d ago`,
+            ]),
+            footer: "Buyers are AI shopping agents acting for people — demo identities.",
+          },
+        };
+      }
+
+      case "get_lapsed_customers": {
+        const quiet = Number(args.quiet_days ?? 30) || 30;
+        const r = await fetchLocal(`/merchants/${merchantId}/customers?quiet_days=${quiet}`);
+        const gone = (r.lapsed ?? []) as Array<{ name: string; revenue: number; orders: number; daysSinceLast: number }>;
+        if (gone.length === 0) {
+          return { summary: `Nobody who used to buy regularly has gone quiet — everyone is still coming.`, data: [] };
+        }
+        const worth = gone.reduce((sum, c) => sum + c.revenue, 0);
+        return {
+          summary:
+            `${gone.length} buyer(s) who used to come regularly have not bought in ${quiet}+ days. ` +
+            `Between them they had spent ${rupees(worth)}. The biggest is ${gone[0]!.name}, quiet for ${gone[0]!.daysSinceLast} days.`,
+          data: gone,
+          card: {
+            kind: "table", title: `Stopped coming — ${rupees(worth)} of past trade`,
+            columns: ["Buyer", "Used to spend", "Orders", "Quiet for"],
+            rows: gone.slice(0, 8).map((c) => [c.name, rupees(c.revenue), String(c.orders), `${c.daysSinceLast} days`]),
+            footer: "These are the ones worth winning back — they bought more than once before stopping.",
+          },
+        };
+      }
+
+      case "get_patterns": {
+        const r = await fetchLocal(`/merchants/${merchantId}/patterns`);
+        const hours = (r.by_hour ?? []) as Array<{ hour: number; revenue: number }>;
+        const days = (r.by_weekday ?? []) as Array<{ day: string; revenue: number }>;
+        const traded = hours.filter((h) => h.revenue > 0);
+        if (traded.length === 0) return { summary: `Not enough sales yet to see a pattern.`, data: null };
+        const hh = (n: number) => `${((n + 11) % 12) + 1}${n < 12 ? "am" : "pm"}`;
+        const best = r.busiest_hour as number;
+        return {
+          summary: `Your busiest hour is around ${hh(best)}, and your strongest day is ${r.busiest_day}.`,
+          data: r,
+          card: {
+            kind: "table", title: "When you actually trade",
+            columns: ["Day", "Taken"],
+            rows: days.map((d) => [d.day, rupees(d.revenue)]),
+            footer: `Busiest hour: ${hh(best)}.`,
+          },
+        };
+      }
+
+      case "get_payment_setup": {
+        return {
+          summary: shop
+            ? `Customers pay you on ${shop.upi_vpa}. ${shop.qr_note ?? ""}`.trim()
+            : `I could not find your shop's payment details.`,
+          data: { upi_vpa: shop?.upi_vpa ?? null, name: shop?.name ?? null },
+          card: {
+            kind: "stat", title: "How customers pay you",
+            value: shop?.upi_vpa ?? "not set",
+            sub: shop?.name ?? "",
+            rows: [{ label: "Change it", value: "upload your QR" }],
+          },
+        };
+      }
+
+      /* ── the ones that need a press ─────────────────────────────────────── */
+
+      case "propose_confirm_handover": {
+        const txn = String(args.transaction_id ?? "");
+        const chain = store.loadChain(txn);
+        if (!chain?.payment) return { summary: `Order ${txn} has not been paid for, so there is nothing to hand over.`, data: null, error: "not paid" };
+        if (chain.fulfillment) return { summary: `You already confirmed that one.`, data: null };
+        const item = catalogItems.find((i) => i.item_id === chain.cart?.item_id);
+        return {
+          summary: `Ready to mark ${item?.name ?? "that order"} as handed over.`,
+          data: null,
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { transaction_id: txn }, confirm: true,
+            summary: `Mark ${item?.name ?? txn} (${rupees(chain.cart?.final_price.value ?? 0)}) as handed to the buyer`,
+          }),
+        };
+      }
+
+      case "propose_bulk_handover": {
+        const r = await fetchLocal(`/merchants/${merchantId}/orders`);
+        const waiting = ((r.orders ?? []) as Array<{ transaction_id: string; item_name: string; amount: number; paid: boolean; delivered: boolean }>)
+          .filter((o) => o.paid && !o.delivered);
+        if (waiting.length === 0) {
+          return { summary: `Nothing is waiting — everything paid for has been handed over.`, data: [] };
+        }
+        const worth = waiting.reduce((sum, o) => sum + o.amount, 0);
+        return {
+          summary:
+            `${waiting.length} paid order(s) worth ${rupees(worth)} are waiting. ` +
+            `Confirming marks every one of them as handed to its buyer — each gets its own signed record.`,
+          data: waiting,
+          card: {
+            kind: "table", title: `Waiting to go out — ${rupees(worth)}`,
+            columns: ["Item", "Amount"],
+            rows: waiting.slice(0, 6).map((o) => [o.item_name, rupees(o.amount)]),
+            footer: waiting.length > 6 ? `…and ${waiting.length - 6} more.` : "",
+          },
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId,
+            tool: name, args: {}, confirm: true,
+            summary: `Mark all ${waiting.length} paid order(s) — ${rupees(worth)} — as handed to their buyers`,
+          }),
+        };
+      }
+
+      case "propose_set_price": {
+        const itemId = String(args.item_id ?? "");
+        const item = catalogItems.find((i) => i.item_id === itemId && i.merchant_id === merchantId);
+        if (!item) return { summary: `I could not find that product.`, data: null, error: "no such product" };
+        const price = Number(args.price ?? 0);
+        const stock = Number(args.stock ?? -1);
+        const bits = [price > 0 ? `price ${rupees(price)}` : "", stock >= 0 ? `${stock} in stock` : ""].filter(Boolean);
+        if (bits.length === 0) return { summary: `Tell me the price or the stock count you want.`, data: null, error: "nothing to set" };
+        return {
+          summary: `Ready to set ${item.name} to ${bits.join(" and ")}.`,
+          data: null,
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { item_id: itemId, price, stock }, confirm: true,
+            summary: `Set ${item.name} — ${bits.join(", ")}`,
+          }),
+        };
+      }
+
+      case "propose_invoice": {
+        const txn = String(args.transaction_id ?? "");
+        const chain = store.loadChain(txn);
+        if (!chain?.payment) return { summary: `An invoice needs a paid order, and that one has not been paid.`, data: null, error: "not paid" };
+        return {
+          summary: `Ready to raise a Razorpay invoice for ${rupees(chain.cart?.final_price.value ?? 0)}.`,
+          data: null,
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { transaction_id: txn }, confirm: true,
+            summary: `Raise a Razorpay invoice for ${rupees(chain.cart?.final_price.value ?? 0)}`,
+          }),
+        };
+      }
+
+      case "propose_payment_link": {
+        const txn = String(args.transaction_id ?? "");
+        const chain = store.loadChain(txn);
+        if (!chain?.cart) return { summary: `I could not find that order.`, data: null, error: "no such order" };
+        if (chain.payment) return { summary: `That one is already paid — no link needed.`, data: null };
+        return {
+          summary: `Ready to create a payment link for ${rupees(chain.cart.final_price.value)}.`,
+          data: null,
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { transaction_id: txn }, confirm: true,
+            summary: `Create a Razorpay payment link for ${rupees(chain.cart.final_price.value)}`,
+          }),
+        };
+      }
+
+      case "propose_promotion": {
+        const oppId = String(args.opportunity_id ?? "");
+        const r = await fetchLocal(`/merchants/${merchantId}/revenue-agent`);
+        const opp = ((r.opportunities ?? []) as Array<{ id: string; headline: string }>).find((o) => o.id === oppId);
+        if (!opp) return { summary: `I could not find that suggestion.`, data: null, error: "no such opportunity" };
+        return {
+          summary: `Ready to put that live: ${opp.headline}.`,
+          data: null,
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { opportunity_id: oppId }, confirm: true, summary: opp.headline,
+          }),
+        };
+      }
+
+      case "propose_upi": {
+        const upi = String(args.upi_id ?? "").trim();
+        const who = String(args.merchant_name ?? "").trim();
+        if (!upi) return { summary: `I did not get a UPI id to save.`, data: null, error: "no upi id" };
+        return {
+          summary: `Ready to save ${upi} as how customers pay you.`,
+          data: { upi_id: upi, merchant_name: who },
+          action: proposeAction({
+            merchant_id: merchantId, conversation_id: conversationId, tool: name,
+            args: { upi_id: upi, merchant_name: who }, confirm: true,
+            summary: `Save ${upi}${who ? ` (${who})` : ""} as your payment address`,
+          }),
+        };
+      }
+
+      default:
+        return { summary: `I do not have a way to do that yet.`, data: null, error: `unimplemented: ${name}` };
+    }
+  }
+
+  /** "↑ 12% vs yesterday", or nothing when there is no honest comparison. */
+  function deltaOf(now: number, before: number | null, label: string): string {
+    if (before === null || before === 0 || !label) return "";
+    const pct = Math.round(((now - before) / before) * 100);
+    if (pct === 0) return `same as ${label}`;
+    return `${pct > 0 ? "↑" : "↓"} ${Math.abs(pct)}% vs ${label}`;
+  }
+
+  /**
+   * Actually do what the merchant approved.
+   *
+   * Reached only from the confirm endpoint, and only through the idempotent
+   * executor — so this function never runs twice for one press, and never runs
+   * because a model decided it should.
+   */
+  async function performAction(a: merchantActions.MerchantAction): Promise<unknown> {
+    switch (a.tool) {
+      case "propose_confirm_handover":
+        return fetchLocal(`/transactions/${a.args.transaction_id}/confirm-fulfillment`, { method: "POST", body: {} });
+
+      /**
+       * Every waiting order, one at a time, through the same endpoint.
+       *
+       * Not a bulk database write: each handover is a *signed fulfilment
+       * mandate* appended to its own chain, and doing forty-eight of them means
+       * doing it forty-eight times. The list is re-read here rather than
+       * carried on the proposal, so an order handed over by hand between the
+       * offer and the press is simply no longer in it.
+       *
+       * A failure part-way through does not undo what already succeeded — those
+       * signatures are real. So the result says exactly how many went through,
+       * and the first thing that stopped, rather than reporting a clean total.
+       */
+      case "propose_bulk_handover": {
+        const r = await fetchLocal(`/merchants/${a.merchant_id}/orders`);
+        const waiting = ((r.orders ?? []) as Array<{ transaction_id: string; paid: boolean; delivered: boolean }>)
+          .filter((o) => o.paid && !o.delivered);
+
+        let done = 0;
+        const failed: Array<{ transaction_id: string; why: string }> = [];
+        for (const o of waiting) {
+          try {
+            await fetchLocal(`/transactions/${o.transaction_id}/confirm-fulfillment`, { method: "POST", body: {} });
+            done++;
+          } catch (err) {
+            failed.push({ transaction_id: o.transaction_id, why: describeThrown(err) });
+          }
+        }
+        if (done === 0 && failed.length > 0) {
+          throw new Error(`none of the ${failed.length} went through — ${failed[0]!.why}`);
+        }
+        return {
+          handed_over: done,
+          attempted: waiting.length,
+          ...(failed.length > 0 ? { failed: failed.length, first_problem: failed[0]!.why } : {}),
+        };
+      }
+      case "propose_set_price": {
+        const body: Record<string, number> = {};
+        if (Number(a.args.price) > 0) body.price = Number(a.args.price);
+        if (Number(a.args.stock) >= 0) body.stock = Number(a.args.stock);
+        return fetchLocal(`/merchants/${a.merchant_id}/items/${a.args.item_id}`, { method: "PATCH", body });
+      }
+      case "propose_invoice":
+        return fetchLocal(`/transactions/${a.args.transaction_id}/invoice`, { method: "POST", body: {} });
+      case "propose_payment_link":
+        return fetchLocal(`/transactions/${a.args.transaction_id}/payment-link`, { method: "POST", body: {} });
+      case "propose_promotion":
+        return fetchLocal(`/merchants/${a.merchant_id}/opportunities/${a.args.opportunity_id}/approve`, { method: "POST", body: {} });
+      case "propose_upi": {
+        const shop = merchants.get(a.merchant_id);
+        if (!shop) throw new Error("no such shop");
+        shop.upi_vpa = String(a.args.upi_id);
+
+        /**
+         * A seeded shop has no row to update.
+         *
+         * The six demo shops come from the catalog fixture, not from the
+         * onboarding table, so changing one in memory alone would work
+         * perfectly until the next restart put the old UPI id back — the same
+         * way editing a seeded product used to be silently temporary. Writing
+         * the row instead makes the merchant's own word outrank the fixture,
+         * which is what `restoreOnboarded` already assumes on the way out.
+         */
+        const stored = onboarding.getMerchant(a.merchant_id);
+        if (stored) {
+          onboarding.updateMerchant({ ...stored, upi_vpa: shop.upi_vpa });
+        } else {
+          onboarding.createMerchant({
+            ...shop,
+            onboarded: true,
+            store_summary: null,
+            created_at: new Date().toISOString(),
+          });
+        }
+        return { upi_vpa: shop.upi_vpa };
+      }
+      default:
+        throw new Error(`no way to perform ${a.tool}`);
+    }
+  }
+
+
+  /**
+   * One turn with the merchant's assistant.
+   *
+   * The shape of a turn is: decide what this is asking, run the lookups, then
+   * say what was found. Only the last step ever involves a language model, and
+   * on most questions not even that — "how much did I make today" is answered
+   * by a router, a ledger read and a sentence template, in about ten
+   * milliseconds and zero tokens. That matters more than it sounds: the token
+   * budget here is 8,000 a minute for the whole organisation, and a merchant
+   * asking four questions in a row must not be the thing that exhausts it.
+   *
+   * The activity list is returned rather than streamed. Each entry is a real
+   * lookup that really ran, so the merchant watching "Checking unpaid orders"
+   * is watching something true rather than a progress animation.
+   */
+  app.post("/merchants/:id/agent", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const message = String(req.body?.message ?? "").trim();
+    if (!message) {
+      res.status(400).json({ error: "say something" });
+      return;
+    }
+    const conversationId = String(req.body?.conversation_id ?? "").trim() || `conv_${randomUUID().slice(0, 8)}`;
+    const convo = conversationFor(conversationId, id);
+    convo.turns.push({ role: "merchant", text: message, at: new Date().toISOString() });
+
+    const started = Date.now();
+    let plan = routeMerchant(message);
+
+    /**
+     * A follow-up that only changes the period.
+     *
+     * "And the week?" carries no verb and no noun — every word that would tell
+     * a router what it is about was in the *previous* question. Routed on its
+     * own it fell through to the generic path and cheerfully answered with
+     * today's takings, which is the specific failure a shopkeeper would never
+     * report as a bug: the number looked plausible and was an answer to a
+     * question they had not asked.
+     *
+     * So a short message that names a stretch of time, when the last thing
+     * discussed was takings, re-runs that lookup over the new period.
+     */
+    const namesPeriod = /\b(today|yesterday|this week|last week|the week|past week|7 days|this month|last month|the month|30 days|all time|overall|so far)\b/i.test(message);
+    // Periods only apply to money here, so a short question naming one is
+    // about takings whatever the previous turn was about.
+    if (namesPeriod && message.split(/\s+/).length <= 6) {
+      plan = { kind: "direct", tools: ["get_sales"], domains: ["sales"], why: "Adding up what was actually paid" };
+    }
+
+    /**
+     * A follow-up that points back at the last answer.
+     *
+     * "Which of those haven't sold?" names no subject at all — "those" is the
+     * list from the previous turn, and every word that would tell a router what
+     * this is about was in the question before it. Routed alone it landed on
+     * the generic path and answered with today's takings: a real number,
+     * confidently given, to a question nobody asked. That is the failure a
+     * shopkeeper would never report, because it looks like an answer.
+     *
+     * Only when the message actually refers back, and only when the generic
+     * path was about to run — a follow-up that names its own subject can route
+     * on its own merits.
+     */
+    const refersBack = /\b(those|them|they|that one|these|it)\b/i.test(message);
+    if (refersBack && convo.focus && plan.kind === "reason" && plan.seed.length === 1 && plan.seed[0] === "get_today") {
+      const back = convo.focus.tool;
+      plan = { kind: "direct", tools: [back], domains: [], why: activityFor(back) };
+    }
+    const activity: Array<{ label: string; domain?: string; ok: boolean }> = [];
+    const outputs: Array<{ tool: string; summary: string; card?: unknown }> = [];
+    const cards: unknown[] = [];
+    const actionsOut: unknown[] = [];
+
+    /**
+     * A question the shop has no data for.
+     *
+     * Answered immediately and honestly, then handed the nearest real thing.
+     * "I don't understand" would be false — it understood perfectly — and
+     * inventing a customer list would be the one failure this project cannot
+     * afford.
+     */
+    if (plan.kind === "unheld") {
+      let answer = plan.say;
+      for (const t of plan.then) {
+        const out = await runMerchantTool(id, conversationId, t, {});
+        activity.push({ label: `Checking what I do have`, ok: !out.error });
+        outputs.push({ tool: t, summary: out.summary });
+        if (out.card) cards.push(out.card);
+        answer += ` What I can tell you: ${out.summary}`;
+      }
+      convo.turns.push({ role: "assistant", text: answer, at: new Date().toISOString() });
+      convo.updated_at = new Date().toISOString();
+      res.json({
+        conversation_id: conversationId, answer, activity, cards, actions: actionsOut,
+        answered_by: "rules", steps: outputs, elapsed_ms: Date.now() - started,
+      });
+      return;
+    }
+
+    /**
+     * An instruction: work out what they named, then prepare it.
+     *
+     * Resolution is deterministic and refuses rather than guesses. If a
+     * merchant says "invoice that order" and there are four candidates, picking
+     * one would be worse than asking — an invoice raised against the wrong sale
+     * is not something they can quietly undo.
+     */
+    if (plan.kind === "act") {
+      const resolved = await resolveActionArgs(id, plan.tool, plan.subject, convo);
+      if (resolved.problem) {
+        const answer = resolved.problem;
+        convo.turns.push({ role: "assistant", text: answer, at: new Date().toISOString() });
+        res.json({
+          conversation_id: conversationId, answer, activity: [{ label: plan.why, ok: false }],
+          cards: [], actions: [], answered_by: "rules", steps: [], elapsed_ms: Date.now() - started,
+        });
+        return;
+      }
+      const out = await runMerchantTool(id, conversationId, plan.tool, resolved.args);
+      const def = merchantToolByName(plan.tool);
+      activity.push({ label: activityFor(plan.tool), domain: def ? DOMAIN_LABEL[def.domain] : undefined, ok: !out.error });
+      if (out.card) cards.push(out.card);
+      if (out.action) actionsOut.push(out.action);
+      convo.turns.push({ role: "assistant", text: out.summary, at: new Date().toISOString() });
+      convo.updated_at = new Date().toISOString();
+      res.json({
+        conversation_id: conversationId, answer: out.summary, activity, cards, actions: actionsOut,
+        answered_by: "rules", steps: [{ tool: plan.tool, summary: out.summary }],
+        elapsed_ms: Date.now() - started,
+      });
+      return;
+    }
+
+    const toRun = plan.kind === "direct" ? plan.tools : plan.seed;
+
+    // Carry the referent forward. "Why was it lower?" means the thing the last
+    // answer was about, and a merchant should never have to say it twice.
+    const args: Record<string, Record<string, unknown>> = {};
+    if (toRun.includes("get_sales")) {
+      args.get_sales = { period: periodFrom(message, convo) };
+    }
+
+    for (const tool of toRun) {
+      const def = merchantToolByName(tool);
+      const out = await runMerchantTool(id, conversationId, tool, args[tool] ?? {});
+      activity.push({
+        label: activityFor(tool),
+        domain: def ? DOMAIN_LABEL[def.domain] : undefined,
+        ok: !out.error,
+      });
+      outputs.push({ tool, summary: out.summary });
+      if (out.card) cards.push(out.card);
+      if (out.action) actionsOut.push(out.action);
+      if (!out.error) convo.focus = { tool, label: out.summary, data: out.data };
+    }
+
+    /**
+     * Say it.
+     *
+     * A single lookup speaks for itself — the tool already wrote a sentence a
+     * shopkeeper can read, and paying a model to rewrite it would add latency,
+     * spend budget and introduce a chance of it saying something the rows do
+     * not support. Several lookups genuinely need joining up, and that is what
+     * the model is for. If it is unavailable, the sentences are joined plainly
+     * and the answer says it came from the rules.
+     */
+    let answer = outputs.map((o) => o.summary).join(" ");
+    let answeredBy: "rules" | "model" = "rules";
+    let note: string | undefined;
+
+    if (plan.kind === "reason" && outputs.length > 1) {
+      const phrased = await phraseMerchantAnswer(message, outputs, convo);
+      if (phrased.text) {
+        answer = phrased.text;
+        answeredBy = "model";
+      } else if (phrased.note) {
+        note = phrased.note;
+      }
+    }
+
+    convo.turns.push({ role: "assistant", text: answer, at: new Date().toISOString() });
+    convo.updated_at = new Date().toISOString();
+    if (convo.turns.length > 24) convo.turns.splice(0, convo.turns.length - 24);
+
+    console.log(`[merchant ${id}] "${message}" → ${plan.kind}, ${outputs.length} lookup(s), ${answeredBy}, ${Date.now() - started}ms`);
+    res.json({
+      conversation_id: conversationId, answer, activity, cards, actions: actionsOut,
+      answered_by: answeredBy, steps: outputs, ...(note ? { note } : {}),
+      elapsed_ms: Date.now() - started,
+    });
+  });
+
+  /**
+   * Turn "invoice that order" into an order id, or say why it cannot.
+   *
+   * Three ways, strongest first: an id typed out in full, the thing the last
+   * answer was about, or — when exactly one candidate exists — that one. Two
+   * candidates and no way to choose is a question, not a guess: this is the
+   * side of the product that changes money.
+   */
+  async function resolveActionArgs(
+    merchantId: string,
+    tool: string,
+    said: string,
+    convo: { focus: { tool: string; data: unknown } | null },
+  ): Promise<{ args: Record<string, unknown>; problem?: string }> {
+    const typedId = said.match(/\btxn_[a-z0-9]+/i)?.[0];
+
+    if (tool === "propose_confirm_handover" || tool === "propose_invoice" || tool === "propose_payment_link") {
+      if (typedId) return { args: { transaction_id: typedId } };
+
+      const orders = (await fetchLocal(`/merchants/${merchantId}/orders`)).orders as Array<{
+        transaction_id: string; item_name: string; paid: boolean; delivered: boolean;
+      }>;
+      // A payment link is for an order that was never paid; a handover and an
+      // invoice both need one that was.
+      const want = tool === "propose_payment_link"
+        ? orders.filter((o) => !o.paid)
+        : orders.filter((o) => o.paid && !o.delivered);
+
+      const named = want.filter((o) => said.toLowerCase().includes(o.item_name.toLowerCase()));
+      const pool = named.length > 0 ? named : want;
+
+      if (pool.length === 0) {
+        return {
+          args: {},
+          problem:
+            tool === "propose_payment_link"
+              ? "Every order has been paid for, so there is nothing to send a link for."
+              : tool === "propose_invoice"
+                ? "There are no paid orders to invoice — an invoice needs money that has already come in."
+                : "There are no paid orders waiting to be handed over.",
+        };
+      }
+      if (pool.length === 1) return { args: { transaction_id: pool[0]!.transaction_id } };
+
+      const focusId = (convo.focus?.data as { transaction_id?: string } | undefined)?.transaction_id;
+      if (focusId && pool.some((o) => o.transaction_id === focusId)) return { args: { transaction_id: focusId } };
+
+      return {
+        args: {},
+        problem:
+          `There are ${pool.length} of those — tell me which one and I will get it ready. ` +
+          pool.slice(0, 4).map((o) => `${o.item_name} (${o.transaction_id.slice(0, 14)})`).join(", ") + ".",
+      };
+    }
+
+    if (tool === "propose_set_price") {
+      const mine = catalogItems.filter((i) => i.merchant_id === merchantId);
+      const lower = said.toLowerCase();
+      const named = mine.filter((i) => lower.includes(i.name.toLowerCase()));
+      if (named.length === 0) {
+        return { args: {}, problem: "Which product? Name it as it appears in your catalog and I will get the change ready." };
+      }
+      if (named.length > 1) {
+        return { args: {}, problem: `That matches ${named.length} products — ${named.slice(0, 3).map((i) => i.name).join(", ")}. Which one?` };
+      }
+      // "to 480", "at ₹480", "480 rupees" — the number that is not part of the
+      // product's own name, which is why the name is removed before looking.
+      const rest = lower.replace(named[0]!.name.toLowerCase(), " ");
+      const price = Number(rest.match(/(?:₹|rs\.?|to|at)\s*([\d,]+)/i)?.[1]?.replace(/,/g, "") ?? 0);
+      const stock = Number(rest.match(/([\d,]+)\s*(?:in stock|left|units|pieces|pcs)/i)?.[1]?.replace(/,/g, "") ?? -1);
+      if (price <= 0 && stock < 0) {
+        return { args: {}, problem: `What should ${named[0]!.name} be? Give me a price or a stock count.` };
+      }
+      return { args: { item_id: named[0]!.item_id, price, stock } };
+    }
+
+    if (tool === "propose_promotion") {
+      const ra = await fetchLocal(`/merchants/${merchantId}/revenue-agent`);
+      const opps = (ra.opportunities ?? []) as Array<{ id: string; headline: string }>;
+      if (opps.length === 0) return { args: {}, problem: "There are no suggestions to act on right now." };
+      const typed = opps.find((o) => said.includes(o.id));
+      if (typed) return { args: { opportunity_id: typed.id } };
+      if (opps.length === 1) return { args: { opportunity_id: opps[0]!.id } };
+      return {
+        args: {},
+        problem: `There are ${opps.length} suggestions — which one? ` + opps.slice(0, 3).map((o) => o.headline).join("; ") + ".",
+      };
+    }
+
+    return { args: {} };
+  }
+
+  /**
+   * Which stretch of time the merchant meant.
+   *
+   * Deterministic on purpose: "yesterday" is not a judgement call, and asking a
+   * model to classify it costs a round trip to learn something a regular
+   * expression already knows. When the question names nothing, the last period
+   * discussed carries forward — which is what makes "and the week before?"
+   * work.
+   */
+  function periodFrom(message: string, convo: { focus: { data: unknown } | null }): string {
+    const m = message.toLowerCase();
+    if (/\byesterday\b/.test(m)) return "yesterday";
+    if (/\b(this |last |past )?(week|7 days|seven days)\b/.test(m)) return "week";
+    if (/\b(this |last |past )?(month|30 days|thirty days)\b/.test(m)) return "month";
+    if (/\b(all time|ever|total|overall|so far)\b/.test(m)) return "all";
+    if (/\btoday\b|\bnow\b/.test(m)) return "today";
+    const carried = (convo.focus?.data as { label?: string } | undefined)?.label;
+    if (carried === "yesterday") return "yesterday";
+    if (carried === "the last 7 days") return "week";
+    if (carried === "the last 30 days") return "month";
+    return "today";
+  }
+
+  /**
+   * Join several findings into one answer a shopkeeper would actually say.
+   *
+   * The model is given only the sentences the tools produced, never the raw
+   * rows — it has nothing to quote that a lookup did not already establish, so
+   * it cannot invent a figure. If it is rate-limited or unreachable, the caller
+   * falls back to the plain join, which is less graceful and equally true.
+   */
+  async function phraseMerchantAnswer(
+    question: string,
+    outputs: Array<{ tool: string; summary: string }>,
+    convo: { turns: Array<{ role: string; text: string }> },
+  ): Promise<{ text?: string; note?: string }> {
+    if (activeProvider() !== "groq") return { note: "phrased from the lookups; no model configured" };
+
+    const recent = convo.turns.slice(-4).map((t) => `${t.role}: ${t.text}`).join("\n");
+    try {
+      const groq = new OpenAI({ apiKey: process.env.GROQ_API_KEY, baseURL: GROQ_BASE_URL });
+      const text = await sharedGroqGovernor.run(
+        700,
+        async () => {
+          const r = await groq.chat.completions.create({
+            model: GROQ_MODEL,
+            temperature: 0.2,
+            max_tokens: 180,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a small Indian shopkeeper's assistant. You are given findings that have already been looked up. " +
+                  "Join them into two or three short sentences in plain language: the answer first, then what to do about it. " +
+                  "Rupees as ₹1,200. No jargon. Use ONLY the figures in the findings — never add, estimate or round a number " +
+                  "that is not there. If the findings do not answer the question, say what you did find and stop.",
+              },
+              ...(recent ? [{ role: "user" as const, content: `Earlier in this conversation:\n${recent}` }] : []),
+              { role: "user", content: `They asked: "${question}"\n\nFindings:\n${outputs.map((o) => `- ${o.summary}`).join("\n")}` },
+            ],
+          });
+          return { data: r.choices[0]?.message?.content ?? "", response: { headers: new Headers() } };
+        },
+        { maxWaitSeconds: INTERACTIVE_MAX_WAIT_SECONDS },
+      );
+      return text.trim() ? { text: text.trim() } : { note: "the model returned nothing" };
+    } catch (err) {
+      const why = describeThrown(err);
+      return { note: `phrased from the lookups directly — ${why}` };
+    }
+  }
+
+  /** Everything waiting on this merchant's approval. */
+  app.get("/merchants/:id/actions", (req: Request, res: Response) => {
+    res.json({ actions: merchantActions.listFor(String(req.params.id)) });
+  });
+
+  /**
+   * The press that makes something happen.
+   *
+   * Idempotent by action id: a merchant on a shop's connection who presses
+   * twice because the first response never came back gets the same
+   * confirmation, not two invoices.
+   */
+  app.post("/merchants/:id/actions/:actionId/confirm", async (req: Request, res: Response) => {
+    const actionId = String(req.params.actionId);
+    const existing = merchantActions.get(actionId);
+    if (!existing || existing.merchant_id !== String(req.params.id)) {
+      res.status(404).json({ error: `no such action: ${actionId}` });
+      return;
+    }
+
+    const { action, replayed } = await merchantActions.execute(actionId, performAction);
+    if (action.status === "failed") {
+      // Never a green tick over a failure. The whole value of this assistant is
+      // that its confirmations are true.
+      res.status(409).json({
+        action, replayed, ok: false,
+        message: `That did not go through — ${action.error ?? "the operation failed"}.`,
+      });
+      return;
+    }
+    /**
+     * Say what actually happened, not what was asked for.
+     *
+     * A bulk handover of forty-eight orders can partly succeed — each one is
+     * its own signed mandate and one of them can be refused. Echoing the
+     * proposal's own wording back would report forty-eight when it did forty.
+     */
+    const r = action.result as { handed_over?: number; attempted?: number; failed?: number } | undefined;
+    const partial =
+      r?.handed_over !== undefined && r.attempted !== undefined && r.handed_over < r.attempted;
+
+    res.json({
+      action, replayed, ok: true,
+      message: replayed
+        ? `Already done.`
+        : partial
+          ? `Handed over ${r!.handed_over} of ${r!.attempted}. ${r!.failed} could not be confirmed.`
+          : r?.handed_over !== undefined
+            ? `Done — ${r.handed_over} order(s) marked as handed over.`
+            : `Done — ${action.summary.charAt(0).toLowerCase()}${action.summary.slice(1)}.`,
+    });
+  });
+
+  app.post("/merchants/:id/actions/:actionId/cancel", (req: Request, res: Response) => {
+    const a = merchantActions.cancel(String(req.params.actionId));
+    if (!a) {
+      res.status(404).json({ error: "no such action" });
+      return;
+    }
+    res.json({ action: a, ok: true, message: "Left it as it was." });
+  });
+
+  /**
+   * A UPI QR the merchant photographed, read into payment details.
+   *
+   * The image is decoded in the browser — it already has a JPEG decoder and a
+   * canvas, and the bytes never need to leave the shop's phone for this. What
+   * arrives here is the decoded string, which is still just text somebody could
+   * have pointed a camera at, so it is parsed and checked before it is offered
+   * back for confirmation. Nothing is saved by this call.
+   */
+  app.post("/merchants/:id/upi-qr", (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const decoded = String(req.body?.decoded ?? "");
+    const read = readUpiUri(decoded);
+    if (!read.ok || !read.details) {
+      res.status(422).json({ ok: false, problem: read.problem });
+      return;
+    }
+
+    const conversationId = String(req.body?.conversation_id ?? "") || `conv_${randomUUID().slice(0, 8)}`;
+    const action = merchantActions.propose({
+      merchant_id: id,
+      conversation_id: conversationId,
+      tool: "propose_upi",
+      args: { upi_id: read.details.upi_id, merchant_name: read.details.merchant_name ?? "" },
+      confirm: true,
+      summary: `Save ${read.details.upi_id}${read.details.merchant_name ? ` (${read.details.merchant_name})` : ""} as your payment address`,
+    });
+
+    res.json({
+      ok: true,
+      details: read.details,
+      warning: fixedAmountWarning(decoded),
+      action,
+      message: read.details.merchant_name
+        ? `I found your payment details — ${read.details.merchant_name}, paying to ${read.details.upi_id}. Is that right?`
+        : `I found a UPI id in that code: ${read.details.upi_id}. Is that right?`,
+    });
+  });
+
+  /** Openers built from what is actually true for this shop right now. */
+  app.get("/merchants/:id/agent/openers", async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    if (!merchants.has(id)) {
+      res.status(404).json({ error: `no such merchant: ${id}` });
+      return;
+    }
+    const [orders, ra] = await Promise.all([
+      fetchLocal(`/merchants/${id}/orders`),
+      fetchLocal(`/merchants/${id}/revenue-agent`),
+    ]);
+    const rows = (orders.orders ?? []) as Array<{ paid: boolean; delivered: boolean }>;
+    const cust = await fetchLocal(`/merchants/${id}/customers`);
+    res.json({
+      openers: merchantOpeners({
+        pendingPayments: rows.filter((o) => !o.paid).length,
+        awaitingHandover: rows.filter((o) => o.paid && !o.delivered).length,
+        lapsed: (cust.lapsed ?? []).length,
+        heldProducts: catalogItems.filter((i) => i.merchant_id === id && i.needs_merchant_confirmation).length,
+        opportunities: (ra.opportunities ?? []).length,
+      }),
+    });
+  });
 
   /**
    * The merchant asks; the agent looks it up and answers from what it found.
@@ -4170,7 +5793,7 @@ export async function createApp(options: AppOptions = {}) {
         res.status(409).json({ error: "fulfillment refused", reasons: err.reasons });
         return;
       }
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: describeThrown(err) });
     }
   });
 

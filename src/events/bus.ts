@@ -10,6 +10,7 @@ export type EventType =
   | "negotiation.countered"
   | "negotiation.agreed"
   | "negotiation.no_deal"
+  | "stock.changed"
   | "payment.order_created"
   | "payment.captured"
   | "fulfillment.confirmed"
